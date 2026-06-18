@@ -524,10 +524,28 @@ class OpenRouterProvider(BaseAIProvider):
             f"Meals Eaten Today: {', '.join(completion_req.meals_eaten_today) if completion_req.meals_eaten_today else 'None'}"
         )
         
+        # Map locale to output language for prompt
+        lang_map = {
+            "it": "Italian",
+            "es": "Spanish",
+            "zh": "Chinese",
+            "ja": "Japanese",
+            "ar": "Arabic",
+            "en": "English",
+        }
+        output_lang = "English"
+        if user_context and user_context.locale:
+            primary = user_context.locale.split("-")[0].split("_")[0].strip().lower()
+            output_lang = lang_map.get(primary, "English")
+
         messages = [
             {
                 "role": "user",
-                "content": f"Suggest 3 meals/recipes to complete my day based on this info:\n{req_info}{context_str}"
+                "content": (
+                    f"Suggest 3 meals/recipes to complete my day based on this info:\n{req_info}{context_str}\n\n"
+                    f"CRITICAL: You must output all text fields (meal_name, description, ingredients, preparation_hint, reasoning, "
+                    f"daily_context_summary, macro_balance_note) in the following language: {output_lang}."
+                )
             }
         ]
         

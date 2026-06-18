@@ -97,7 +97,10 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
 @pytest.mark.asyncio
 async def test_meal_completion_guardrail(client: AsyncClient, db_session: AsyncSession) -> None:
     """Tests POST /api/v1/meals/complete-day when remaining calories are < 200 (guardrail)."""
-    headers = {"Authorization": "Bearer mock_token_completion_guardrail_test"}
+    headers = {
+        "Authorization": "Bearer mock_token_completion_guardrail_test",
+        "Accept-Language": "it",
+    }
 
     # 1. Register user
     profile_res = await client.get("/api/v1/users/me", headers=headers)

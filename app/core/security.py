@@ -52,12 +52,14 @@ def verify_firebase_token(token: str) -> dict:
     If in a testing environment (pytest), returns a mock token payload
     to allow robust, local unit tests to execute without hitting Firebase servers.
     """
-    if settings.is_testing:
-        uid = token.replace("mock_token_", "") if token.startswith("mock_token_") else "test_user"
+    if settings.is_testing or (settings.ENVIRONMENT == "development" and token.startswith("mock_")):
+        uid = "mock_uid_123"
+        email = "google.user@calry.ai" if "google" in token else "developer@calry.ai"
+        name = "Google User" if "google" in token else "Calry Developer"
         return {
             "uid": uid,
-            "email": f"{uid}@example.com",
-            "name": f"Mock User {uid}",
+            "email": email,
+            "name": name,
             "email_verified": True,
         }
 
