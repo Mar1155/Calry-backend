@@ -47,3 +47,6 @@ class User(Base):
     daily_summaries: Mapped[list["DailySummary"]] = relationship(
         "DailySummary", back_populates="user", cascade="all, delete-orphan"
     )
+    food_memories: Mapped[list["UserFoodMemory"]] = relationship(
+        "UserFoodMemory", back_populates="user", cascade="all, delete-orphan"
+    )

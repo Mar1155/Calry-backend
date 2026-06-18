@@ -20,6 +20,7 @@ from app.schemas.meal import (
     MealResponse,
     MealUpdate,
 )
+from app.repositories.food_memory import FoodMemoryRepository
 from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.meals")
@@ -284,6 +285,14 @@ async def update_meal(
 
     # Perform repository updates
     updated_meal = await meal_repo.update(meal, payload)
+
+    # When user confirms calories, learn from the correction for future repeat logs
+    if payload.confirmed_calories is not None:
+        try:
+            food_memory_repo = FoodMemoryRepository(db)
+            await food_memory_repo.upsert_from_meal(updated_meal, payload.confirmed_calories)
+        except Exception as e:
+            logger.error(f"Failed to update food memory on meal confirmation: {e}")
 
     # Recalculate summary balance for this specific historical meal date
     try:
