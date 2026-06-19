@@ -26,7 +26,13 @@ class User(Base):
     premium_entitlement: Mapped[str | None] = mapped_column(String(255), nullable=True)
     premium_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revenuecat_app_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    
+    # Macro goals (premium feature)
+    daily_protein_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_carbs_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_fat_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Push notification token (stored for future push support)
+    fcm_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),

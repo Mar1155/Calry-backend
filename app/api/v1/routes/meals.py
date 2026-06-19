@@ -225,12 +225,8 @@ async def list_user_meals(
     """Retrieves a paginated timeline of meals logged by the user."""
     meal_repo = MealRepository(db)
     
-    cutoff_date = None
-    if not current_user.is_premium:
-        cutoff_date = dt.datetime.now(dt.UTC) - dt.timedelta(days=7)
-        
     return await meal_repo.get_by_user(
-        user_id=current_user.id, skip=skip, limit=limit, cutoff_date=cutoff_date
+        user_id=current_user.id, skip=skip, limit=limit
     )
 
 

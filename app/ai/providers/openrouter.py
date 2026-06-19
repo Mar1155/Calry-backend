@@ -617,3 +617,67 @@ class OpenRouterProvider(BaseAIProvider):
                 raw_output=raw_text,
                 latency_ms=latency_ms,
             )
+
+    async def generate_weekly_observation(
+        self,
+        avg_calories: int,
+        days_in_target: int,
+        total_days: int,
+        highest: int,
+        lowest: int,
+        most_frequent_meal: str | None,
+        goal: int,
+    ) -> str:
+        from app.ai.prompts.insights import WEEKLY_OBSERVATION_SYSTEM_PROMPT
+        data_summary = (
+            f"Weekly stats:\n"
+            f"- Average calories: {avg_calories} kcal (goal: {goal} kcal)\n"
+            f"- Days within target: {days_in_target}/{total_days}\n"
+            f"- Highest day: {highest} kcal, Lowest day: {lowest} kcal\n"
+            f"- Most logged meal: {most_frequent_meal or 'unknown'}\n"
+            f"- Variance: {highest - lowest} kcal between best and worst day"
+        )
+        messages = [{"role": "user", "content": data_summary}]
+        try:
+            text, _ = await self._post_openrouter(
+                model=settings.OPENROUTER_TEXT_MODEL,
+                system_prompt=WEEKLY_OBSERVATION_SYSTEM_PROMPT,
+                messages=messages,
+            )
+            return text.strip()
+        except Exception:
+            return "Keep logging consistently to unlock personalized AI observations."
+
+    async def generate_pattern_insights(
+        self,
+        correction_summary: str | None,
+        avg_correction_pct: float | None,
+        days_logged: int,
+        days_in_target: int,
+        avg_calories: int,
+        goal: int,
+    ) -> list[str]:
+        from app.ai.prompts.insights import PATTERN_INSIGHTS_SYSTEM_PROMPT
+        import json
+        data_summary = (
+            f"User data:\n"
+            f"- Days logged in past 30 days: {days_logged}\n"
+            f"- Days within calorie target: {days_in_target}\n"
+            f"- Average daily calories: {avg_calories} kcal (goal: {goal} kcal)\n"
+        )
+        if correction_summary:
+            data_summary += f"- AI correction history: {correction_summary}\n"
+        if avg_correction_pct is not None:
+            data_summary += f"- Average correction %: {avg_correction_pct:.1f}%\n"
+        messages = [{"role": "user", "content": data_summary}]
+        try:
+            text, _ = await self._post_openrouter(
+                model=settings.OPENROUTER_TEXT_MODEL,
+                system_prompt=PATTERN_INSIGHTS_SYSTEM_PROMPT,
+                messages=messages,
+                response_format={"type": "json_object"},
+            )
+            parsed = json.loads(text)
+            return parsed.get("patterns", [])
+        except Exception:
+            return ["Log more meals to unlock AI pattern insights."]

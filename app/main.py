@@ -8,8 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.v1.routes.awareness import router as awareness_router
 from app.api.v1.routes.burned_calories import router as burned_router
 from app.api.v1.routes.food_memory import router as food_memory_router
+from app.api.v1.routes.habits import router as habits_router
 from app.api.v1.routes.insights import router as insights_router
 from app.api.v1.routes.meals import router as meals_router
 from app.api.v1.routes.premium import router as premium_router
@@ -123,6 +125,8 @@ app.include_router(insights_router, prefix="/api/v1", tags=["Insights"])
 app.include_router(premium_router, prefix="/api/v1/premium", tags=["Premium"])
 app.include_router(webhook_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
 app.include_router(food_memory_router, prefix="/api/v1/food-memory", tags=["Food Memory"])
+app.include_router(habits_router, prefix="/api/v1/habits", tags=["Habits"])
+app.include_router(awareness_router, prefix="/api/v1/awareness", tags=["Awareness"])
 
 
 @app.get("/", tags=["Root"])

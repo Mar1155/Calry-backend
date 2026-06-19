@@ -42,10 +42,6 @@ async def get_historical_summaries(
     """Retrieves a historical list of daily summaries, sorted chronologically descending."""
     repo = DailySummaryRepository(db)
     
-    cutoff_date = None
-    if not current_user.is_premium:
-        cutoff_date = dt.date.today() - dt.timedelta(days=7)
-        
     return await repo.get_history(
-        user_id=current_user.id, skip=skip, limit=limit, cutoff_date=cutoff_date
+        user_id=current_user.id, skip=skip, limit=limit
     )

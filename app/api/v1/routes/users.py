@@ -1,7 +1,8 @@
 import datetime as dt
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
@@ -71,3 +72,17 @@ async def update_user_profile(
             logger.error(f"Failed to sync today's summary after user target modification: {e}")
 
     return updated_user
+
+
+class FCMTokenUpdate(BaseModel):
+    token: str = Field(..., min_length=10, max_length=512)
+
+@router.post("/me/fcm-token", status_code=status.HTTP_204_NO_CONTENT)
+async def update_fcm_token(
+    payload: FCMTokenUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Stores the device FCM push token for future push notification support."""
+    current_user.fcm_token = payload.token
+    await db.flush()
