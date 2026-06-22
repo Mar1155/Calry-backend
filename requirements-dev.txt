@@ -1,0 +1,9 @@
+# Dev/test dependencies. Install locally with:  pip install -r requirements-dev.txt
+# (includes everything in requirements.txt)
+-r requirements.txt
+
+pytest>=8.1.1
+pytest-asyncio>=0.23.5
+ruff>=0.3.3
+black>=24.2.0
+aiosqlite>=0.20.0

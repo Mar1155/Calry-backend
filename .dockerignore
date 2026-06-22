@@ -1,0 +1,47 @@
+# Version control
+.git
+.gitignore
+
+# Secrets & local env — NEVER ship these in the image
+.env
+.env.*
+!.env.example
+service-account.json
+*.json.key
+
+# Python caches & build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+ENV/
+
+# Tests & local-only scripts (not needed at runtime)
+tests/
+scripts/
+
+# Local tooling / editor cruft
+*.vsix
+*.iml
+.vscode/
+.idea/
+.DS_Store
+
+# Stray nested project (unrelated Xcode app) & local sqlite
+Calry/
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker / compose (not needed inside the image)
+docker-compose.yaml
+rebuild_backend.sh

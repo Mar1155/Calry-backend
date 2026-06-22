@@ -34,7 +34,11 @@ This is the production-ready backend foundation for **Calry**, a modern AI-first
 │   └── main.py                   # App entrypoint, CORS configuration, exception handlers
 ├── alembic/                      # Database DDL migration revisions
 ├── tests/                        # Integration and unit tests using in-memory SQLite
-├── requirements.txt              # Production and development pip dependencies
+├── requirements.txt              # Runtime dependencies (installed into the image)
+├── requirements-dev.txt          # Dev/test dependencies (pytest, ruff, black)
+├── Dockerfile                    # Multi-stage, slim, non-root production image
+├── railway.json                  # Railway build/deploy config (Dockerfile + healthcheck)
+├── start.sh                      # Container entrypoint: migrate, then serve on $PORT
 ├── pyproject.toml                # Black & Ruff formatting configurations
 ├── .env.example                  # Environment configuration template
 └── README.md                     # This documentation
@@ -84,30 +88,41 @@ pytest -v
 
 ## Railway Production Deployment
 
-This backend is designed for instant, out-of-the-box deployment to **Railway**.
+Deployment is containerized and declarative. The repo ships:
 
-### 1. Production Startup Command
-In your Railway dashboard, set the Startup Command to:
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
-*(Railway dynamically binds the `$PORT` environment variable.)*
+* **`Dockerfile`** — multi-stage, slim, non-root Python 3.12 image (runtime deps only).
+* **`railway.json`** — builds from the Dockerfile, health-checks `/api/v1/health`, restarts `ON_FAILURE`.
+* **`start.sh`** — runs `alembic upgrade head`, then `uvicorn` bound to `$PORT` (migrations apply on every deploy).
 
-### 2. Database Migration Hook
-Set your build or deployment command to apply migrations before startup:
-```bash
-alembic upgrade head
-```
+### 1. Provision
 
-### 3. Production Environment Checklist
-Configure these variables in your Railway Project Settings:
+1. Create a Railway project and add the **PostgreSQL** plugin.
+2. Add a service from this repo's `calry_backend` directory. Railway auto-detects `railway.json` + `Dockerfile` — no Nixpacks, no manual build/start command needed.
 
-| Environment Variable | Recommended Value | Purpose |
+### 2. Environment variables
+
+Set these in the service's **Variables** tab:
+
+| Variable | Value | Purpose |
 | :--- | :--- | :--- |
-| `ENVIRONMENT` | `production` | Enables production security and log formats |
-| `LOG_LEVEL` | `info` | Silences debugging logs |
-| `DATABASE_URL` | `postgresql://...` | Injected automatically by Railway's PostgreSQL plugin |
-| `GEMINI_API_KEY` | `your-gemini-key` | Enables Google Gemini 1.5 calorie estimation |
-| `OPENAI_API_KEY` | `your-openai-key` | Enables OpenAI GPT-4o calorie estimation |
-| `DEFAULT_AI_PROVIDER` | `gemini` | Choose default AI engine (`gemini` or `openai`) |
-| `FIREBASE_CREDENTIALS_PATH` | *(Blank or path to private json)* | For authenticating Flutter users via real Firebase JWT |
+| `ENVIRONMENT` | `production` | Hides internal error detail; production behavior |
+| `LOG_LEVEL` | `info` | Log verbosity |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Reference the Postgres plugin; app auto-rewrites to the async driver |
+| `ALLOWED_ORIGINS` | `https://app.calry.ai` | Explicit CORS origins (enables credentials). Comma-separated; omit/`*` for all |
+| `OPENROUTER_API_KEY` | `your-openrouter-key` | Enables AI calorie estimation via OpenRouter |
+| `DEFAULT_AI_PROVIDER` | `openrouter` | Default AI engine |
+| `FIREBASE_PROJECT_ID` | `calry-62362` | Firebase project for ID-token verification |
+| `FIREBASE_CREDENTIALS_PATH` | *(leave unset)* | Optional. Token verification works with the project ID alone; only set if you need full Admin SDK operations (provide creds via a mounted secret, not a committed file) |
+
+> `PORT` is injected by Railway automatically — do **not** set it manually.
+
+### 3. Deploy
+
+Push to the connected branch, or use the CLI:
+```bash
+railway up
+```
+Railway builds the image, runs migrations via `start.sh`, and waits for `/api/v1/health` to report healthy before routing traffic.
+
+### ⚠️ Persistent uploads
+`/static` is written to the container's **ephemeral** filesystem — files are lost on every redeploy/restart. The Flutter client already uses **Firebase Storage**; route production media uploads there (or a Railway Volume / S3) rather than local disk.

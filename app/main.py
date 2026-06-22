@@ -50,12 +50,16 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Configure CORS Middleware
-# Essential for testing APIs via Flutter web debuggers or local networks
+# Configure CORS Middleware.
+# Origins come from settings.ALLOWED_ORIGINS (default "*" for local/mobile dev).
+# The CORS spec forbids credentials with a "*" origin, so credentials are only
+# enabled when an explicit origin list is configured (e.g. in production).
+_cors_origins = settings.cors_origins
+_allow_all_origins = _cors_origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permits all origins for easy mobile local host routing
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=not _allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
