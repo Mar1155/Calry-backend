@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import DateTime, Float, Integer, String, Boolean
+from sqlalchemy import Boolean, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -20,7 +20,7 @@ class User(Base):
     age: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
-    
+
     # Premium Billing Fields
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     premium_entitlement: Mapped[str | None] = mapped_column(String(255), nullable=True)

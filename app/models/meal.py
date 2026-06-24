@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -8,6 +8,11 @@ from app.models.base import Base
 
 class Meal(Base):
     __tablename__ = "meals"
+    __table_args__ = (
+        # Idempotency (C13): a client request id is unique per user. Multiple NULLs
+        # are allowed, so legacy/keyless logs are unaffected.
+        UniqueConstraint("user_id", "client_request_id", name="uq_meal_user_request"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
@@ -28,8 +33,10 @@ class Meal(Base):
     correction_delta: Mapped[int | None] = mapped_column(Integer, nullable=True)
     correction_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_confidence: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     needs_clarification: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     clarifying_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),

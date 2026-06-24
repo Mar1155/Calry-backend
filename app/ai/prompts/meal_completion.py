@@ -36,4 +36,5 @@ Rules:
 4. If User Context is provided (sex, age, weight, goal_type), tailor the recommendations to fit their physical needs and objectives (e.g., muscle gain vs. weight loss).
 5. Do not moralize or judge food choices.
 6. Return raw JSON only. Do not wrap in markdown code blocks like ```json ... ```. No explanation or conversation outside the JSON.
+7. meal_type and difficulty MUST be the exact lowercase English enum values shown (lunch/dinner/snack, easy/medium) even when all other text fields are written in another language. Never omit a key.
 """

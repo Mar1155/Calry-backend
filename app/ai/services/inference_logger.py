@@ -1,5 +1,7 @@
 import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.inference import AIInferenceLog
 from app.repositories.inference import AIInferenceLogRepository
 
@@ -25,7 +27,9 @@ class AIInferenceLogger:
         latency_ms: int,
         success: bool,
         error_message: str | None = None,
+        token_usage: dict | None = None,
     ) -> None:
+        usage = token_usage or {}
         try:
             log_entry = AIInferenceLog(
                 user_id=user_id,
@@ -38,6 +42,9 @@ class AIInferenceLogger:
                 latency_ms=latency_ms,
                 success=success,
                 error_message=error_message,
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+                cached_tokens=usage.get("cached_tokens"),
             )
             await self.repo.create(log_entry)
             await self.db.flush()

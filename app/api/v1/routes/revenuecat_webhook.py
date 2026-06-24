@@ -1,12 +1,13 @@
-import logging
 import datetime as dt
+import logging
 from typing import Any
+
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.db import get_db
 from app.repositories.user import UserRepository
-from app.core.config import settings
 
 logger = logging.getLogger("app.api.revenuecat_webhook")
 router = APIRouter()

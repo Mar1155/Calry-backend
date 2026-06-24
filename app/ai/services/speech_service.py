@@ -1,13 +1,13 @@
 import logging
 import time
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.prompts.voice_transcription import VOICE_TRANSCRIPTION_PROMPT_VERSION
 from app.ai.providers.base import BaseAIProvider
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.schemas.meal_estimate import SpeechTranscriptionResult
 from app.ai.services.inference_logger import AIInferenceLogger
-from app.core.config import settings
-from app.ai.prompts.voice_transcription import VOICE_TRANSCRIPTION_PROMPT_VERSION
 
 logger = logging.getLogger("app.ai.speech_service")
 
@@ -18,7 +18,7 @@ class AISpeechService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.inference_logger = AIInferenceLogger(db)
-        
+
         # Register OpenRouter as the provider
         self.providers: dict[str, BaseAIProvider] = {
             "openrouter": OpenRouterProvider(),
@@ -39,7 +39,7 @@ class AISpeechService:
         success = False
         raw_output = None
         error_msg = None
-        
+
         try:
             result = await provider.transcribe_audio(audio_url)
             raw_output = result.raw_output

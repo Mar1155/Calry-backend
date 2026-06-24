@@ -1,4 +1,5 @@
 import datetime as dt
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -37,7 +38,7 @@ class UserRepository(BaseRepository[User]):
         user.premium_entitlement = premium_entitlement
         user.premium_expires_at = premium_expires_at
         user.revenuecat_app_user_id = revenuecat_app_user_id
-        
+
         self.db.add(user)
         await self.db.flush()
         return user

@@ -1,6 +1,7 @@
-import logging
 import datetime as dt
+import logging
 from collections import Counter
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -9,10 +10,10 @@ from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.services.correction_context_service import AICorrectionContextService
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
-from app.models.user import User
 from app.models.daily_summary import DailySummary
 from app.models.meal import Meal
-from app.schemas.insights import WeeklyReportResponse, PatternInsightsResponse
+from app.models.user import User
+from app.schemas.insights import PatternInsightsResponse, WeeklyReportResponse
 
 logger = logging.getLogger("app.api.insights")
 router = APIRouter()

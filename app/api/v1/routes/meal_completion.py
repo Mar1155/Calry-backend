@@ -1,11 +1,12 @@
 import datetime as dt
 import logging
-from fastapi import APIRouter, Depends, status, Header
+
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.ai.schemas.meal_completion import MealCompletionRequest
 from app.ai.schemas.meal_estimate import UserContext
+from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.user import User

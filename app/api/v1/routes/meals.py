@@ -36,6 +36,7 @@ async def _process_and_save_meal(
     image_url: str | None,
     audio_url: str | None,
     estimation: MealEstimateResult,
+    client_request_id: str | None = None,
 ) -> Meal:
     """Helper method to construct a Meal record with children and trigger summary sync."""
     meal_repo = MealRepository(db)
@@ -57,8 +58,10 @@ async def _process_and_save_meal(
         estimation_reasoning=estimation.estimation_reasoning,
         confirmed_calories=None,  # Not yet validated by user
         ai_confidence=estimation.confidence,
+        confidence_score=estimation.confidence_score,
         needs_clarification=estimation.needs_clarification,
         clarifying_question=estimation.clarifying_question,
+        client_request_id=client_request_id,
     )
     await meal_repo.create(meal)
     await db.flush()  # Assures meal.id is populated
@@ -97,25 +100,44 @@ async def _process_and_save_meal(
 
 
 async def _build_user_context(db: AsyncSession, user: User) -> UserContext:
-    """Retrieves calibration/correction history and profile to build a comprehensive UserContext."""
+    """Builds UserContext from a SINGLE correction-history query (C5): the prose
+    summary for the prompt and the deterministic per-source bias for C11."""
     from app.ai.services.correction_context_service import AICorrectionContextService
 
     correction_service = AICorrectionContextService(db)
-    summary = await correction_service.get_user_correction_summary(user.id)
-    avg_pct = await correction_service.get_average_correction_percent(user.id)
+    context = await correction_service.get_correction_context(user.id)
 
     return UserContext(
         daily_calorie_goal=user.daily_calorie_goal,
         locale=None,
         timezone=None,
-        previous_corrections_summary=summary,
+        previous_corrections_summary=context.summary,
         sex=user.sex,
         age=user.age,
         height_cm=user.height_cm,
         weight_kg=user.weight_kg,
         goal_type=user.goal_type,
-        avg_correction_percent=avg_pct,
+        correction_bias_by_source=context.bias_by_source or None,
     )
+
+
+async def _find_existing_by_request_id(
+    db: AsyncSession, user_id: int, client_request_id: str | None
+) -> Meal | None:
+    """Idempotency lookup (C13): a repeat with the same client_request_id returns
+    the already-created meal instead of re-running the LLM."""
+    if not client_request_id:
+        return None
+    from sqlalchemy.future import select
+    from sqlalchemy.orm import selectinload
+
+    stmt = (
+        select(Meal)
+        .where(Meal.user_id == user_id, Meal.client_request_id == client_request_id)
+        .options(selectinload(Meal.items))
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 @router.post("/text", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
@@ -125,6 +147,11 @@ async def log_meal_via_text(
     db: AsyncSession = Depends(get_db),
 ) -> Meal:
     """Logs a meal by parsing free-form written text."""
+    # 0. Idempotency: return the existing meal on a repeat request id.
+    existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+    if existing is not None:
+        return existing
+
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
@@ -135,6 +162,7 @@ async def log_meal_via_text(
         text=payload.text,
         user_context=user_context,
         user_id=current_user.id,
+        additional_context=payload.additional_context,
     )
 
     # 3. Build and commit the entities
@@ -146,6 +174,7 @@ async def log_meal_via_text(
         image_url=None,
         audio_url=None,
         estimation=estimation,
+        client_request_id=payload.client_request_id,
     )
     return meal
 
@@ -157,6 +186,11 @@ async def log_meal_via_photo(
     db: AsyncSession = Depends(get_db),
 ) -> Meal:
     """Logs a meal by analyzing an image URL with optional text description."""
+    # 0. Idempotency: return the existing meal on a repeat request id.
+    existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+    if existing is not None:
+        return existing
+
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
@@ -168,6 +202,7 @@ async def log_meal_via_photo(
         optional_hint=payload.text,
         user_context=user_context,
         user_id=current_user.id,
+        additional_context=payload.additional_context,
     )
 
     # 3. Build and commit entities
@@ -180,6 +215,7 @@ async def log_meal_via_photo(
         image_url=payload.image_url,
         audio_url=None,
         estimation=estimation,
+        client_request_id=payload.client_request_id,
     )
     return meal
 
@@ -191,6 +227,11 @@ async def log_meal_via_voice(
     db: AsyncSession = Depends(get_db),
 ) -> Meal:
     """Logs a meal by transcribing a recorded audio file URL and parsing the text."""
+    # 0. Idempotency: return the existing meal on a repeat request id.
+    existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+    if existing is not None:
+        return existing
+
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
@@ -201,6 +242,7 @@ async def log_meal_via_voice(
         audio_url=payload.audio_url,
         user_context=user_context,
         user_id=current_user.id,
+        additional_context=payload.additional_context,
     )
 
     # 3. Build and commit entities
@@ -212,6 +254,7 @@ async def log_meal_via_voice(
         image_url=None,
         audio_url=payload.audio_url,
         estimation=estimation,
+        client_request_id=payload.client_request_id,
     )
     return meal
 

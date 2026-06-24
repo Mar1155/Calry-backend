@@ -1,7 +1,7 @@
 import datetime as dt
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -34,8 +34,20 @@ async def log_from_memory(
     memory_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    client_request_id: str | None = Query(default=None, max_length=64),
 ) -> Meal:
     """Instantly logs a meal from food memory — no AI call, uses learned calories."""
+    # Idempotency (C13): a double-tap must not create two meals or bump use_count twice.
+    if client_request_id:
+        existing_stmt = (
+            select(Meal)
+            .where(Meal.user_id == current_user.id, Meal.client_request_id == client_request_id)
+            .options(selectinload(Meal.items))
+        )
+        existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing is not None:
+            return existing
+
     repo = FoodMemoryRepository(db)
     memory = await repo.get_by_id(memory_id, current_user.id)
 
@@ -58,8 +70,10 @@ async def log_from_memory(
         total_carbs_g=memory.carbs_g,
         total_fat_g=memory.fat_g,
         ai_confidence="high",
+        confidence_score=0.9,
         needs_clarification=False,
         confirmed_at=now,
+        client_request_id=client_request_id,
     )
     db.add(meal)
     await db.flush()

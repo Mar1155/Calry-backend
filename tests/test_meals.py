@@ -52,7 +52,9 @@ def test_ai_validation_service_rules():
     )
     validated = AIValidationService.validate_and_normalize_estimate(data)
     assert validated.estimated_calories == 300  # aligned to sum of items
-    assert "Adjusted total calories to match sum of items." in validated.assumptions
+    # Realignment is now flagged (feeding the confidence score) and logged rather
+    # than appended as a user-visible assumption on every meal (C10 noise cut).
+    assert validated.total_realigned is True
 
     # Test clamping high calories
     data_high = MealEstimateResult(

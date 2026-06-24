@@ -27,20 +27,28 @@ class MealItemResponse(MealItemBase):
     created_at: dt.datetime
 
 
-# Input schemas for different meal logging channels
+# Input schemas for different meal logging channels.
+# client_request_id (C13): optional idempotency key. A repeat with the same key
+# returns the already-created meal instead of re-running the LLM.
 class MealCreateText(BaseModel):
     text: str = Field(..., min_length=2, max_length=2000)
+    additional_context: str | None = Field(default=None, max_length=1000)
+    client_request_id: str | None = Field(default=None, max_length=64)
 
 
 class MealCreatePhoto(BaseModel):
     image_url: str = Field(..., min_length=5, max_length=1024)
     text: str | None = Field(default=None, max_length=1000)
+    additional_context: str | None = Field(default=None, max_length=1000)
+    client_request_id: str | None = Field(default=None, max_length=64)
 
 
 class MealCreateVoice(BaseModel):
     audio_url: str = Field(..., min_length=5, max_length=1024)
     # Optional pre-transcribed text if client performs on-device transcription
     text: str | None = Field(default=None, max_length=2000)
+    additional_context: str | None = Field(default=None, max_length=1000)
+    client_request_id: str | None = Field(default=None, max_length=64)
 
 
 class MealUpdate(BaseModel):
@@ -68,6 +76,7 @@ class MealResponse(BaseModel):
     estimation_reasoning: str | None = None
     confirmed_calories: int | None = None
     ai_confidence: Literal["low", "medium", "high"] | None = None
+    confidence_score: float | None = None
     needs_clarification: bool = False
     clarifying_question: str | None = None
     created_at: dt.datetime

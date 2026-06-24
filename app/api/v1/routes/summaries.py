@@ -41,7 +41,7 @@ async def get_historical_summaries(
 ) -> list[DailySummary]:
     """Retrieves a historical list of daily summaries, sorted chronologically descending."""
     repo = DailySummaryRepository(db)
-    
+
     return await repo.get_history(
         user_id=current_user.id, skip=skip, limit=limit
     )

@@ -1,7 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.user import User
 from app.repositories.user import UserRepository
-from app.schemas.premium import PremiumSyncRequest, PremiumStatusResponse
+from app.schemas.premium import PremiumStatusResponse, PremiumSyncRequest
 
 
 class PremiumService:

@@ -1,5 +1,6 @@
 from typing import Literal
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel
 
 
 class MealSuggestionItem(BaseModel):
@@ -25,6 +26,7 @@ class MealCompletionResult(BaseModel):
     prompt_version: str
     raw_output: dict | str | None = None
     latency_ms: int | None = None
+    token_usage: dict | None = None
 
 
 class MealCompletionRequest(BaseModel):

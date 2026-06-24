@@ -11,3 +11,7 @@ pydantic-settings>=2.2.1
 firebase-admin>=6.5.0
 pyjwt[crypto]>=2.8.0
 httpx>=0.27.0
+# Image preprocessing (C15): conservative downscale before vision calls.
+pillow>=10.2.0
+# CPU-only fuzzy food-name matching for the pre-inference cache (C19). No vector DB.
+rapidfuzz>=3.6.0

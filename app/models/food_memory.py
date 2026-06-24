@@ -1,5 +1,6 @@
 import datetime as dt
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, UniqueConstraint
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -15,6 +16,9 @@ class UserFoodMemory(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     normalized_name = Column(String(500), nullable=False)
+    # Canonical dedup/lookup key (C4): NFKC-folded, token-sorted, filler-stripped.
+    # Used for the pre-inference cache match; backfilled lazily on confirm.
+    canonical_key = Column(String(500), nullable=True, index=True)
     display_name = Column(String(500), nullable=False)
 
     learned_calories = Column(Integer, nullable=False)

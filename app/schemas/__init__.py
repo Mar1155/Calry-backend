@@ -13,11 +13,11 @@ from app.schemas.meal import (
     MealResponse,
     MealUpdate,
 )
-from app.schemas.user import UserCreate, UserResponse, UserUpdate
 from app.schemas.meal_completion import (
-    MealSuggestionResponse,
     MealCompletionResponse,
+    MealSuggestionResponse,
 )
+from app.schemas.user import UserCreate, UserResponse, UserUpdate
 
 __all__ = [
     "UserCreate",

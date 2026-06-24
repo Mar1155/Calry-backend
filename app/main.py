@@ -4,22 +4,22 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.routes.awareness import router as awareness_router
 from app.api.v1.routes.burned_calories import router as burned_router
 from app.api.v1.routes.food_memory import router as food_memory_router
 from app.api.v1.routes.habits import router as habits_router
 from app.api.v1.routes.insights import router as insights_router
+from app.api.v1.routes.meal_completion import router as meal_completion_router
 from app.api.v1.routes.meals import router as meals_router
 from app.api.v1.routes.premium import router as premium_router
 from app.api.v1.routes.revenuecat_webhook import router as webhook_router
 from app.api.v1.routes.summaries import router as summaries_router
 from app.api.v1.routes.system import router as system_router
 from app.api.v1.routes.users import router as users_router
-from app.api.v1.routes.meal_completion import router as meal_completion_router
 from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.core.logging import setup_logging
@@ -39,6 +39,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"Active Default AI Provider: {settings.DEFAULT_AI_PROVIDER.upper()}")
     yield
     logger.info("Shutting down Calry Calorie Tracker API...")
+    # Release the pooled OpenRouter HTTP client (C7).
+    from app.ai.providers.openrouter import close_shared_client
+
+    await close_shared_client()
 
 
 app = FastAPI(

@@ -1,11 +1,12 @@
 import logging
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.user import User
-from app.schemas.premium import PremiumSyncRequest, PremiumStatusResponse
+from app.schemas.premium import PremiumStatusResponse, PremiumSyncRequest
 from app.services.premium_service import PremiumService
 
 logger = logging.getLogger("app.api.premium")

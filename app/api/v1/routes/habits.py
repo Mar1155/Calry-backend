@@ -1,10 +1,11 @@
 import datetime as dt
 import logging
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
