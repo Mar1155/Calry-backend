@@ -1,14 +1,18 @@
 import logging
 import time
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.prompts.image_estimation import IMAGE_MEAL_ESTIMATION_PROMPT_VERSION
+from app.ai.prompts.meal_completion import MEAL_COMPLETION_PROMPT_VERSION
+from app.ai.prompts.meal_estimation import TEXT_MEAL_ESTIMATION_PROMPT_VERSION
 from app.ai.providers.base import BaseAIProvider
 from app.ai.providers.openrouter import OpenRouterProvider
+from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult
 from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
-from app.ai.schemas.meal_completion import MealCompletionResult, MealCompletionRequest
-from app.ai.services.validation_service import AIValidationService
 from app.ai.services.inference_logger import AIInferenceLogger
 from app.ai.services.speech_service import AISpeechService
+from app.ai.services.validation_service import AIValidationService
 from app.core.config import settings
 
 logger = logging.getLogger("app.ai.calorie_estimation_service")
@@ -21,7 +25,7 @@ class AICalorieEstimationService:
         self.db = db
         self.inference_logger = AIInferenceLogger(db)
         self.speech_service = AISpeechService(db)
-        
+
         # Register OpenRouter as the sole provider
         self.providers: dict[str, BaseAIProvider] = {
             "openrouter": OpenRouterProvider(),
@@ -40,18 +44,19 @@ class AICalorieEstimationService:
         provider = self._get_provider(provider_override)
         start_time = time.perf_counter()
         success = False
+        raw_result = None
         raw_output = None
         error_msg = None
-        
+
         try:
             raw_result = await provider.estimate_meal_from_text(text, user_context)
             raw_output = raw_result.raw_output
-            
+
             # Validate and normalize
             validated_result = AIValidationService.validate_and_normalize_estimate(raw_result)
             success = True
             return validated_result
-            
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error in estimate_from_text: {e}")
@@ -59,7 +64,11 @@ class AICalorieEstimationService:
         finally:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             model_name = settings.OPENROUTER_TEXT_MODEL
-            prompt_version = "text_meal_estimation_v1"
+            prompt_version = (
+                raw_result.prompt_version
+                if raw_result is not None
+                else TEXT_MEAL_ESTIMATION_PROMPT_VERSION
+            )
             await self.inference_logger.log_call(
                 user_id=user_id,
                 provider=provider.provider_name,
@@ -84,18 +93,19 @@ class AICalorieEstimationService:
         provider = self._get_provider(provider_override)
         start_time = time.perf_counter()
         success = False
+        raw_result = None
         raw_output = None
         error_msg = None
-        
+
         try:
             raw_result = await provider.estimate_meal_from_image(image_url, user_context, optional_hint)
             raw_output = raw_result.raw_output
-            
+
             # Validate and normalize
             validated_result = AIValidationService.validate_and_normalize_estimate(raw_result)
             success = True
             return validated_result
-            
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error in estimate_from_image: {e}")
@@ -103,7 +113,11 @@ class AICalorieEstimationService:
         finally:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             model_name = settings.OPENROUTER_IMAGE_MODEL
-            prompt_version = "image_meal_estimation_v1"
+            prompt_version = (
+                raw_result.prompt_version
+                if raw_result is not None
+                else IMAGE_MEAL_ESTIMATION_PROMPT_VERSION
+            )
             await self.inference_logger.log_call(
                 user_id=user_id,
                 provider=provider.provider_name,
@@ -131,9 +145,9 @@ class AICalorieEstimationService:
             user_id=user_id,
             provider_override=provider_override,
         )
-        
+
         transcript = transcription_result.transcript
-        
+
         # 2. Run text calorie estimation on the transcript
         estimation_result = await self.estimate_from_text(
             text=transcript,
@@ -141,7 +155,7 @@ class AICalorieEstimationService:
             user_id=user_id,
             provider_override=provider_override,
         )
-        
+
         return transcript, estimation_result
 
     async def suggest_meal_completion(
@@ -154,15 +168,16 @@ class AICalorieEstimationService:
         provider = self._get_provider(provider_override)
         start_time = time.perf_counter()
         success = False
+        raw_result = None
         raw_output = None
         error_msg = None
-        
+
         try:
             raw_result = await provider.suggest_meal_completion(completion_req, user_context)
             raw_output = raw_result.raw_output
             success = True
             return raw_result
-            
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error in suggest_meal_completion: {e}")
@@ -170,7 +185,11 @@ class AICalorieEstimationService:
         finally:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             model_name = settings.OPENROUTER_TEXT_MODEL
-            prompt_version = "meal_completion_v1"
+            prompt_version = (
+                raw_result.prompt_version
+                if raw_result is not None
+                else MEAL_COMPLETION_PROMPT_VERSION
+            )
             await self.inference_logger.log_call(
                 user_id=user_id,
                 provider=provider.provider_name,
