@@ -152,6 +152,21 @@ class AIValidationService:
             result.total_carbs_g = None
             result.total_fat_g = None
 
+        # 5b. Fallback: model omitted calories_per_100g for all items (structured output
+        #     sometimes skips optional fields). Distribute total proportionally by weight
+        #     so the frontend shows non-zero per-item figures. Per-item accuracy is
+        #     approximate (equal density assumed) — the primary signal is the total.
+        if sum_item_calories == 0 and result.estimated_calories > 0 and result.items:
+            total_weight = sum(item.weight_grams or 0 for item in result.items)
+            if total_weight > 0:
+                avg_density = round(result.estimated_calories * 100 / total_weight, 1)
+                for item in result.items:
+                    w = item.weight_grams or 0
+                    if w > 0 and item.calories_per_100g is None:
+                        item.calories_per_100g = avg_density
+                        item.estimated_calories = int(round(avg_density * w / 100))
+                        sum_item_calories += item.estimated_calories
+
         # 6. Align total calories to the sum of items when they meaningfully disagree.
         #    Relative tolerance (max of 50 kcal / 10%) avoids realigning on rounding noise.
         if result.items:

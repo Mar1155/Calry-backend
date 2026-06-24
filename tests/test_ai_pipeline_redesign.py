@@ -57,6 +57,30 @@ def test_density_clamp_scales_macros_proportionally():
     assert it.fat_g < 60.0
 
 
+# ---- proportional fallback when model omits calories_per_100g ---------------
+
+def test_proportional_fallback_no_zero_items():
+    """When model returns items with weight but no calories_per_100g, validation
+    distributes total calories proportionally by weight — frontend shows non-zero."""
+    result = MealEstimateResult(
+        meal_name="Gnocchi plate", estimated_calories=1800, confidence="medium",
+        source_type="photo",
+        items=[
+            MealEstimateItem(name="Gnocchi", weight_grams=350),  # no calories_per_100g
+            MealEstimateItem(name="Green Beans", weight_grams=100),
+            MealEstimateItem(name="Cooking Oil", weight_grams=28),
+        ],
+        model_name="t", prompt_version="t",
+    )
+    validated = AIValidationService.validate_and_normalize_estimate(result)
+    for item in validated.items:
+        if item.weight_grams and item.weight_grams > 0:
+            assert item.estimated_calories > 0, f"{item.name} still shows 0 kcal"
+            assert item.calories_per_100g is not None
+    total = sum(i.estimated_calories for i in validated.items)
+    assert abs(total - 1800) <= 10  # rounding tolerance
+
+
 # ---- C10: range invariants --------------------------------------------------
 
 def test_range_invariants_no_inversion():

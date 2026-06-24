@@ -102,7 +102,7 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
                     "carbs_g": {"type": ["number", "null"]},
                     "fat_g": {"type": ["number", "null"]},
                 },
-                "required": ["name"],
+                "required": ["name", "weight_grams", "calories_per_100g"],
             },
         },
         "assumptions": {"type": "array", "items": {"type": "string"}},

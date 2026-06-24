@@ -52,9 +52,10 @@ Object:
 
 ESTIMATION_RULES = """Estimation rules:
 1. Identify each edible component. A single item still counts as a meal.
-2. For each item give weight_grams and a realistic calories_per_100g (and macros
-   if confident). Do NOT compute item or total calories — the system derives them
-   from weight and density.
+2. For each item always output weight_grams and calories_per_100g (energy density,
+   NOT a calorie count — required even when uncertain; use a realistic estimate).
+   Also output protein_g/carbs_g/fat_g if confident. Do NOT output estimated_calories
+   per item — the system derives it from weight × density.
 3. Add normal hidden calories and list each in assumptions: 2-5 g cooking oil for
    grilled, roasted, sauteed, or pan-cooked food unless clearly oil-free; plus
    dressing, butter, sauce, cheese, or sugar when standard for the dish.
