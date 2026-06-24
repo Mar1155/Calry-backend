@@ -2,9 +2,11 @@ import pytest
 import datetime as dt
 from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from app.ai.schemas.meal_estimate import MealEstimateResult, MealEstimateItem, SpeechTranscriptionResult
 from app.ai.services.validation_service import AIValidationService
+from app.models.meal import MealRevision
 
 
 def test_meal_estimate_schema_validation():
@@ -232,3 +234,77 @@ async def test_meal_correction_tracking(client: AsyncClient, mock_estimation_res
     assert db_meal["confirmed_at"] is not None
     # 950 - 850 = 100
     # correction_percent = 100 / 850 * 100 ~ 11.76% (not directly exposed in MealResponse, but we verified the update runs fine)
+
+
+@pytest.mark.asyncio
+async def test_refine_meal_returns_unsaved_revision(client: AsyncClient, db_session, mock_estimation_result) -> None:
+    headers = {"Authorization": "Bearer mock_token_refine_test"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    with patch(
+        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_text",
+        new_callable=AsyncMock,
+    ) as mock_est:
+        mock_est.return_value = mock_estimation_result
+        create_res = await client.post("/api/v1/meals/text", json={"text": "burger"}, headers=headers)
+        meal_id = create_res.json()["id"]
+
+    revised = MealEstimateResult(
+        meal_name="Double Cheeseburger",
+        estimated_calories=1050,
+        estimated_min_calories=1000,
+        estimated_max_calories=1100,
+        confidence="high",
+        source_type="text",
+        items=[
+            MealEstimateItem(
+                name="Double cheeseburger",
+                quantity_estimate="1 burger",
+                weight_grams=300,
+                calories_per_100g=318.3,
+            ),
+            MealEstimateItem(
+                name="Mayonnaise",
+                quantity_estimate="1 tbsp",
+                weight_grams=14,
+                calories_per_100g=680,
+            ),
+        ],
+        assumptions=[],
+        needs_clarification=False,
+        model_name="test-model",
+        prompt_version="meal_refinement_v1",
+        ai_summary="Updated for a double burger with mayonnaise.",
+        changes_made=["Extra beef patty", "Mayonnaise"],
+    )
+
+    with patch(
+        "app.api.v1.routes.meals.AICalorieEstimationService.refine_estimate",
+        new_callable=AsyncMock,
+    ) as mock_refine:
+        mock_refine.return_value = revised
+        response = await client.post(
+            f"/api/v1/meals/{meal_id}/refine",
+            json={
+                "user_refinement": "It was actually a double burger with mayonnaise.",
+                "refinement_type": "text",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == meal_id
+    assert body["meal_name"] == "Double Cheeseburger"
+    assert body["estimated_calories"] == 1050
+    assert body["confirmed_calories"] is None
+    assert body["refinement_changes"] == ["Extra beef patty", "Mayonnaise"]
+
+    get_res = await client.get(f"/api/v1/meals/{meal_id}", headers=headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["estimated_calories"] == 850
+
+    revisions = (await db_session.execute(select(MealRevision))).scalars().all()
+    assert len(revisions) == 1
+    assert revisions[0].previous_calories == 850
+    assert revisions[0].revised_calories == 1050

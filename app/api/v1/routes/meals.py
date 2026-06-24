@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import logging
 import shutil
 import uuid
@@ -11,7 +12,7 @@ from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
-from app.models.meal import Meal, MealItem
+from app.models.meal import Meal, MealItem, MealRevision
 from app.models.user import User
 from app.repositories.food_memory import FoodMemoryRepository
 from app.repositories.meal import MealRepository
@@ -19,6 +20,7 @@ from app.schemas.meal import (
     MealCreatePhoto,
     MealCreateText,
     MealCreateVoice,
+    MealRefineRequest,
     MealResponse,
     MealUpdate,
 )
@@ -138,6 +140,83 @@ async def _find_existing_by_request_id(
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+def _meal_items_payload(meal: Meal) -> list[dict]:
+    return [
+        {
+            "name": item.name,
+            "quantity_estimate": item.quantity_estimate,
+            "weight_grams": item.weight_grams,
+            "calories_per_100g": item.calories_per_100g,
+            "protein_g": item.protein_g,
+            "carbs_g": item.carbs_g,
+            "fat_g": item.fat_g,
+            "estimated_calories": item.estimated_calories,
+        }
+        for item in meal.items
+    ]
+
+
+def _meal_snapshot(meal: Meal) -> dict:
+    return {
+        "meal_name": meal.meal_name,
+        "estimated_calories": meal.estimated_calories,
+        "estimated_min_calories": meal.estimated_min_calories,
+        "estimated_max_calories": meal.estimated_max_calories,
+        "total_protein_g": meal.total_protein_g,
+        "total_carbs_g": meal.total_carbs_g,
+        "total_fat_g": meal.total_fat_g,
+        "confidence": meal.ai_confidence,
+        "source_type": meal.source_type,
+        "original_input": meal.original_input,
+        "items": _meal_items_payload(meal),
+        "estimation_reasoning": meal.estimation_reasoning,
+    }
+
+
+def _meal_response_dict(meal: Meal, estimation: MealEstimateResult) -> dict:
+    return {
+        "id": meal.id,
+        "user_id": meal.user_id,
+        "source_type": meal.source_type,
+        "original_input": meal.original_input,
+        "image_url": meal.image_url,
+        "audio_url": meal.audio_url,
+        "meal_name": estimation.meal_name,
+        "estimated_calories": estimation.estimated_calories,
+        "estimated_min_calories": estimation.estimated_min_calories,
+        "estimated_max_calories": estimation.estimated_max_calories,
+        "total_protein_g": estimation.total_protein_g,
+        "total_carbs_g": estimation.total_carbs_g,
+        "total_fat_g": estimation.total_fat_g,
+        "estimation_reasoning": estimation.estimation_reasoning,
+        "confirmed_calories": meal.confirmed_calories,
+        "ai_confidence": estimation.confidence,
+        "confidence_score": estimation.confidence_score,
+        "needs_clarification": estimation.needs_clarification,
+        "clarifying_question": estimation.clarifying_question,
+        "created_at": meal.created_at,
+        "confirmed_at": meal.confirmed_at,
+        "items": [
+            {
+                "id": idx + 1,
+                "meal_id": meal.id,
+                "name": item.name,
+                "estimated_calories": item.estimated_calories,
+                "quantity_estimate": item.quantity_estimate,
+                "weight_grams": item.weight_grams,
+                "calories_per_100g": item.calories_per_100g,
+                "protein_g": item.protein_g,
+                "carbs_g": item.carbs_g,
+                "fat_g": item.fat_g,
+                "created_at": meal.created_at,
+            }
+            for idx, item in enumerate(estimation.items)
+        ],
+        "ai_summary": estimation.ai_summary,
+        "refinement_changes": estimation.changes_made,
+    }
 
 
 @router.post("/text", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
@@ -283,6 +362,76 @@ async def list_meals_on_date(
     """Retrieves all meals logged on a specific calendar date (YYYY-MM-DD)."""
     meal_repo = MealRepository(db)
     return await meal_repo.get_user_meals_on_date(user_id=current_user.id, date_val=date_val)
+
+
+@router.post("/{id}/refine", response_model=MealResponse)
+async def refine_meal_estimate(
+    id: int,
+    payload: MealRefineRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Conversationally revises an existing AI meal estimate without saving it to the meal."""
+    meal_repo = MealRepository(db)
+    meal = await meal_repo.get(id)
+
+    if not meal or meal.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Meal record not found or access forbidden.",
+        )
+
+    ai_service = AICalorieEstimationService(db)
+    user_context = await _build_user_context(db, current_user)
+    previous_items = _meal_items_payload(meal)
+    user_refinement = payload.user_refinement
+
+    if payload.refinement_type == "voice":
+        try:
+            transcription = await ai_service.speech_service.transcribe_audio(
+                audio_url=payload.user_refinement,
+                user_id=current_user.id,
+            )
+            user_refinement = transcription.transcript
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="I couldn't confidently update this estimate. Try adding a little more detail.",
+            )
+
+    try:
+        estimation = await ai_service.refine_estimate(
+            meal_snapshot=_meal_snapshot(meal),
+            user_refinement=user_refinement,
+            source_type=meal.source_type,
+            user_context=user_context,
+            user_id=current_user.id,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="I couldn't confidently update this estimate. Try adding a little more detail.",
+        )
+
+    revised_items = [item.model_dump() for item in estimation.items]
+    revision = MealRevision(
+        meal_id=meal.id,
+        user_id=current_user.id,
+        refinement_type=payload.refinement_type,
+        user_input=user_refinement,
+        previous_calories=meal.estimated_calories,
+        revised_calories=estimation.estimated_calories,
+        calorie_delta=estimation.estimated_calories - meal.estimated_calories,
+        previous_items_json=json.dumps(previous_items, ensure_ascii=False),
+        revised_items_json=json.dumps(revised_items, ensure_ascii=False),
+        ai_summary=estimation.ai_summary,
+        model_name=estimation.model_name,
+        prompt_version=estimation.prompt_version,
+    )
+    db.add(revision)
+    await db.flush()
+
+    return _meal_response_dict(meal, estimation)
 
 
 @router.get("/{id}", response_model=MealResponse)

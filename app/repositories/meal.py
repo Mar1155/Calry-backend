@@ -87,6 +87,9 @@ class MealRepository(BaseRepository[Meal]):
                     self.db.add(new_item)
                 await self.db.flush()
 
+        if "estimated_calories" in update_data and update_data["estimated_calories"] is not None:
+            db_obj.estimated_calories = update_data.pop("estimated_calories")
+
         # 2. Update confirmed calories and calculate correction tracking metrics
         if "confirmed_calories" in update_data and update_data["confirmed_calories"] is not None:
             confirmed_cal = update_data.pop("confirmed_calories")

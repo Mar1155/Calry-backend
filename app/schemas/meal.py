@@ -51,9 +51,25 @@ class MealCreateVoice(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=64)
 
 
+class MealRefineRequest(BaseModel):
+    user_refinement: str = Field(..., min_length=2, max_length=2000)
+    refinement_type: Literal["text", "voice"] = "text"
+
+
 class MealUpdate(BaseModel):
     confirmed_calories: int | None = Field(default=None, ge=0)
     meal_name: str | None = Field(default=None, max_length=255)
+    estimated_calories: int | None = Field(default=None, ge=0)
+    estimated_min_calories: int | None = Field(default=None, ge=0)
+    estimated_max_calories: int | None = Field(default=None, ge=0)
+    total_protein_g: float | None = Field(default=None, ge=0)
+    total_carbs_g: float | None = Field(default=None, ge=0)
+    total_fat_g: float | None = Field(default=None, ge=0)
+    estimation_reasoning: str | None = Field(default=None)
+    ai_confidence: Literal["low", "medium", "high"] | None = None
+    confidence_score: float | None = Field(default=None, ge=0, le=1)
+    needs_clarification: bool | None = None
+    clarifying_question: str | None = Field(default=None)
     items: list[MealItemCreate] | None = Field(default=None)
 
 
@@ -82,6 +98,8 @@ class MealResponse(BaseModel):
     created_at: dt.datetime
     confirmed_at: dt.datetime | None = None
     items: list[MealItemResponse] = []
+    ai_summary: str | None = None
+    refinement_changes: list[str] = []
 
     @field_validator("ai_confidence", mode="before")
     @classmethod

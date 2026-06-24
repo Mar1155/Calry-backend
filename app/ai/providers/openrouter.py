@@ -31,6 +31,11 @@ from app.ai.prompts.meal_estimation import (
     TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT,
     build_text_meal_estimation_user_prompt,
 )
+from app.ai.prompts.meal_refinement import (
+    MEAL_REFINEMENT_PROMPT_VERSION,
+    MEAL_REFINEMENT_SYSTEM_PROMPT,
+    build_meal_refinement_user_prompt,
+)
 from app.ai.prompts.voice_transcription import (
     VOICE_TRANSCRIPTION_SYSTEM_PROMPT,
 )
@@ -38,6 +43,7 @@ from app.ai.providers.base import BaseAIProvider
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult, MealSuggestionItem
 from app.ai.schemas.meal_estimate import (
     MEAL_ESTIMATE_RESPONSE_SCHEMA,
+    MEAL_REFINEMENT_RESPONSE_SCHEMA,
     MealEstimateItem,
     MealEstimateResult,
     SpeechTranscriptionResult,
@@ -569,6 +575,49 @@ class OpenRouterProvider(BaseAIProvider):
             raw_text, latency_ms, usage,
             source_type="photo", model=model, prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
         )
+
+    async def refine_meal_estimate(
+        self,
+        meal_snapshot: dict,
+        user_refinement: str,
+        source_type: str,
+        user_context: UserContext | None = None,
+    ) -> MealEstimateResult:
+        model = settings.OPENROUTER_TEXT_MODEL
+        context_str = self._build_user_context(user_context)
+        messages = [
+            {
+                "role": "user",
+                "content": build_meal_refinement_user_prompt(
+                    original_meal_json=json.dumps(meal_snapshot, ensure_ascii=False),
+                    source_type=source_type,
+                    user_refinement=user_refinement,
+                    context=context_str,
+                ),
+            }
+        ]
+        raw_text, latency_ms, usage = await self._post_openrouter(
+            model=model,
+            system_prompt=MEAL_REFINEMENT_SYSTEM_PROMPT,
+            messages=messages,
+            response_format=self._response_format(MEAL_REFINEMENT_RESPONSE_SCHEMA, "meal_refinement"),
+        )
+        result = await self._parse_and_build_meal(
+            raw_text,
+            latency_ms,
+            usage,
+            source_type=source_type,
+            model=model,
+            prompt_version=MEAL_REFINEMENT_PROMPT_VERSION,
+        )
+        try:
+            parsed, _ = self._parse_payload(raw_text, MealEstimateResult)
+            result.ai_summary = parsed.get("ai_summary")
+            result.changes_made = parsed.get("changes_made") or []
+        except Exception:
+            result.ai_summary = None
+            result.changes_made = []
+        return result
 
     async def transcribe_audio(self, audio_url: str) -> SpeechTranscriptionResult:
         model = settings.OPENROUTER_AUDIO_MODEL

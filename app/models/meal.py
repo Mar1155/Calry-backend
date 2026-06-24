@@ -86,3 +86,29 @@ class MealItem(Base):
         if self.weight_grams is None or self.calories_per_100g is None:
             return 0
         return max(0, int(round(self.weight_grams * self.calories_per_100g / 100)))
+
+
+class MealRevision(Base):
+    __tablename__ = "meal_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    meal_id: Mapped[int] = mapped_column(ForeignKey("meals.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    refinement_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    user_input: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_calories: Mapped[int] = mapped_column(Integer, nullable=False)
+    revised_calories: Mapped[int] = mapped_column(Integer, nullable=False)
+    calorie_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_items_json: Mapped[str] = mapped_column(Text, nullable=False)
+    revised_items_json: Mapped[str] = mapped_column(Text, nullable=False)
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: dt.datetime.now(dt.UTC),
+        nullable=False,
+    )
+
+    meal: Mapped["Meal"] = relationship("Meal")
+    user: Mapped["User"] = relationship("User")

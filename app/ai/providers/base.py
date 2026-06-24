@@ -40,6 +40,17 @@ class BaseAIProvider(ABC):
         pass
 
     @abstractmethod
+    async def refine_meal_estimate(
+        self,
+        meal_snapshot: dict,
+        user_refinement: str,
+        source_type: str,
+        user_context: UserContext | None = None,
+    ) -> MealEstimateResult:
+        """Revises an existing structured meal estimate from conversational detail."""
+        pass
+
+    @abstractmethod
     async def transcribe_audio(self, audio_url: str) -> SpeechTranscriptionResult:
         """Transcribes a spoken meal description audio URL verbatim."""
         pass

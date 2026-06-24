@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.prompts.image_estimation import IMAGE_MEAL_ESTIMATION_PROMPT_VERSION
 from app.ai.prompts.meal_completion import MEAL_COMPLETION_PROMPT_VERSION
 from app.ai.prompts.meal_estimation import TEXT_MEAL_ESTIMATION_PROMPT_VERSION
+from app.ai.prompts.meal_refinement import MEAL_REFINEMENT_PROMPT_VERSION
 from app.ai.providers.base import BaseAIProvider
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult
@@ -307,6 +308,61 @@ class AICalorieEstimationService:
         )
 
         return transcript, estimation_result
+
+    async def refine_estimate(
+        self,
+        meal_snapshot: dict,
+        user_refinement: str,
+        source_type: str,
+        user_context: UserContext | None = None,
+        user_id: int | None = None,
+        provider_override: str | None = None,
+    ) -> MealEstimateResult:
+        provider = self._get_provider(provider_override)
+        start_time = time.perf_counter()
+        success = False
+        raw_result = None
+        raw_output = None
+        error_msg = None
+
+        try:
+            raw_result = await provider.refine_meal_estimate(
+                meal_snapshot,
+                user_refinement,
+                source_type,
+                user_context,
+            )
+            raw_output = raw_result.raw_output
+            validated_result = AIValidationService.validate_and_normalize_estimate(raw_result)
+            validated_result.source_type = source_type  # type: ignore[assignment]
+            score = AIConfidenceService.compute(validated_result)
+            validated_result.confidence_score = score
+            validated_result.confidence = bucket_confidence(score)  # type: ignore[assignment]
+            validated_result.ai_summary = raw_result.ai_summary
+            validated_result.changes_made = raw_result.changes_made
+            success = True
+            return validated_result
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error in refine_estimate: {e}")
+            raise e
+        finally:
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            prompt_version = raw_result.prompt_version if raw_result is not None else MEAL_REFINEMENT_PROMPT_VERSION
+            await self.inference_logger.log_call(
+                user_id=user_id,
+                provider=provider.provider_name,
+                model_name=settings.OPENROUTER_TEXT_MODEL,
+                prompt_version=prompt_version,
+                input_type="meal_refinement",
+                raw_input=f"Snapshot: {meal_snapshot}\n\nUser refinement: {user_refinement}",
+                raw_output=str(raw_output) if raw_output else None,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_msg,
+                token_usage=raw_result.token_usage if raw_result is not None else None,
+            )
 
     async def suggest_meal_completion(
         self,

@@ -47,6 +47,11 @@ class MealEstimateResult(BaseModel):
     # Raw provider token usage (prompt/completion/cached) for cost telemetry.
     token_usage: dict | None = None
 
+    # Revision-only metadata. These fields are populated by the conversational
+    # refinement pipeline and may be surfaced to the client before save.
+    ai_summary: str | None = None
+    changes_made: list[str] = Field(default_factory=list)
+
 
 class SpeechTranscriptionResult(BaseModel):
     transcript: str
@@ -110,4 +115,22 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
         "clarifying_question": {"type": ["string", "null"]},
     },
     "required": ["meal_name", "estimated_calories", "confidence", "items"],
+}
+
+
+MEAL_REFINEMENT_RESPONSE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        **MEAL_ESTIMATE_RESPONSE_SCHEMA["properties"],
+        "ai_summary": {"type": ["string", "null"]},
+        "changes_made": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "meal_name",
+        "estimated_calories",
+        "confidence",
+        "items",
+        "ai_summary",
+        "changes_made",
+    ],
 }
