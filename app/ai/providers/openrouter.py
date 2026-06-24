@@ -1,36 +1,38 @@
 import base64
 import json
 import logging
+import re
 import time
+from typing import Any
+
 import httpx
 from pydantic import ValidationError
 
-from app.ai.providers.base import BaseAIProvider
-from app.ai.schemas.meal_estimate import MealEstimateResult, SpeechTranscriptionResult, UserContext, MealEstimateItem
-from app.ai.schemas.meal_completion import MealCompletionResult, MealCompletionRequest, MealSuggestionItem
-from app.ai.prompts.meal_estimation import (
-    TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT,
-    TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
-    JSON_REPAIR_SYSTEM_PROMPT,
-)
-from app.ai.prompts.meal_completion import (
-    MEAL_COMPLETION_SYSTEM_PROMPT,
-    MEAL_COMPLETION_PROMPT_VERSION,
-)
-from app.ai.prompts.image_estimation import (
-    IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
-    IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
-)
-from app.ai.prompts.voice_transcription import (
-    VOICE_TRANSCRIPTION_SYSTEM_PROMPT,
-    VOICE_TRANSCRIPTION_PROMPT_VERSION,
-)
 from app.ai.errors import (
-    AIProviderError,
     AIInvalidResponseError,
+    AIProviderError,
     ImageAnalysisError,
     SpeechTranscriptionError,
 )
+from app.ai.prompts.image_estimation import (
+    IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
+    IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
+)
+from app.ai.prompts.meal_completion import (
+    MEAL_COMPLETION_PROMPT_VERSION,
+    MEAL_COMPLETION_SYSTEM_PROMPT,
+)
+from app.ai.prompts.meal_estimation import (
+    JSON_REPAIR_SYSTEM_PROMPT,
+    TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
+    TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT,
+)
+from app.ai.prompts.voice_transcription import (
+    VOICE_TRANSCRIPTION_SYSTEM_PROMPT,
+)
+from app.ai.providers.base import BaseAIProvider
+from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult, MealSuggestionItem
+from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult, SpeechTranscriptionResult, UserContext
 from app.core.config import settings
 
 logger = logging.getLogger("app.ai.openrouter")
@@ -129,12 +131,90 @@ class OpenRouterProvider(BaseAIProvider):
                 messages=repair_messages,
                 response_format={"type": "json_object"},
             )
-            return json.loads(repaired_text)
+            try:
+                return json.loads(repaired_text)
+            except json.JSONDecodeError:
+                recovered = self._recover_partial_json(malformed_json, schema_type)
+                if recovered is not None:
+                    logger.warning("Recovered partial meal estimate after JSON repair failed.")
+                    return recovered
+                raise
         except Exception as e:
+            recovered = self._recover_partial_json(malformed_json, schema_type)
+            if recovered is not None:
+                logger.warning("Recovered partial meal estimate after JSON repair failed.")
+                return recovered
             logger.error(f"JSON repair failed: {e}")
             raise AIInvalidResponseError(
                 f"Failed to repair JSON output. Original: {malformed_json}. Error: {error_msg}"
             )
+
+    def _parse_json_or_repair(self, raw_text: str, schema_type: type) -> dict[str, Any]:
+        try:
+            return json.loads(raw_text)
+        except json.JSONDecodeError as e:
+            recovered = self._recover_partial_json(raw_text, schema_type)
+            if recovered is not None:
+                logger.warning("Recovered partial meal estimate from malformed JSON response.")
+                return recovered
+            raise e
+
+    @staticmethod
+    def _recover_partial_json(malformed_json: str, schema_type: type) -> dict[str, Any] | None:
+        if schema_type is not MealEstimateResult:
+            return None
+
+        def last_int(key: str) -> int | None:
+            matches = re.findall(rf'"{re.escape(key)}"\s*:\s*(-?\d+)', malformed_json)
+            return int(matches[-1]) if matches else None
+
+        def last_float(key: str) -> float | None:
+            matches = re.findall(rf'"{re.escape(key)}"\s*:\s*(-?\d+(?:\.\d+)?)', malformed_json)
+            return float(matches[-1]) if matches else None
+
+        def first_string(key: str) -> str | None:
+            match = re.search(rf'"{re.escape(key)}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', malformed_json)
+            if not match:
+                return None
+            return json.loads(f'"{match.group(1)}"')
+
+        estimated_calories = last_int("estimated_calories")
+        meal_name = first_string("meal_name")
+        if estimated_calories is None or not meal_name:
+            return None
+
+        confidence = first_string("confidence") or "low"
+        if confidence not in {"low", "medium", "high"}:
+            confidence = "low"
+
+        protein = last_float("total_protein_g")
+        carbs = last_float("total_carbs_g")
+        fat = last_float("total_fat_g")
+        synthetic_item: dict[str, Any] = {
+            "name": meal_name,
+            "quantity_estimate": None,
+            "weight_grams": None,
+            "protein_g": protein,
+            "carbs_g": carbs,
+            "fat_g": fat,
+            "estimated_calories": estimated_calories,
+        }
+
+        return {
+            "meal_name": meal_name,
+            "estimated_calories": estimated_calories,
+            "estimated_min_calories": last_int("estimated_min_calories"),
+            "estimated_max_calories": last_int("estimated_max_calories"),
+            "total_protein_g": protein,
+            "total_carbs_g": carbs,
+            "total_fat_g": fat,
+            "confidence": confidence,
+            "items": [synthetic_item],
+            "assumptions": ["Recovered from a partial AI response."],
+            "needs_clarification": False,
+            "clarifying_question": None,
+            "estimation_reasoning": None,
+        }
 
     async def estimate_meal_from_text(
         self, input_text: str, user_context: UserContext | None = None
@@ -173,7 +253,7 @@ class OpenRouterProvider(BaseAIProvider):
         )
         
         try:
-            parsed = json.loads(raw_text)
+            parsed = self._parse_json_or_repair(raw_text, MealEstimateResult)
         except json.JSONDecodeError as e:
             parsed = await self._repair_json(raw_text, str(e), MealEstimateResult)
             
@@ -328,7 +408,7 @@ class OpenRouterProvider(BaseAIProvider):
         )
         
         try:
-            parsed = json.loads(raw_text)
+            parsed = self._parse_json_or_repair(raw_text, MealEstimateResult)
         except json.JSONDecodeError as e:
             parsed = await self._repair_json(raw_text, str(e), MealEstimateResult)
             
@@ -467,7 +547,7 @@ class OpenRouterProvider(BaseAIProvider):
         )
         
         try:
-            parsed = json.loads(raw_text)
+            parsed = self._parse_json_or_repair(raw_text, SpeechTranscriptionResult)
         except json.JSONDecodeError as e:
             parsed = await self._repair_json(raw_text, str(e), SpeechTranscriptionResult)
             
@@ -557,7 +637,7 @@ class OpenRouterProvider(BaseAIProvider):
         )
         
         try:
-            parsed = json.loads(raw_text)
+            parsed = self._parse_json_or_repair(raw_text, MealCompletionResult)
         except json.JSONDecodeError as e:
             parsed = await self._repair_json(raw_text, str(e), MealCompletionResult)
             
@@ -657,8 +737,9 @@ class OpenRouterProvider(BaseAIProvider):
         avg_calories: int,
         goal: int,
     ) -> list[str]:
-        from app.ai.prompts.insights import PATTERN_INSIGHTS_SYSTEM_PROMPT
         import json
+
+        from app.ai.prompts.insights import PATTERN_INSIGHTS_SYSTEM_PROMPT
         data_summary = (
             f"User data:\n"
             f"- Days logged in past 30 days: {days_logged}\n"
