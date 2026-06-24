@@ -1,5 +1,5 @@
-from typing import Literal
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/calry"
 
     # Firebase configuration
-    FIREBASE_CREDENTIALS_PATH: str | None = None
     FIREBASE_PROJECT_ID: str = "calry-62362"
+    FIREBASE_CREDENTIALS: str | None = None
 
     # AI API keys
     OPENROUTER_API_KEY: str | None = None

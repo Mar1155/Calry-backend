@@ -1,10 +1,10 @@
+import json
 import logging
-from pathlib import Path
 
 import firebase_admin
 from firebase_admin import auth, credentials
 
-from app.core.config import BASE_DIR, settings
+from app.core.config import settings
 from app.core.exceptions import AuthException
 
 logger = logging.getLogger("app.security")
@@ -15,7 +15,8 @@ _firebase_initialized = False
 def init_firebase() -> None:
     """Initializes the Firebase Admin SDK.
 
-    Supports custom credentials file paths or automated environment detection (such as on Railway).
+    Uses a Firebase service account JSON from the FIREBASE_CREDENTIALS
+    environment variable, which works well with Railway variables.
     """
     global _firebase_initialized
     if _firebase_initialized:
@@ -30,27 +31,25 @@ def init_firebase() -> None:
     except ValueError:
         pass
 
-    try:
-        if settings.FIREBASE_CREDENTIALS_PATH:
-            credentials_path = Path(settings.FIREBASE_CREDENTIALS_PATH)
-            if not credentials_path.is_absolute():
-                credentials_path = BASE_DIR / credentials_path
-            if not credentials_path.exists():
-                raise FileNotFoundError(f"Firebase credentials file not found: {credentials_path}")
+    if not settings.FIREBASE_CREDENTIALS:
+        raise RuntimeError("FIREBASE_CREDENTIALS environment variable is required.")
 
-            cred = credentials.Certificate(str(credentials_path))
-            firebase_admin.initialize_app(cred)
-            logger.info(f"Firebase Admin SDK successfully initialized from path: {credentials_path}")
-        else:
-            # Initialize with the project ID directly to support verification without service accounts
-            firebase_admin.initialize_app(options={"projectId": settings.FIREBASE_PROJECT_ID})
-            logger.info(f"Firebase Admin SDK initialized for project ID: {settings.FIREBASE_PROJECT_ID}")
-        _firebase_initialized = True
-    except Exception as e:
-        logger.warning(
-            f"Unable to initialize Firebase Admin SDK: {e}. "
-            "Using development fallback mock mechanism if not in production."
+    try:
+        service_account_info = json.loads(settings.FIREBASE_CREDENTIALS)
+    except json.JSONDecodeError as e:
+        raise RuntimeError("FIREBASE_CREDENTIALS must contain valid service account JSON.") from e
+
+    credential_project_id = service_account_info.get("project_id")
+    if credential_project_id != settings.FIREBASE_PROJECT_ID:
+        raise RuntimeError(
+            "Firebase credentials project_id does not match FIREBASE_PROJECT_ID: "
+            f"{credential_project_id!r} != {settings.FIREBASE_PROJECT_ID!r}"
         )
+
+    cred = credentials.Certificate(service_account_info)
+    firebase_admin.initialize_app(cred, {"projectId": settings.FIREBASE_PROJECT_ID})
+    _firebase_initialized = True
+    logger.info("Firebase Admin SDK successfully initialized from FIREBASE_CREDENTIALS.")
 
 
 def verify_firebase_token(token: str) -> dict:
@@ -70,9 +69,8 @@ def verify_firebase_token(token: str) -> dict:
             "email_verified": True,
         }
 
-    init_firebase()
-
     try:
+        init_firebase()
         # Verify the ID token and return decodable user payload
         decoded_token = auth.verify_id_token(token)
         return decoded_token

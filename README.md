@@ -112,7 +112,7 @@ Set these in the service's **Variables** tab:
 | `OPENROUTER_API_KEY` | `your-openrouter-key` | Enables AI calorie estimation via OpenRouter |
 | `DEFAULT_AI_PROVIDER` | `openrouter` | Default AI engine |
 | `FIREBASE_PROJECT_ID` | `calry-62362` | Firebase project for ID-token verification |
-| `FIREBASE_CREDENTIALS_PATH` | *(leave unset)* | Optional. Token verification works with the project ID alone; only set if you need full Admin SDK operations (provide creds via a mounted secret, not a committed file) |
+| `FIREBASE_CREDENTIALS` | full service account JSON | Firebase Admin credentials. Paste the complete JSON from Firebase Console → Project settings → Service accounts |
 
 > `PORT` is injected by Railway automatically — do **not** set it manually.
 
