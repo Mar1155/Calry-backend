@@ -1,7 +1,7 @@
 import datetime as dt
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert
 
 from app.models.food_memory import UserFoodMemory
 from app.models.meal import Meal
@@ -44,6 +44,7 @@ class FoodMemoryRepository:
                     "estimated_calories": item.estimated_calories,
                     "quantity_estimate": item.quantity_estimate,
                     "weight_grams": item.weight_grams,
+                    "calories_per_100g": item.calories_per_100g,
                     "protein_g": item.protein_g,
                     "carbs_g": item.carbs_g,
                     "fat_g": item.fat_g,

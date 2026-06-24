@@ -1,5 +1,4 @@
-import pytest
-from app.ai.schemas.meal_estimate import MealEstimateResult, MealEstimateItem
+from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult
 from app.ai.services.validation_service import AIValidationService
 
 
@@ -26,9 +25,9 @@ def test_validation_macro_derived_calories():
         model_name="test-model",
         prompt_version="test-v1"
     )
-    
+
     validated = AIValidationService.validate_and_normalize_estimate(result)
-    
+
     # Derivation: 5*4 + 30*4 + 3*9 = 167
     assert validated.items[0].estimated_calories == 167
     assert validated.estimated_calories == 167
@@ -60,9 +59,9 @@ def test_validation_energy_density_clamping():
         model_name="test-model",
         prompt_version="test-v1"
     )
-    
+
     validated = AIValidationService.validate_and_normalize_estimate(result)
-    
+
     # Should clamp calories to 10g * 9 kcal/g = 90 kcal
     assert validated.items[0].estimated_calories == 90
     assert validated.estimated_calories == 90
@@ -93,10 +92,39 @@ def test_validation_missing_macros_fallback():
         model_name="test-model",
         prompt_version="test-v1"
     )
-    
+
     validated = AIValidationService.validate_and_normalize_estimate(result)
-    
+
     assert validated.items[0].estimated_calories == 150
     assert validated.total_protein_g is None
     assert validated.total_carbs_g is None
     assert validated.total_fat_g is None
+
+
+def test_validation_derives_item_calories_from_per_100g_density():
+    item = MealEstimateItem(
+        name="Cooked Pasta",
+        quantity_estimate="250g",
+        weight_grams=250,
+        calories_per_100g=160,
+        protein_g=12.0,
+        carbs_g=80.0,
+        fat_g=4.0,
+    )
+    result = MealEstimateResult(
+        meal_name="Pasta",
+        estimated_calories=999,
+        confidence="high",
+        source_type="text",
+        items=[item],
+        assumptions=[],
+        needs_clarification=False,
+        model_name="test-model",
+        prompt_version="test-v1",
+    )
+
+    validated = AIValidationService.validate_and_normalize_estimate(result)
+
+    assert validated.items[0].estimated_calories == 400
+    assert validated.items[0].calories_per_100g == 160
+    assert validated.estimated_calories == 400

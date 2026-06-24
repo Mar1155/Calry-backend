@@ -1,14 +1,15 @@
 import datetime as dt
-from typing import Literal, Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MealItemBase(BaseModel):
     name: str
-    estimated_calories: int = Field(..., ge=0)
+    estimated_calories: int = Field(default=0, ge=0)
     quantity_estimate: str | None = Field(default=None, max_length=100)
     weight_grams: int | None = Field(default=None)
+    calories_per_100g: float | None = Field(default=None, ge=0)
     protein_g: float | None = Field(default=None)
     carbs_g: float | None = Field(default=None)
     fat_g: float | None = Field(default=None)
@@ -96,9 +97,8 @@ class MealResponse(BaseModel):
                     return "high"
             except ValueError:
                 pass
-            
+
             v_lower = v.lower()
             if v_lower in ("low", "medium", "high"):
                 return v_lower
         return None
-

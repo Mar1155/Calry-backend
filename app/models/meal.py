@@ -61,10 +61,10 @@ class MealItem(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity_estimate: Mapped[str | None] = mapped_column(String(100), nullable=True)
     weight_grams: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    calories_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
     protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
-    estimated_calories: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),
@@ -73,3 +73,9 @@ class MealItem(Base):
 
     # Relationships
     meal: Mapped["Meal"] = relationship("Meal", back_populates="items")
+
+    @property
+    def estimated_calories(self) -> int:
+        if self.weight_grams is None or self.calories_per_100g is None:
+            return 0
+        return max(0, int(round(self.weight_grams * self.calories_per_100g / 100)))

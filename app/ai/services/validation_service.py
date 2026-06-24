@@ -1,4 +1,5 @@
 import logging
+
 from app.ai.schemas.meal_estimate import MealEstimateResult
 
 logger = logging.getLogger("app.ai.validation")
@@ -12,11 +13,11 @@ class AIValidationService:
         # 1. Normalize empty meal name
         if not result.meal_name or not result.meal_name.strip():
             result.meal_name = "Meal"
-            
+
         # 2. Normalize assumptions
         if result.assumptions is None:
             result.assumptions = []
-            
+
         # 3. Handle clarification edge case
         if result.needs_clarification:
             if not result.clarifying_question or not result.clarifying_question.strip():
@@ -31,7 +32,7 @@ class AIValidationService:
             result.total_fat_g = 0.0
             return result
 
-        # 4. Check / normalize items and validate macros
+        # 4. Check / normalize items and derive item calories from per-100g density.
         sum_item_calories = 0
         sum_protein = 0.0
         sum_carbs = 0.0
@@ -45,6 +46,8 @@ class AIValidationService:
             # Normalize weight
             if item.weight_grams is not None:
                 item.weight_grams = max(0, item.weight_grams)
+            if item.calories_per_100g is not None:
+                item.calories_per_100g = round(max(0.0, item.calories_per_100g), 1)
 
             # Check if macros are provided
             has_macros = (item.protein_g is not None or item.carbs_g is not None or item.fat_g is not None)
@@ -62,36 +65,32 @@ class AIValidationService:
 
                 # Calculate macro-derived calories: protein*4 + carbs*4 + fat*9
                 macro_derived_calories = int(round(item.protein_g * 4 + item.carbs_g * 4 + item.fat_g * 9))
-
-                # Cross-validate item calories with macro-derived calories
-                if item.estimated_calories < 0:
-                    item.estimated_calories = macro_derived_calories
-                else:
-                    deviation = abs(item.estimated_calories - macro_derived_calories)
-                    # If deviation is more than 15% AND greater than 15 calories, align to macro-derived calories
-                    percent_deviation = (deviation / max(1, macro_derived_calories)) * 100
-                    if deviation > 15 and percent_deviation > 15.0:
-                        logger.info(
-                            f"Item '{item.name}' calorie deviation: stated={item.estimated_calories}, macro_derived={macro_derived_calories}. Aligning to macros."
-                        )
-                        item.estimated_calories = macro_derived_calories
-
-                # Energy density check: max 9 kcal/g (pure fat)
-                if item.weight_grams and item.weight_grams > 0:
-                    density = item.estimated_calories / item.weight_grams
-                    if density > 9.0:
-                        logger.warning(
-                            f"Unrealistic energy density ({density:.2f} kcal/g) for item '{item.name}'. Clamping calories to pure fat density (9.0 kcal/g)."
-                        )
-                        item.estimated_calories = int(round(item.weight_grams * 9.0))
-                        # Recalculate fat/macros if they were invalid or mismatched
-                        item.fat_g = round(item.estimated_calories / 9.0, 1)
-                        item.protein_g = 0.0
-                        item.carbs_g = 0.0
             else:
-                # No macros provided, ensure calories are non-negative
-                if item.estimated_calories < 0:
-                    item.estimated_calories = 0
+                macro_derived_calories = None
+
+            if item.calories_per_100g is None and item.weight_grams and item.weight_grams > 0:
+                if item.estimated_calories > 0:
+                    item.calories_per_100g = round(item.estimated_calories / item.weight_grams * 100, 1)
+                elif macro_derived_calories is not None:
+                    item.calories_per_100g = round(macro_derived_calories / item.weight_grams * 100, 1)
+
+            # Energy density check: max 900 kcal / 100g (pure fat).
+            if item.calories_per_100g is not None and item.calories_per_100g > 900.0:
+                logger.warning(
+                    f"Unrealistic energy density ({item.calories_per_100g:.1f} kcal/100g) for item '{item.name}'. Clamping to 900 kcal/100g."
+                )
+                item.calories_per_100g = 900.0
+                if has_macros and item.weight_grams is not None:
+                    item.protein_g = 0.0
+                    item.carbs_g = 0.0
+                    item.fat_g = round(item.weight_grams, 1)
+
+            if item.weight_grams and item.weight_grams > 0 and item.calories_per_100g is not None:
+                item.estimated_calories = int(round(item.weight_grams * item.calories_per_100g / 100))
+            elif macro_derived_calories is not None:
+                item.estimated_calories = macro_derived_calories
+            else:
+                item.estimated_calories = max(0, item.estimated_calories)
 
             sum_item_calories += item.estimated_calories
 
@@ -130,5 +129,5 @@ class AIValidationService:
             result.estimated_min_calories = max(0, result.estimated_min_calories)
         if result.estimated_max_calories is not None:
             result.estimated_max_calories = max(result.estimated_calories, result.estimated_max_calories)
-            
+
         return result

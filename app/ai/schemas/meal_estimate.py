@@ -1,4 +1,5 @@
 from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -6,10 +7,11 @@ class MealEstimateItem(BaseModel):
     name: str
     quantity_estimate: str | None = None
     weight_grams: int | None = None
+    calories_per_100g: float | None = None
     protein_g: float | None = None
     carbs_g: float | None = None
     fat_g: float | None = None
-    estimated_calories: int = Field(..., ge=0)
+    estimated_calories: int = Field(default=0, ge=0)
 
 
 class MealEstimateResult(BaseModel):

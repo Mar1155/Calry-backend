@@ -1,5 +1,6 @@
 import datetime as dt
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -68,9 +69,9 @@ async def log_from_memory(
             meal_item = MealItem(
                 meal_id=meal.id,
                 name=item_data["name"],
-                estimated_calories=item_data["estimated_calories"],
                 quantity_estimate=item_data.get("quantity_estimate"),
                 weight_grams=item_data.get("weight_grams"),
+                calories_per_100g=item_data.get("calories_per_100g"),
                 protein_g=item_data.get("protein_g"),
                 carbs_g=item_data.get("carbs_g"),
                 fat_g=item_data.get("fat_g"),

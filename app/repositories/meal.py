@@ -15,6 +15,18 @@ class MealRepository(BaseRepository[Meal]):
     def __init__(self, db: AsyncSession):
         super().__init__(Meal, db)
 
+    @staticmethod
+    def _resolve_calories_per_100g(item_data: dict[str, Any]) -> float | None:
+        calories_per_100g = item_data.get("calories_per_100g")
+        if calories_per_100g is not None:
+            return calories_per_100g
+
+        weight_grams = item_data.get("weight_grams")
+        estimated_calories = item_data.get("estimated_calories")
+        if weight_grams and weight_grams > 0 and estimated_calories is not None:
+            return round(estimated_calories / weight_grams * 100, 1)
+        return None
+
     async def get_by_user(
         self, user_id: int, skip: int = 0, limit: int = 50, cutoff_date: dt.datetime | None = None
     ) -> list[Meal]:
@@ -67,10 +79,10 @@ class MealRepository(BaseRepository[Meal]):
                         name=item_data["name"],
                         quantity_estimate=item_data.get("quantity_estimate"),
                         weight_grams=item_data.get("weight_grams"),
+                        calories_per_100g=self._resolve_calories_per_100g(item_data),
                         protein_g=item_data.get("protein_g"),
                         carbs_g=item_data.get("carbs_g"),
                         fat_g=item_data.get("fat_g"),
-                        estimated_calories=item_data.get("estimated_calories", 0),
                     )
                     self.db.add(new_item)
                 await self.db.flush()
@@ -95,11 +107,10 @@ class MealRepository(BaseRepository[Meal]):
 
         self.db.add(db_obj)
         await self.db.flush()
-        
+
         # Refresh relation to avoid stale session cache
         from sqlalchemy.future import select
         from sqlalchemy.orm import selectinload
         stmt = select(Meal).where(Meal.id == db_obj.id).options(selectinload(Meal.items))
         result = await self.db.execute(stmt)
         return result.scalar_one()
-

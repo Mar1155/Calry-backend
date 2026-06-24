@@ -3,15 +3,17 @@ import logging
 import shutil
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
-from app.ai.schemas.meal_estimate import UserContext, MealEstimateResult
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.meal import Meal, MealItem
 from app.models.user import User
+from app.repositories.food_memory import FoodMemoryRepository
 from app.repositories.meal import MealRepository
 from app.schemas.meal import (
     MealCreatePhoto,
@@ -20,7 +22,6 @@ from app.schemas.meal import (
     MealResponse,
     MealUpdate,
 )
-from app.repositories.food_memory import FoodMemoryRepository
 from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.meals")
@@ -69,10 +70,10 @@ async def _process_and_save_meal(
             name=item.name,
             quantity_estimate=item.quantity_estimate,
             weight_grams=item.weight_grams,
+            calories_per_100g=item.calories_per_100g,
             protein_g=item.protein_g,
             carbs_g=item.carbs_g,
             fat_g=item.fat_g,
-            estimated_calories=item.estimated_calories,
         )
         db.add(meal_item)
 
@@ -98,11 +99,11 @@ async def _process_and_save_meal(
 async def _build_user_context(db: AsyncSession, user: User) -> UserContext:
     """Retrieves calibration/correction history and profile to build a comprehensive UserContext."""
     from app.ai.services.correction_context_service import AICorrectionContextService
-    
+
     correction_service = AICorrectionContextService(db)
     summary = await correction_service.get_user_correction_summary(user.id)
     avg_pct = await correction_service.get_average_correction_percent(user.id)
-    
+
     return UserContext(
         daily_calorie_goal=user.daily_calorie_goal,
         locale=None,
@@ -224,7 +225,7 @@ async def list_user_meals(
 ) -> list[Meal]:
     """Retrieves a paginated timeline of meals logged by the user."""
     meal_repo = MealRepository(db)
-    
+
     return await meal_repo.get_by_user(
         user_id=current_user.id, skip=skip, limit=limit
     )
@@ -342,11 +343,11 @@ async def upload_media(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Uploads a local media file (image/audio) and returns an accessible path.
-    
+
     Useful for offline/local development or setups without Firebase Storage.
     """
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     ext = Path(file.filename).suffix if file.filename else ""
     if not ext:
         if "image" in (file.content_type or ""):
@@ -355,11 +356,11 @@ async def upload_media(
             ext = ".mp3"
         else:
             ext = ".bin"
-            
+
     unique_filename = f"{uuid.uuid4()}{ext}"
     dest_path = UPLOAD_DIR / unique_filename
-    
+
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+
     return {"url": f"/static/uploads/{unique_filename}"}

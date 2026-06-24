@@ -222,10 +222,14 @@ class OpenRouterProvider(BaseAIProvider):
         protein = last_float("total_protein_g")
         carbs = last_float("total_carbs_g")
         fat = last_float("total_fat_g")
+        weight_grams = last_int("weight_grams")
         synthetic_item: dict[str, Any] = {
             "name": meal_name,
             "quantity_estimate": None,
-            "weight_grams": None,
+            "weight_grams": weight_grams,
+            "calories_per_100g": round(estimated_calories / weight_grams * 100, 1)
+            if weight_grams and weight_grams > 0
+            else None,
             "protein_g": protein,
             "carbs_g": carbs,
             "fat_g": fat,
@@ -287,6 +291,7 @@ class OpenRouterProvider(BaseAIProvider):
                         name=item.get("name", ""),
                         quantity_estimate=item.get("quantity_estimate"),
                         weight_grams=item.get("weight_grams"),
+                        calories_per_100g=item.get("calories_per_100g"),
                         protein_g=item.get("protein_g"),
                         carbs_g=item.get("carbs_g"),
                         fat_g=item.get("fat_g"),
@@ -321,6 +326,7 @@ class OpenRouterProvider(BaseAIProvider):
                         name=item.get("name", ""),
                         quantity_estimate=item.get("quantity_estimate"),
                         weight_grams=item.get("weight_grams"),
+                        calories_per_100g=item.get("calories_per_100g"),
                         protein_g=item.get("protein_g"),
                         carbs_g=item.get("carbs_g"),
                         fat_g=item.get("fat_g"),
@@ -428,6 +434,7 @@ class OpenRouterProvider(BaseAIProvider):
                         name=item.get("name", ""),
                         quantity_estimate=item.get("quantity_estimate"),
                         weight_grams=item.get("weight_grams"),
+                        calories_per_100g=item.get("calories_per_100g"),
                         protein_g=item.get("protein_g"),
                         carbs_g=item.get("carbs_g"),
                         fat_g=item.get("fat_g"),
@@ -462,6 +469,7 @@ class OpenRouterProvider(BaseAIProvider):
                         name=item.get("name", ""),
                         quantity_estimate=item.get("quantity_estimate"),
                         weight_grams=item.get("weight_grams"),
+                        calories_per_100g=item.get("calories_per_100g"),
                         protein_g=item.get("protein_g"),
                         carbs_g=item.get("carbs_g"),
                         fat_g=item.get("fat_g"),
