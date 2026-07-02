@@ -5,7 +5,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
@@ -101,7 +101,18 @@ async def _process_and_save_meal(
     return result.scalar_one()
 
 
-async def _build_user_context(db: AsyncSession, user: User) -> UserContext:
+def _primary_locale(accept_language: str | None) -> str:
+    if not accept_language:
+        return "en"
+    primary = accept_language.split(",")[0].split("-")[0].split("_")[0].strip().lower()
+    return primary if primary in {"en", "it", "es", "zh", "ja", "ar"} else "en"
+
+
+async def _build_user_context(
+    db: AsyncSession,
+    user: User,
+    locale: str | None = None,
+) -> UserContext:
     """Builds UserContext from a SINGLE correction-history query (C5): the prose
     summary for the prompt and the deterministic per-source bias for C11."""
     from app.ai.services.correction_context_service import AICorrectionContextService
@@ -111,7 +122,7 @@ async def _build_user_context(db: AsyncSession, user: User) -> UserContext:
 
     return UserContext(
         daily_calorie_goal=user.daily_calorie_goal,
-        locale=None,
+        locale=locale,
         timezone=None,
         previous_corrections_summary=context.summary,
         sex=user.sex,
@@ -224,6 +235,7 @@ async def log_meal_via_text(
     payload: MealCreateText,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
 ) -> Meal:
     """Logs a meal by parsing free-form written text."""
     # 0. Idempotency: return the existing meal on a repeat request id.
@@ -234,7 +246,11 @@ async def log_meal_via_text(
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
-    user_context = await _build_user_context(db, current_user)
+    user_context = await _build_user_context(
+        db,
+        current_user,
+        _primary_locale(accept_language),
+    )
 
     # 2. Fetch calorie estimation from AI Orchestrator
     estimation = await ai_service.estimate_from_text(
@@ -263,6 +279,7 @@ async def log_meal_via_photo(
     payload: MealCreatePhoto,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
 ) -> Meal:
     """Logs a meal by analyzing an image URL with optional text description."""
     # 0. Idempotency: return the existing meal on a repeat request id.
@@ -273,7 +290,11 @@ async def log_meal_via_photo(
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
-    user_context = await _build_user_context(db, current_user)
+    user_context = await _build_user_context(
+        db,
+        current_user,
+        _primary_locale(accept_language),
+    )
 
     # 2. Fetch calorie estimation using Multimodal Vision AI
     estimation = await ai_service.estimate_from_image(
@@ -285,7 +306,7 @@ async def log_meal_via_photo(
     )
 
     # 3. Build and commit entities
-    raw_desc = payload.text if payload.text else "Multimodal image scan"
+    raw_desc = estimation.meal_name.strip() or (payload.text or "Meal photo")
     meal = await _process_and_save_meal(
         db=db,
         user=current_user,
@@ -304,6 +325,7 @@ async def log_meal_via_voice(
     payload: MealCreateVoice,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
 ) -> Meal:
     """Logs a meal by transcribing a recorded audio file URL and parsing the text."""
     # 0. Idempotency: return the existing meal on a repeat request id.
@@ -314,7 +336,11 @@ async def log_meal_via_voice(
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
-    user_context = await _build_user_context(db, current_user)
+    user_context = await _build_user_context(
+        db,
+        current_user,
+        _primary_locale(accept_language),
+    )
 
     # 2. Transcribe voice note and estimate caloric components
     transcript, estimation = await ai_service.estimate_from_voice(
@@ -370,6 +396,7 @@ async def refine_meal_estimate(
     payload: MealRefineRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
 ) -> dict:
     """Conversationally revises an existing AI meal estimate without saving it to the meal."""
     meal_repo = MealRepository(db)
@@ -382,7 +409,11 @@ async def refine_meal_estimate(
         )
 
     ai_service = AICalorieEstimationService(db)
-    user_context = await _build_user_context(db, current_user)
+    user_context = await _build_user_context(
+        db,
+        current_user,
+        _primary_locale(accept_language),
+    )
     previous_items = _meal_items_payload(meal)
     user_refinement = payload.user_refinement
 

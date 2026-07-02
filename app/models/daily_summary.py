@@ -15,6 +15,7 @@ class DailySummary(Base):
     consumed_calories: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     burned_calories: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     remaining_calories: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    water_glasses: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="daily_summaries")

@@ -144,12 +144,15 @@ async def test_log_meal_via_text(client: AsyncClient, mock_estimation_result) ->
 @pytest.mark.asyncio
 async def test_log_meal_via_photo(client: AsyncClient, mock_estimation_result) -> None:
     """Tests POST /api/v1/meals/photo using a mocked vision calorie estimation service."""
-    headers = {"Authorization": "Bearer mock_token_photo_test"}
+    headers = {
+        "Authorization": "Bearer mock_token_photo_test",
+        "Accept-Language": "it-IT,it;q=0.9",
+    }
     await client.get("/api/v1/users/me", headers=headers)
 
     # Change source_type for photo
     mock_estimation_result.source_type = "photo"
-    payload = {"image_url": "https://storage.googleapis.com/calry/photo.jpg", "text": "dinner"}
+    payload = {"image_url": "https://storage.googleapis.com/calry/photo.jpg"}
 
     with patch(
         "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_image",
@@ -163,7 +166,9 @@ async def test_log_meal_via_photo(client: AsyncClient, mock_estimation_result) -
         meal = response.json()
         assert meal["source_type"] == "photo"
         assert meal["meal_name"] == "Spaghetti al pomodoro"
+        assert meal["original_input"] == "Spaghetti al pomodoro"
         assert meal["image_url"] == "https://storage.googleapis.com/calry/photo.jpg"
+        assert mock_est.call_args.kwargs["user_context"].locale == "it"
 
 
 @pytest.mark.asyncio

@@ -53,6 +53,15 @@ from app.core.config import settings
 
 logger = logging.getLogger("app.ai.openrouter")
 
+_LANGUAGE_NAMES = {
+    "en": "English",
+    "it": "Italian",
+    "es": "Spanish",
+    "zh": "Chinese",
+    "ja": "Japanese",
+    "ar": "Arabic",
+}
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # C7: a single connection-pooled client reused across all calls (and across the
@@ -96,6 +105,17 @@ class OpenRouterProvider(BaseAIProvider):
             return ""
 
         context_parts = []
+        if user_context.locale:
+            primary = user_context.locale.split("-")[0].split("_")[0].strip().lower()
+            output_lang = _LANGUAGE_NAMES.get(primary, "English")
+            context_parts.append(
+                "Output Language: "
+                f"{output_lang}. Write all free-text JSON fields in {output_lang}: "
+                "meal_name, item names, quantity_estimate, assumptions, "
+                "clarifying_question, ai_summary, and changes_made. Keep enum "
+                "values such as confidence/source_type in lowercase English exactly "
+                "as specified by the schema."
+            )
         if user_context.sex or user_context.age or user_context.height_cm or user_context.weight_kg:
             profile = []
             if user_context.sex:
@@ -713,11 +733,10 @@ class OpenRouterProvider(BaseAIProvider):
             f"Meals Eaten Today: {', '.join(completion_req.meals_eaten_today) if completion_req.meals_eaten_today else 'None'}"
         )
 
-        lang_map = {"it": "Italian", "es": "Spanish", "zh": "Chinese", "ja": "Japanese", "ar": "Arabic", "en": "English"}
         output_lang = "English"
         if user_context and user_context.locale:
             primary = user_context.locale.split("-")[0].split("_")[0].strip().lower()
-            output_lang = lang_map.get(primary, "English")
+            output_lang = _LANGUAGE_NAMES.get(primary, "English")
 
         messages = [
             {

@@ -1,6 +1,6 @@
 import datetime as dt
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DailySummaryResponse(BaseModel):
@@ -12,3 +12,10 @@ class DailySummaryResponse(BaseModel):
     consumed_calories: int
     burned_calories: int
     remaining_calories: int
+    water_glasses: int
+
+
+class WaterUpdateRequest(BaseModel):
+    """One tap adds one glass; small negative deltas allow undoing mistaps."""
+
+    delta: int = Field(default=1, ge=-5, le=5)

@@ -8,10 +8,30 @@ from app.dependencies.db import get_db
 from app.models.daily_summary import DailySummary
 from app.models.user import User
 from app.repositories.daily_summary import DailySummaryRepository
-from app.schemas.daily_summary import DailySummaryResponse
+from app.schemas.daily_summary import DailySummaryResponse, WaterUpdateRequest
 from app.services.summary import SummaryService
 
 router = APIRouter()
+
+
+@router.post("/water", response_model=DailySummaryResponse)
+async def log_water(
+    payload: WaterUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DailySummary:
+    """Adjusts today's water-glass count by a small delta (one tap = one glass).
+
+    The count never goes below zero. Water is a lightweight awareness counter,
+    not a tracked goal, so there is no target or validation beyond sane deltas.
+    """
+    today = dt.date.today()
+    summary_service = SummaryService(db)
+
+    summary = await summary_service.sync_daily_summary(current_user.id, today)
+    summary.water_glasses = max(0, summary.water_glasses + payload.delta)
+    await db.flush()
+    return summary
 
 
 @router.get("/today", response_model=DailySummaryResponse)
