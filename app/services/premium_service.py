@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.premium import PremiumStatusResponse, PremiumSyncRequest
@@ -24,6 +25,13 @@ class PremiumService:
 
     async def get_premium_status(self, user: User) -> PremiumStatusResponse:
         """Returns verified premium status info from the local database context."""
+        if settings.PREMIUM_BYPASS:
+            return PremiumStatusResponse(
+                is_premium=True,
+                entitlement="premium",
+                expires_at=None,
+                source="bypass",
+            )
         return PremiumStatusResponse(
             is_premium=user.is_premium,
             entitlement=user.premium_entitlement,

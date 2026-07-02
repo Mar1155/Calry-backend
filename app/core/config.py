@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # only changes via server-to-server events.
     REVENUECAT_WEBHOOK_SECRET: str | None = None
 
+    # Tester deployments: treat every authenticated user as premium, so testers
+    # never pay. Pair with the app-side PREMIUM_BYPASS dart-define. Must stay
+    # False on the real production deployment.
+    PREMIUM_BYPASS: bool = False
+
     # AI API keys
     OPENROUTER_API_KEY: str | None = None
     DEFAULT_AI_PROVIDER: str = "openrouter"

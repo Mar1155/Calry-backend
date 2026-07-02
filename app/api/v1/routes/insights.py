@@ -8,6 +8,7 @@ from sqlalchemy.future import select
 
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.services.correction_context_service import AICorrectionContextService
+from app.core.config import settings
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.daily_summary import DailySummary
@@ -25,7 +26,7 @@ async def get_weekly_report(
     db: AsyncSession = Depends(get_db),
 ) -> WeeklyReportResponse:
     """Computes weekly caloric stats and generates a real AI observation."""
-    if not current_user.is_premium:
+    if not current_user.is_premium and not settings.PREMIUM_BYPASS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Calry Premium subscription required to view weekly reports.",
@@ -117,7 +118,7 @@ async def get_pattern_insights(
     db: AsyncSession = Depends(get_db),
 ) -> PatternInsightsResponse:
     """Returns real AI-generated pattern insights from the user's tracking history."""
-    if not current_user.is_premium:
+    if not current_user.is_premium and not settings.PREMIUM_BYPASS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Calry Premium subscription required to view AI pattern insights.",
