@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     FIREBASE_PROJECT_ID: str = "calry-62362"
     FIREBASE_CREDENTIALS: str | None = None
 
+    # RevenueCat webhook shared secret. Required in production so billing state
+    # only changes via server-to-server events.
+    REVENUECAT_WEBHOOK_SECRET: str | None = None
+
     # AI API keys
     OPENROUTER_API_KEY: str | None = None
     DEFAULT_AI_PROVIDER: str = "openrouter"

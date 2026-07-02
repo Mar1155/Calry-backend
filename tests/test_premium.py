@@ -1,5 +1,6 @@
 import datetime as dt
 import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,28 @@ async def test_premium_sync_and_status(client: AsyncClient) -> None:
     assert status_response2.status_code == 200
     assert status_response2.json()["is_premium"] is True
     assert status_response2.json()["entitlement"] == "premium"
+
+
+@pytest.mark.asyncio
+async def test_premium_sync_is_disabled_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies client-driven premium sync cannot mutate billing state in production."""
+    from app.core.config import settings
+    from app.api.v1.routes.premium import sync_premium_status
+    from app.schemas.premium import PremiumSyncRequest
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    sync_payload = PremiumSyncRequest(
+        is_premium=True,
+        entitlement="premium",
+        expires_at=dt.datetime(2030, 1, 1, tzinfo=dt.UTC),
+        revenuecat_app_user_id="premium_sync_prod_test_uid",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sync_premium_status(sync_payload, current_user=None, db=None)  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Premium status is managed by RevenueCat webhooks in production."
 
 
 @pytest.mark.asyncio
