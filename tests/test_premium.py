@@ -26,20 +26,20 @@ async def test_premium_sync_and_status(client: AsyncClient) -> None:
     # 3. Synchronize premium status from RevenueCat client payload
     sync_payload = {
         "is_premium": True,
-        "entitlement": "premium",
+        "entitlement": "Calry Pro",
         "expires_at": "2030-01-01T00:00:00Z",
         "revenuecat_app_user_id": "premium_sync_test_uid",
     }
     sync_response = await client.post("/api/v1/premium/sync", json=sync_payload, headers=headers)
     assert sync_response.status_code == 200
     assert sync_response.json()["is_premium"] is True
-    assert sync_response.json()["entitlement"] == "premium"
+    assert sync_response.json()["entitlement"] == "Calry Pro"
 
     # 4. Verify updated status
     status_response2 = await client.get("/api/v1/premium/status", headers=headers)
     assert status_response2.status_code == 200
     assert status_response2.json()["is_premium"] is True
-    assert status_response2.json()["entitlement"] == "premium"
+    assert status_response2.json()["entitlement"] == "Calry Pro"
 
 
 @pytest.mark.asyncio
@@ -52,7 +52,7 @@ async def test_premium_sync_is_disabled_in_production(monkeypatch: pytest.Monkey
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     sync_payload = PremiumSyncRequest(
         is_premium=True,
-        entitlement="premium",
+        entitlement="Calry Pro",
         expires_at=dt.datetime(2030, 1, 1, tzinfo=dt.UTC),
         revenuecat_app_user_id="premium_sync_prod_test_uid",
     )
@@ -110,7 +110,7 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
     # 3. Elevate user to premium status
     sync_payload = {
         "is_premium": True,
-        "entitlement": "premium",
+        "entitlement": "Calry Pro",
         "expires_at": "2030-01-01T00:00:00Z",
         "revenuecat_app_user_id": "premium_user_uid",
     }

@@ -43,7 +43,7 @@ def _webhook_payload(
         "type": event_type,
         "app_user_id": app_user_id,
         "product_id": "calry_premium_monthly",
-        "entitlement_ids": ["premium"] if entitlement_ids is None else entitlement_ids,
+        "entitlement_ids": ["Calry Pro"] if entitlement_ids is None else entitlement_ids,
         "transaction_id": "tx-1000",
         "original_transaction_id": "tx-0999",
         "expiration_at_ms": expiration_at_ms,
@@ -60,7 +60,7 @@ def _subscriber_payload(expires_date: str | None, product: str = "calry_premium_
         "request_date": _iso(0),
         "subscriber": {
             "entitlements": {
-                "premium": {
+                "Calry Pro": {
                     "expires_date": expires_date,
                     "product_identifier": product,
                     "purchase_date": _iso(-1),
@@ -134,7 +134,7 @@ async def test_initial_purchase_sets_premium_from_api(
 
     await db_session.refresh(user)
     assert user.is_premium is True
-    assert user.premium_entitlement == "premium"
+    assert user.premium_entitlement == "Calry Pro"
     assert user.premium_expires_at is not None
     assert user.revenuecat_app_user_id == uid
     assert user.premium_store == "app_store"
@@ -164,7 +164,7 @@ async def test_expiration_clears_premium(
     uid = "rc-expiration-uid"
     user = await _create_user(db_session, uid)
     user.is_premium = True
-    user.premium_entitlement = "premium"
+    user.premium_entitlement = "Calry Pro"
     await db_session.commit()
 
     _mock_rc_api(monkeypatch, _subscriber_payload(expires_date=_iso(-1)))
@@ -188,7 +188,7 @@ async def test_cancellation_keeps_premium_until_period_end(
     uid = "rc-cancellation-uid"
     user = await _create_user(db_session, uid)
     user.is_premium = True
-    user.premium_entitlement = "premium"
+    user.premium_entitlement = "Calry Pro"
     await db_session.commit()
 
     # RevenueCat still reports an active entitlement (expires in the future).
@@ -262,7 +262,7 @@ async def test_payload_fallback_expiration_clears_premium(
     uid = "rc-payload-expiration-uid"
     user = await _create_user(db_session, uid)
     user.is_premium = True
-    user.premium_entitlement = "premium"
+    user.premium_entitlement = "Calry Pro"
     await db_session.commit()
 
     response = await client.post(

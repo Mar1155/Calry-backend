@@ -28,7 +28,7 @@ class PremiumService:
         if settings.PREMIUM_BYPASS:
             return PremiumStatusResponse(
                 is_premium=True,
-                entitlement="premium",
+                entitlement=settings.REVENUECAT_ENTITLEMENT_ID,
                 expires_at=None,
                 source="bypass",
             )

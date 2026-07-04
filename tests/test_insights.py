@@ -37,7 +37,7 @@ async def test_insights_success_for_premium_users(client: AsyncClient, db_sessio
 
     sync_payload = {
         "is_premium": True,
-        "entitlement": "premium",
+        "entitlement": "Calry Pro",
         "expires_at": "2030-01-01T00:00:00Z",
         "revenuecat_app_user_id": "premium_insights_uid",
     }

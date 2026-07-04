@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # webhook falls back to payload-derived state (logged as such).
     REVENUECAT_API_KEY: str | None = None
     # Entitlement identifier configured in the RevenueCat dashboard.
-    REVENUECAT_ENTITLEMENT_ID: str = "premium"
+    REVENUECAT_ENTITLEMENT_ID: str = "Calry Pro"
     REVENUECAT_API_TIMEOUT_SECONDS: float = 10.0
     REVENUECAT_API_MAX_RETRIES: int = 2
 
