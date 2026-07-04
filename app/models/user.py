@@ -26,6 +26,9 @@ class User(Base):
     premium_entitlement: Mapped[str | None] = mapped_column(String(255), nullable=True)
     premium_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revenuecat_app_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Store the entitlement came from ("app_store", "play_store", ...) and the product bought.
+    premium_store: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    premium_product_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Macro goals (premium feature)
     daily_protein_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
     daily_carbs_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)

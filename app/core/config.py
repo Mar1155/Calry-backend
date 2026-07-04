@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     # only changes via server-to-server events.
     REVENUECAT_WEBHOOK_SECRET: str | None = None
 
+    # RevenueCat secret REST API key (sk_...). When set, every webhook triggers a
+    # GET /subscribers/{app_user_id} verification so is_premium reflects the real
+    # entitlement state instead of trusting the webhook payload. When unset, the
+    # webhook falls back to payload-derived state (logged as such).
+    REVENUECAT_API_KEY: str | None = None
+    # Entitlement identifier configured in the RevenueCat dashboard.
+    REVENUECAT_ENTITLEMENT_ID: str = "premium"
+    REVENUECAT_API_TIMEOUT_SECONDS: float = 10.0
+    REVENUECAT_API_MAX_RETRIES: int = 2
+
     # Tester deployments: treat every authenticated user as premium, so testers
     # never pay. Pair with the app-side PREMIUM_BYPASS dart-define. Must stay
     # False on the real production deployment.

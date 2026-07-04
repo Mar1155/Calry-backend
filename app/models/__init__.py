@@ -5,6 +5,7 @@ from app.models.daily_summary import DailySummary
 from app.models.food_memory import UserFoodMemory
 from app.models.inference import AIInferenceLog
 from app.models.meal import Meal, MealItem, MealRevision
+from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.user import User
 
 __all__ = [
@@ -18,4 +19,6 @@ __all__ = [
     "DailySummary",
     "AIInferenceLog",
     "UserFoodMemory",
+    "RevenueCatEvent",
+    "RevenueCatSubscriberSnapshot",
 ]

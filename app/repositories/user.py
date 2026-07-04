@@ -25,6 +25,12 @@ class UserRepository(BaseRepository[User]):
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_revenuecat_app_user_id(self, app_user_id: str) -> User | None:
+        """Looks up a user by the RevenueCat app_user_id stored on a previous sync."""
+        stmt = select(User).where(User.revenuecat_app_user_id == app_user_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def update_user_premium_status(
         self,
         user: User,
@@ -32,12 +38,16 @@ class UserRepository(BaseRepository[User]):
         premium_entitlement: str | None,
         premium_expires_at: dt.datetime | None,
         revenuecat_app_user_id: str | None,
+        premium_store: str | None = None,
+        premium_product_id: str | None = None,
     ) -> User:
         """Updates the subscription metadata for the user."""
         user.is_premium = is_premium
         user.premium_entitlement = premium_entitlement
         user.premium_expires_at = premium_expires_at
         user.revenuecat_app_user_id = revenuecat_app_user_id
+        user.premium_store = premium_store
+        user.premium_product_id = premium_product_id
 
         self.db.add(user)
         await self.db.flush()
