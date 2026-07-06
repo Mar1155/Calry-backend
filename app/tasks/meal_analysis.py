@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.core.config import settings
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.models.meal import Meal
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.user import User
@@ -36,6 +36,11 @@ async def _run_photo_analysis_with_cleanup(job_id: str) -> int | None:
         from app.ai.providers.openrouter import close_shared_client
 
         await close_shared_client()
+        # asyncio.run() opens/closes a fresh event loop per task, but `engine`'s
+        # pooled connections are bound to whichever loop created them. Dispose
+        # here (same loop) so the next asyncio.run() call starts a clean pool
+        # instead of reusing connections tied to an already-closed loop.
+        await engine.dispose()
 
 
 async def _run_photo_analysis(job_id: str) -> int | None:
@@ -100,30 +105,36 @@ async def _get_job(db, job_id: str) -> MealAnalysisJob | None:
 
 
 async def _mark_job_queued(job_id: str, error: str) -> None:
-    async with SessionLocal() as db:
-        job = await _get_job(db, job_id)
-        if job is None or job.status == "completed":
-            return
-        job.status = "queued"
-        job.error_message = error[:2000]
-        await db.commit()
+    try:
+        async with SessionLocal() as db:
+            job = await _get_job(db, job_id)
+            if job is None or job.status == "completed":
+                return
+            job.status = "queued"
+            job.error_message = error[:2000]
+            await db.commit()
+    finally:
+        await engine.dispose()
 
 
 async def _mark_job_failed(job_id: str, error: str) -> None:
-    async with SessionLocal() as db:
-        job = await _get_job(db, job_id)
-        if job is None or job.status == "completed":
-            return
+    try:
+        async with SessionLocal() as db:
+            job = await _get_job(db, job_id)
+            if job is None or job.status == "completed":
+                return
 
-        existing_meal = await _find_existing_meal(db, job.user_id, job.client_request_id)
-        if existing_meal is not None:
-            job.status = "completed"
-            job.meal_id = existing_meal.id
-            job.completed_at = dt.datetime.now(dt.UTC)
-        else:
-            job.status = "failed"
-            job.error_message = error[:2000]
-        await db.commit()
+            existing_meal = await _find_existing_meal(db, job.user_id, job.client_request_id)
+            if existing_meal is not None:
+                job.status = "completed"
+                job.meal_id = existing_meal.id
+                job.completed_at = dt.datetime.now(dt.UTC)
+            else:
+                job.status = "failed"
+                job.error_message = error[:2000]
+            await db.commit()
+    finally:
+        await engine.dispose()
 
 
 async def _find_existing_meal(db, user_id: int, client_request_id: str | None) -> Meal | None:
