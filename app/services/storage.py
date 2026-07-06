@@ -1,5 +1,6 @@
 import shutil
 import uuid
+import mimetypes
 from pathlib import Path
 
 from fastapi import UploadFile
@@ -20,6 +21,14 @@ def _extension_for(file: UploadFile) -> str:
     if "audio" in content_type:
         return ".mp3"
     return ".bin"
+
+
+def _content_type_for(file: UploadFile, key: str) -> str:
+    content_type = file.content_type
+    if content_type and content_type != "application/octet-stream":
+        return content_type
+    guessed_type, _ = mimetypes.guess_type(key)
+    return guessed_type or "application/octet-stream"
 
 
 def _s3_public_url(key: str) -> str:
@@ -66,7 +75,7 @@ async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
             aws_access_key_id=settings.S3_ACCESS_KEY_ID,
             aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
         )
-        extra_args = {"ContentType": file.content_type or "application/octet-stream"}
+        extra_args = {"ContentType": _content_type_for(file, key)}
         if settings.S3_PUBLIC_READ:
             extra_args["ACL"] = "public-read"
         try:
