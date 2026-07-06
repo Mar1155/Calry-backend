@@ -1,18 +1,18 @@
 import datetime as dt
 import json
 import logging
-import shutil
-import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.meal import Meal, MealItem, MealRevision
+from app.models.meal_analysis import MealAnalysisJob
 from app.models.user import User
 from app.repositories.food_memory import FoodMemoryRepository
 from app.repositories.meal import MealRepository
@@ -20,10 +20,14 @@ from app.schemas.meal import (
     MealCreatePhoto,
     MealCreateText,
     MealCreateVoice,
+    MealPhotoAnalysisCreate,
+    MealPhotoAnalysisStartResponse,
+    MealPhotoAnalysisStatusResponse,
     MealRefineRequest,
     MealResponse,
     MealUpdate,
 )
+from app.services.storage import save_upload
 from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.meals")
@@ -151,6 +155,37 @@ async def _find_existing_by_request_id(
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def _find_existing_analysis_by_request_id(
+    db: AsyncSession, user_id: int, client_request_id: str | None
+) -> MealAnalysisJob | None:
+    if not client_request_id:
+        return None
+    stmt = select(MealAnalysisJob).where(
+        MealAnalysisJob.user_id == user_id,
+        MealAnalysisJob.client_request_id == client_request_id,
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def _analysis_status_response(db: AsyncSession, job: MealAnalysisJob) -> MealPhotoAnalysisStatusResponse:
+    meal = None
+    if job.meal_id is not None:
+        result = await db.execute(select(Meal).where(Meal.id == job.meal_id).options(selectinload(Meal.items)))
+        meal = result.scalar_one_or_none()
+    return MealPhotoAnalysisStatusResponse(
+        id=job.id,
+        status=job.status,
+        meal_id=job.meal_id,
+        meal=meal,
+        error_message=job.error_message,
+        attempts=job.attempts,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        completed_at=job.completed_at,
+    )
 
 
 def _meal_items_payload(meal: Meal) -> list[dict]:
@@ -320,6 +355,78 @@ async def log_meal_via_photo(
     return meal
 
 
+@router.post("/photo/analysis", response_model=MealPhotoAnalysisStartResponse, status_code=status.HTTP_202_ACCEPTED)
+async def start_photo_analysis(
+    payload: MealPhotoAnalysisCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
+) -> MealPhotoAnalysisStartResponse:
+    existing_job = await _find_existing_analysis_by_request_id(db, current_user.id, payload.client_request_id)
+    if existing_job is not None:
+        return MealPhotoAnalysisStartResponse(
+            id=existing_job.id,
+            status=existing_job.status,
+            meal_id=existing_job.meal_id,
+        )
+
+    existing_meal = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+    job = MealAnalysisJob(
+        user_id=current_user.id,
+        status="completed" if existing_meal is not None else "queued",
+        source_type="photo",
+        image_url=payload.image_url,
+        text=payload.text,
+        additional_context=payload.additional_context,
+        locale=_primary_locale(accept_language),
+        client_request_id=payload.client_request_id,
+        meal_id=existing_meal.id if existing_meal is not None else None,
+        completed_at=dt.datetime.now(dt.UTC) if existing_meal is not None else None,
+    )
+    db.add(job)
+    await db.flush()
+    await db.commit()
+
+    if existing_meal is None:
+        try:
+            from app.tasks.meal_analysis import analyze_photo_meal
+
+            task = analyze_photo_meal.delay(job.id)
+            job.celery_task_id = task.id
+            await db.commit()
+        except Exception as exc:
+            job.status = "failed"
+            job.error_message = str(exc)
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Meal analysis queue is unavailable. Try again shortly.",
+            )
+
+    return MealPhotoAnalysisStartResponse(id=job.id, status=job.status, meal_id=job.meal_id)
+
+
+@router.get("/photo/analysis/{analysis_id}", response_model=MealPhotoAnalysisStatusResponse)
+async def get_photo_analysis(
+    analysis_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MealPhotoAnalysisStatusResponse:
+    result = await db.execute(
+        select(MealAnalysisJob).where(
+            MealAnalysisJob.id == analysis_id,
+            MealAnalysisJob.user_id == current_user.id,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Meal analysis not found.",
+        )
+    return await _analysis_status_response(db, job)
+
+
 @router.post("/voice", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
 async def log_meal_via_voice(
     payload: MealCreateVoice,
@@ -388,6 +495,15 @@ async def list_meals_on_date(
     """Retrieves all meals logged on a specific calendar date (YYYY-MM-DD)."""
     meal_repo = MealRepository(db)
     return await meal_repo.get_user_meals_on_date(user_id=current_user.id, date_val=date_val)
+
+
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
+async def upload_media(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Uploads a media file and returns a URL usable by AI providers and clients."""
+    return await save_upload(file, current_user.id)
 
 
 @router.post("/{id}/refine", response_model=MealResponse)
@@ -556,34 +672,3 @@ async def delete_meal(
         logger.error(f"Failed to re-sync daily summary after meal deletion: {e}")
 
     return {"message": "Meal entry successfully removed."}
-
-
-UPLOAD_DIR = Path("app/static/uploads")
-
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
-async def upload_media(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-) -> dict:
-    """Uploads a local media file (image/audio) and returns an accessible path.
-
-    Useful for offline/local development or setups without Firebase Storage.
-    """
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-    ext = Path(file.filename).suffix if file.filename else ""
-    if not ext:
-        if "image" in (file.content_type or ""):
-            ext = ".jpg"
-        elif "audio" in (file.content_type or ""):
-            ext = ".mp3"
-        else:
-            ext = ".bin"
-
-    unique_filename = f"{uuid.uuid4()}{ext}"
-    dest_path = UPLOAD_DIR / unique_filename
-
-    with open(dest_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    return {"url": f"/static/uploads/{unique_filename}"}

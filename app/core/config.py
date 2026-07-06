@@ -27,6 +27,23 @@ class Settings(BaseSettings):
     # Must use postgresql+asyncpg:// for SQLAlchemy async connections
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/calry"
 
+    # Redis/Celery background jobs. Railway should run a separate worker service
+    # with start_worker.sh and the same env vars as the API.
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str | None = None
+    MEAL_ANALYSIS_MAX_RETRIES: int = 2
+
+    # Media storage. "local" keeps current app/static/uploads behavior for dev.
+    # "s3" uploads to S3-compatible storage and returns an HTTP URL.
+    STORAGE_BACKEND: Literal["local", "s3"] = "local"
+    S3_BUCKET: str | None = None
+    S3_REGION: str = "us-east-1"
+    S3_ENDPOINT_URL: str | None = None
+    S3_ACCESS_KEY_ID: str | None = None
+    S3_SECRET_ACCESS_KEY: str | None = None
+    S3_PUBLIC_URL_BASE: str | None = None
+    S3_PUBLIC_READ: bool = False
+
     # Firebase configuration
     FIREBASE_PROJECT_ID: str = "calry-62362"
     FIREBASE_CREDENTIALS: str | None = None

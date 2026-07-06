@@ -43,6 +43,16 @@ class MealCreatePhoto(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=64)
 
 
+class MealPhotoAnalysisCreate(MealCreatePhoto):
+    pass
+
+
+class MealPhotoAnalysisStartResponse(BaseModel):
+    id: str
+    status: Literal["queued", "processing", "completed", "failed"]
+    meal_id: int | None = None
+
+
 class MealCreateVoice(BaseModel):
     audio_url: str = Field(..., min_length=5, max_length=1024)
     # Optional pre-transcribed text if client performs on-device transcription
@@ -129,3 +139,15 @@ class MealResponse(BaseModel):
             if v_lower in ("low", "medium", "high"):
                 return v_lower
         return None
+
+
+class MealPhotoAnalysisStatusResponse(BaseModel):
+    id: str
+    status: Literal["queued", "processing", "completed", "failed"]
+    meal_id: int | None = None
+    meal: MealResponse | None = None
+    error_message: str | None = None
+    attempts: int = 0
+    created_at: dt.datetime
+    updated_at: dt.datetime
+    completed_at: dt.datetime | None = None

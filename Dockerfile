@@ -36,7 +36,7 @@ COPY --from=builder /opt/venv /opt/venv
 # Copy the application source (.dockerignore keeps secrets/venv/junk out).
 COPY . .
 
-RUN chmod +x ./start.sh && chown -R appuser:appuser /app
+RUN chmod +x ./start.sh ./start_worker.sh && chown -R appuser:appuser /app
 USER appuser
 
 # Informational only — Railway routes traffic to $PORT, which start.sh honors.

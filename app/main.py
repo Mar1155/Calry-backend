@@ -1,4 +1,5 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -74,6 +75,29 @@ app.add_middleware(
 static_dir = Path("app/static")
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.perf_counter()
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        client_host = request.client.host if request.client else "unknown"
+
+        logger.info(
+            "request method=%s path=%s status_code=%s duration_ms=%.2f client=%s",
+            request.method,
+            request.url.path,
+            status_code,
+            duration_ms,
+            client_host,
+        )
 
 
 # Global custom exception handler for CalryException

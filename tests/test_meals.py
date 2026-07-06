@@ -1,10 +1,10 @@
-import pytest
-import datetime as dt
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.ai.schemas.meal_estimate import MealEstimateResult, MealEstimateItem, SpeechTranscriptionResult
+from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult
 from app.ai.services.validation_service import AIValidationService
 from app.models.meal import MealRevision
 
@@ -130,7 +130,7 @@ async def test_log_meal_via_text(client: AsyncClient, mock_estimation_result) ->
 
         response = await client.post("/api/v1/meals/text", json=payload, headers=headers)
         assert response.status_code == 201
-        
+
         meal = response.json()
         assert meal["source_type"] == "text"
         assert meal["meal_name"] == "Spaghetti al pomodoro"
@@ -162,13 +162,68 @@ async def test_log_meal_via_photo(client: AsyncClient, mock_estimation_result) -
 
         response = await client.post("/api/v1/meals/photo", json=payload, headers=headers)
         assert response.status_code == 201
-        
+
         meal = response.json()
         assert meal["source_type"] == "photo"
         assert meal["meal_name"] == "Spaghetti al pomodoro"
         assert meal["original_input"] == "Spaghetti al pomodoro"
         assert meal["image_url"] == "https://storage.googleapis.com/calry/photo.jpg"
         assert mock_est.call_args.kwargs["user_context"].locale == "it"
+
+
+@pytest.mark.asyncio
+async def test_start_photo_analysis_queues_job(client: AsyncClient) -> None:
+    headers = {"Authorization": "Bearer mock_token_photo_analysis"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    class DummyTask:
+        id = "celery-task-1"
+
+    with patch("app.tasks.meal_analysis.analyze_photo_meal.delay", return_value=DummyTask()) as mock_delay:
+        response = await client.post(
+            "/api/v1/meals/photo/analysis",
+            json={
+                "image_url": "https://storage.googleapis.com/calry/photo.jpg",
+                "text": "pizza",
+                "client_request_id": "analysis-test-1",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["status"] == "queued"
+    assert data["meal_id"] is None
+    mock_delay.assert_called_once_with(data["id"])
+
+    status_response = await client.get(f"/api/v1/meals/photo/analysis/{data['id']}", headers=headers)
+    assert status_response.status_code == 200
+    status_data = status_response.json()
+    assert status_data["status"] == "queued"
+    assert status_data["meal"] is None
+
+
+@pytest.mark.asyncio
+async def test_start_photo_analysis_is_idempotent(client: AsyncClient) -> None:
+    headers = {"Authorization": "Bearer mock_token_photo_analysis_idempotent"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    class DummyTask:
+        id = "celery-task-1"
+
+    payload = {
+        "image_url": "https://storage.googleapis.com/calry/photo.jpg",
+        "client_request_id": "analysis-test-2",
+    }
+
+    with patch("app.tasks.meal_analysis.analyze_photo_meal.delay", return_value=DummyTask()) as mock_delay:
+        first = await client.post("/api/v1/meals/photo/analysis", json=payload, headers=headers)
+        second = await client.post("/api/v1/meals/photo/analysis", json=payload, headers=headers)
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["id"] == second.json()["id"]
+    mock_delay.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -191,7 +246,7 @@ async def test_log_meal_via_voice(client: AsyncClient, mock_estimation_result) -
 
         response = await client.post("/api/v1/meals/voice", json=payload, headers=headers)
         assert response.status_code == 201
-        
+
         meal = response.json()
         assert meal["source_type"] == "voice"
         assert meal["audio_url"] == "https://storage.googleapis.com/calry/voice.mp3"
@@ -225,16 +280,16 @@ async def test_meal_correction_tracking(client: AsyncClient, mock_estimation_res
 
     response = await client.patch(f"/api/v1/meals/{meal_id}", json=update_payload, headers=headers)
     assert response.status_code == 200
-    
+
     updated_meal = response.json()
     assert updated_meal["confirmed_calories"] == 950
     assert updated_meal["meal_name"] == "Spaghetti Bolognese"
-    
+
     # 3. Retrieve directly from DB using get endpoint to check DB-only correction fields
     get_res = await client.get(f"/api/v1/meals/{meal_id}", headers=headers)
     assert get_res.status_code == 200
     db_meal = get_res.json()
-    
+
     # confirmed_at should exist
     assert db_meal["confirmed_at"] is not None
     # 950 - 850 = 100

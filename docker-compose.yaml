@@ -8,6 +8,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/calry_db
+      REDIS_URL: redis://redis:6379/0
       PORT: 8000
     ports:
       - "8000:8000"
@@ -20,6 +21,36 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    image: python:3.12-slim
+    container_name: calry_worker
+    working_dir: /app
+    restart: always
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/calry_db
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - .:/app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt
+      && ./start_worker.sh"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    container_name: calry_redis
+    restart: always
+    ports:
+      - "6379:6379"
 
   db:
     image: postgres:16-alpine # Versione stabile e leggera

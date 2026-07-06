@@ -12,6 +12,7 @@ This is the production-ready backend foundation for **Calry**, a modern AI-first
 *   **Serialization & Settings:** [Pydantic V2](https://docs.pydantic.dev/) & `pydantic-settings`
 *   **Authentication:** [Firebase Authentication](https://firebase.google.com/) JWT verification (with zero-config local development mock fallback)
 *   **Storage:** [Firebase Storage](https://firebase.google.com/) (media URLs)
+*   **Background Jobs:** Celery + Redis for resilient long-running photo analysis
 *   **AI Integration:** Multimodal [Google Gemini 1.5 Flash](https://deepmind.google/technologies/gemini/) & [OpenAI GPT-4o](https://openai.com/) adapters (with deterministic mock engines when API keys are absent)
 *   **Tooling:** [Ruff](https://github.com/astral-sh/ruff) (Linter), [Black](https://github.com/psf/black) (Formatter), [Pytest](https://docs.pytest.org/) (Async testing)
 
@@ -73,6 +74,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 Open [http://localhost:8000/docs](http://localhost:8000/docs) in your browser to view the interactive OpenAPI documentation!
 
+For asynchronous photo analysis, also run Redis and the Celery worker:
+```bash
+redis-server
+./start_worker.sh
+```
+
 ---
 
 ## Running Tests
@@ -96,8 +103,9 @@ Deployment is containerized and declarative. The repo ships:
 
 ### 1. Provision
 
-1. Create a Railway project and add the **PostgreSQL** plugin.
-2. Add a service from this repo's `calry_backend` directory. Railway auto-detects `railway.json` + `Dockerfile` — no Nixpacks, no manual build/start command needed.
+1. Create a Railway project and add **PostgreSQL** and **Redis**.
+2. Add an API service from this repo's `calry_backend` directory. Railway auto-detects `railway.json` + `Dockerfile`.
+3. Add a second service from the same directory for the worker and set its start command to `./start_worker.sh`.
 
 ### 2. Environment variables
 
@@ -108,6 +116,11 @@ Set these in the service's **Variables** tab:
 | `ENVIRONMENT` | `production` | Hides internal error detail; production behavior |
 | `LOG_LEVEL` | `info` | Log verbosity |
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Reference the Postgres plugin; app auto-rewrites to the async driver |
+| `REDIS_URL` | `${{Redis.REDIS_URL}}` | Celery broker/result backend for background analysis |
+| `STORAGE_BACKEND` | `s3` | Stores uploads outside the Railway container |
+| `S3_BUCKET` / `S3_REGION` | your bucket settings | S3-compatible storage target |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | credentials | S3 upload credentials |
+| `S3_PUBLIC_URL_BASE` | CDN/custom domain URL | Public base used in returned media URLs |
 | `ALLOWED_ORIGINS` | `https://app.calry.ai` | Explicit CORS origins (enables credentials). Comma-separated; omit/`*` for all |
 | `OPENROUTER_API_KEY` | `your-openrouter-key` | Enables AI calorie estimation via OpenRouter |
 | `DEFAULT_AI_PROVIDER` | `openrouter` | Default AI engine |
@@ -124,5 +137,5 @@ railway up
 ```
 Railway builds the image, runs migrations via `start.sh`, and waits for `/api/v1/health` to report healthy before routing traffic.
 
-### ⚠️ Persistent uploads
-`/static` is written to the container's **ephemeral** filesystem — files are lost on every redeploy/restart. The Flutter client already uses **Firebase Storage**; route production media uploads there (or a Railway Volume / S3) rather than local disk.
+### Persistent uploads
+Use `STORAGE_BACKEND=s3` in production. `/static` local uploads remain for development only and are lost on redeploy/restart.
