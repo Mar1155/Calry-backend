@@ -1,7 +1,13 @@
 #!/usr/bin/env sh
-# Production entrypoint: apply DB migrations, then serve.
-# `exec` hands PID 1 to uvicorn so Railway's SIGTERM reaches it for clean shutdown.
+# Production entrypoint used by Railway for both API and worker services.
+# Set CALRY_PROCESS=worker on the worker service; default is API.
+# `exec` hands PID 1 to the child process so Railway's SIGTERM reaches it.
 set -e
+
+if [ "${CALRY_PROCESS:-api}" = "worker" ]; then
+  echo "==> Starting Celery worker"
+  exec celery -A app.worker.celery_app.celery_app worker --loglevel="${LOG_LEVEL:-info}"
+fi
 
 echo "==> Applying database migrations (alembic upgrade head)"
 alembic upgrade head

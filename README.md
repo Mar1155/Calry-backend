@@ -105,7 +105,7 @@ Deployment is containerized and declarative. The repo ships:
 
 1. Create a Railway project and add **PostgreSQL** and **Redis**.
 2. Add an API service from this repo's `calry_backend` directory. Railway auto-detects `railway.json` + `Dockerfile`.
-3. Add a second service from the same directory for the worker and set its start command to `./start_worker.sh`.
+3. Add a second service from the same directory for the worker. It can use the same `railway.json`; set `CALRY_PROCESS=worker` on that service.
 
 ### 2. Environment variables
 
@@ -114,6 +114,7 @@ Set these in the service's **Variables** tab:
 | Variable | Value | Purpose |
 | :--- | :--- | :--- |
 | `ENVIRONMENT` | `production` | Hides internal error detail; production behavior |
+| `CALRY_PROCESS` | `api` for API, `worker` for worker | Selects Uvicorn or Celery inside `start.sh` |
 | `LOG_LEVEL` | `info` | Log verbosity |
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Reference the Postgres plugin; app auto-rewrites to the async driver |
 | `REDIS_URL` | `${{Redis.REDIS_URL}}` | Celery broker/result backend for background analysis |
@@ -135,7 +136,7 @@ Push to the connected branch, or use the CLI:
 ```bash
 railway up
 ```
-Railway builds the image, runs migrations via `start.sh`, and waits for `/api/v1/health` to report healthy before routing traffic.
+Railway builds the image and runs `start.sh`. API services apply migrations and start Uvicorn; worker services with `CALRY_PROCESS=worker` start Celery and skip migrations.
 
 ### Persistent uploads
 Use `STORAGE_BACKEND=s3` in production. `/static` local uploads remain for development only and are lost on redeploy/restart.
