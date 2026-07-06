@@ -104,7 +104,7 @@ Deployment is containerized and declarative. The repo ships:
 ### 1. Provision
 
 1. Create a Railway project and add **PostgreSQL** and **Redis**.
-2. Add an API service from this repo's `calry_backend` directory. Railway auto-detects `railway.json` + `Dockerfile`.
+2. Add an API service from this repo's `calry_backend` directory. Railway auto-detects `railway.json` + `Dockerfile`. Optional: set its service healthcheck to `/api/v1/health` in the Railway UI.
 3. Add a second service from the same directory for the worker. It can use the same `railway.json`; set `CALRY_PROCESS=worker` on that service.
 
 ### 2. Environment variables
@@ -122,6 +122,7 @@ Set these in the service's **Variables** tab:
 | `S3_BUCKET` / `S3_REGION` | your bucket settings | S3-compatible storage target |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | credentials | S3 upload credentials |
 | `S3_PUBLIC_URL_BASE` | CDN/custom domain URL | Public base used in returned media URLs |
+| `S3_PUBLIC_READ` | `true` | Uploads new media with `public-read` ACL when bucket ACLs are enabled |
 | `ALLOWED_ORIGINS` | `https://app.calry.ai` | Explicit CORS origins (enables credentials). Comma-separated; omit/`*` for all |
 | `OPENROUTER_API_KEY` | `your-openrouter-key` | Enables AI calorie estimation via OpenRouter |
 | `DEFAULT_AI_PROVIDER` | `openrouter` | Default AI engine |
@@ -130,13 +131,32 @@ Set these in the service's **Variables** tab:
 
 > `PORT` is injected by Railway automatically — do **not** set it manually.
 
+For AWS S3 buckets with **Block Public Access** or **Object Ownership: Bucket owner enforced**,
+`public-read` ACLs may be ignored or rejected. In that case keep `S3_PUBLIC_READ=false`
+and add a bucket policy for the upload prefix instead:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadUploads",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::calry-bucket/uploads/*"
+    }
+  ]
+}
+```
+
 ### 3. Deploy
 
 Push to the connected branch, or use the CLI:
 ```bash
 railway up
 ```
-Railway builds the image and runs `start.sh`. API services apply migrations and start Uvicorn; worker services with `CALRY_PROCESS=worker` start Celery and skip migrations.
+Railway builds the image and runs `start.sh`. API services apply migrations and start Uvicorn; worker services with `CALRY_PROCESS=worker` start Celery and skip migrations. Do not configure an HTTP healthcheck on the worker.
 
 ### Persistent uploads
 Use `STORAGE_BACKEND=s3` in production. `/static` local uploads remain for development only and are lost on redeploy/restart.

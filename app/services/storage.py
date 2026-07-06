@@ -57,6 +57,7 @@ async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
 
     def upload() -> None:
         import boto3
+        from botocore.exceptions import ClientError
 
         client = boto3.client(
             "s3",
@@ -68,7 +69,28 @@ async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
         extra_args = {"ContentType": file.content_type or "application/octet-stream"}
         if settings.S3_PUBLIC_READ:
             extra_args["ACL"] = "public-read"
-        client.upload_fileobj(file.file, settings.S3_BUCKET, key, ExtraArgs=extra_args)
+        try:
+            client.upload_fileobj(
+                file.file,
+                settings.S3_BUCKET,
+                key,
+                ExtraArgs=extra_args,
+            )
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            code = error.get("Code", "Unknown")
+            message = error.get("Message", str(exc))
+            if settings.S3_PUBLIC_READ and code in {
+                "AccessControlListNotSupported",
+                "AccessDenied",
+                "InvalidRequest",
+            }:
+                raise RuntimeError(
+                    "S3 upload could not apply public-read ACL. Disable S3_PUBLIC_READ "
+                    "and add a bucket policy that allows public s3:GetObject on uploads/*, "
+                    "or allow object ACLs for this bucket."
+                ) from exc
+            raise RuntimeError(f"S3 upload failed ({code}): {message}") from exc
 
     await run_in_threadpool(upload)
     return {"url": _s3_public_url(key), "storage": "s3", "key": key}

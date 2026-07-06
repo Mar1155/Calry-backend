@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY_ID: str | None = None
     S3_SECRET_ACCESS_KEY: str | None = None
     S3_PUBLIC_URL_BASE: str | None = None
-    S3_PUBLIC_READ: bool = False
+    S3_PUBLIC_READ: bool = True
 
     # Firebase configuration
     FIREBASE_PROJECT_ID: str = "calry-62362"
