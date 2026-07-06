@@ -1,9 +1,13 @@
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.premium import PremiumStatusResponse, PremiumSyncRequest
+
+logger = logging.getLogger("app.services.premium")
 
 
 class PremiumService:
@@ -13,6 +17,14 @@ class PremiumService:
 
     async def sync_premium(self, user: User, sync_req: PremiumSyncRequest) -> User:
         """Updates and persists the premium sync data for the active user."""
+        if user.is_premium != sync_req.is_premium:
+            logger.info(
+                "premium status change user_id=%s %s->%s entitlement=%s source=client_sync",
+                user.id,
+                user.is_premium,
+                sync_req.is_premium,
+                sync_req.entitlement,
+            )
         updated_user = await self.user_repo.update_user_premium_status(
             user=user,
             is_premium=sync_req.is_premium,

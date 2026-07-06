@@ -3,6 +3,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import sentry_sdk
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,17 @@ from app.core.exceptions import CalryException
 from app.core.logging import setup_logging
 
 logger = logging.getLogger("app.main")
+
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.ENVIRONMENT,
+        send_default_pii=True,
+        enable_logs=True,
+        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+        profile_session_sample_rate=settings.SENTRY_PROFILE_SESSION_SAMPLE_RATE,
+        profile_lifecycle="trace",
+    )
 
 
 @asynccontextmanager

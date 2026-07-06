@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "info"
     PORT: int = 8000
 
+    # Sentry error/performance monitoring. Unset in dev to keep local runs quiet.
+    SENTRY_DSN: str | None = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 1.0
+    SENTRY_PROFILE_SESSION_SAMPLE_RATE: float = 1.0
+
     # CORS — comma-separated allowed origins, or "*" for all.
     # In production set an explicit list (e.g. "https://app.calry.ai") to allow
     # credentialed requests; "*" disables credentials per the CORS spec.

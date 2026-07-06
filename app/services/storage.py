@@ -1,3 +1,4 @@
+import logging
 import shutil
 import uuid
 import mimetypes
@@ -7,6 +8,8 @@ from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
+
+logger = logging.getLogger("app.services.storage")
 
 UPLOAD_DIR = Path("app/static/uploads")
 
@@ -56,12 +59,17 @@ async def _save_upload_local(file: UploadFile, key: str) -> dict[str, str]:
         with open(dest_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-    await run_in_threadpool(write_file)
+    try:
+        await run_in_threadpool(write_file)
+    except OSError:
+        logger.exception("local upload write failed key=%s", key)
+        raise
     return {"url": f"/static/uploads/{filename}", "storage": "local"}
 
 
 async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
     if not settings.S3_BUCKET:
+        logger.error("s3 upload attempted without S3_BUCKET configured key=%s", key)
         raise RuntimeError("S3_BUCKET is required when STORAGE_BACKEND=s3")
 
     def upload() -> None:
@@ -89,6 +97,7 @@ async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
             error = exc.response.get("Error", {})
             code = error.get("Code", "Unknown")
             message = error.get("Message", str(exc))
+            logger.error("s3 upload failed key=%s code=%s message=%s", key, code, message)
             if settings.S3_PUBLIC_READ and code in {
                 "AccessControlListNotSupported",
                 "AccessDenied",
@@ -102,4 +111,5 @@ async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
             raise RuntimeError(f"S3 upload failed ({code}): {message}") from exc
 
     await run_in_threadpool(upload)
+    logger.info("s3 upload succeeded key=%s", key)
     return {"url": _s3_public_url(key), "storage": "s3", "key": key}
