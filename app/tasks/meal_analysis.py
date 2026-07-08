@@ -34,8 +34,10 @@ async def _run_photo_analysis_with_cleanup(job_id: str) -> int | None:
         return await _run_photo_analysis(job_id)
     finally:
         from app.ai.providers.openrouter import close_shared_client
+        from app.services.stream_bus import close_redis
 
         await close_shared_client()
+        await close_redis()
         # asyncio.run() opens/closes a fresh event loop per task, but `engine`'s
         # pooled connections are bound to whichever loop created them. Dispose
         # here (same loop) so the next asyncio.run() call starts a clean pool
@@ -43,14 +45,44 @@ async def _run_photo_analysis_with_cleanup(job_id: str) -> int | None:
         await engine.dispose()
 
 
+async def _serialize_meal_for_stream(db, meal_id: int) -> dict | None:
+    from app.schemas.meal import MealResponse
+
+    meal = await _load_meal(db, meal_id)
+    if meal is None:
+        return None
+    return MealResponse.model_validate(meal).model_dump(mode="json")
+
+
+async def _load_meal(db, meal_id: int) -> Meal | None:
+    result = await db.execute(select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items)))
+    return result.scalar_one_or_none()
+
+
 async def _run_photo_analysis(job_id: str) -> int | None:
+    """Durable photo analysis. Runs the streaming estimator so partial items can
+    be relayed live to a `/photo/stream` client via the Redis stream bus, while
+    still persisting the meal + job row exactly as the poll path expects.
+
+    Preview events are published best-effort; `done` is published only after the
+    meal is committed. A retryable failure re-raises WITHOUT publishing an error
+    (the outer task retries and re-streams); a permanent failure publishes the
+    error from `_mark_job_failed`.
+    """
+    from app.ai.streaming import protocol
     from app.api.v1.routes.meals import _build_user_context, _find_existing_by_request_id, _process_and_save_meal
+    from app.services import stream_bus
 
     async with SessionLocal() as db:
         job = await _get_job(db, job_id)
         if job is None:
             return None
         if job.status == "completed":
+            # Late subscriber: re-publish the terminal `done` from the persisted meal.
+            if job.meal_id is not None:
+                meal_dict = await _serialize_meal_for_stream(db, job.meal_id)
+                if meal_dict is not None:
+                    await stream_bus.publish(job_id, protocol.done(meal_dict))
             return job.meal_id
 
         user = await db.get(User, job.user_id)
@@ -68,17 +100,30 @@ async def _run_photo_analysis(job_id: str) -> int | None:
             job.meal_id = existing_meal.id
             job.completed_at = dt.datetime.now(dt.UTC)
             await db.commit()
+            meal_dict = await _serialize_meal_for_stream(db, existing_meal.id)
+            if meal_dict is not None:
+                await stream_bus.publish(job_id, protocol.done(meal_dict))
             return existing_meal.id
 
         ai_service = AICalorieEstimationService(db)
         user_context = await _build_user_context(db, user, job.locale or "en")
-        estimation = await ai_service.estimate_from_image(
-            image_url=job.image_url,
-            optional_hint=job.text,
+
+        await stream_bus.publish(job_id, protocol.status("processing"))
+        estimation = None
+        async for ev in ai_service.stream_estimate_from_image(
+            job.image_url,
             user_context=user_context,
+            optional_hint=job.text,
             user_id=user.id,
             additional_context=job.additional_context,
-        )
+        ):
+            if ev.get("type") == "__complete__":
+                estimation = ev["result"]
+            else:
+                await stream_bus.publish(job_id, ev)
+
+        if estimation is None:
+            raise RuntimeError("stream produced no result")
 
         raw_desc = estimation.meal_name.strip() or (job.text or "Meal photo")
         meal = await _process_and_save_meal(
@@ -96,6 +141,10 @@ async def _run_photo_analysis(job_id: str) -> int | None:
         job.meal_id = meal.id
         job.completed_at = dt.datetime.now(dt.UTC)
         await db.commit()
+
+        meal_dict = await _serialize_meal_for_stream(db, meal.id)
+        if meal_dict is not None:
+            await stream_bus.publish(job_id, protocol.done(meal_dict))
         return meal.id
 
 
@@ -118,6 +167,11 @@ async def _mark_job_queued(job_id: str, error: str) -> None:
 
 
 async def _mark_job_failed(job_id: str, error: str) -> None:
+    from app.ai.streaming import protocol
+    from app.schemas.meal import MealResponse
+    from app.services import stream_bus
+
+    terminal_event: dict | None = None
     try:
         async with SessionLocal() as db:
             job = await _get_job(db, job_id)
@@ -129,11 +183,19 @@ async def _mark_job_failed(job_id: str, error: str) -> None:
                 job.status = "completed"
                 job.meal_id = existing_meal.id
                 job.completed_at = dt.datetime.now(dt.UTC)
+                terminal_event = protocol.done(
+                    MealResponse.model_validate(existing_meal).model_dump(mode="json")
+                )
             else:
                 job.status = "failed"
                 job.error_message = error[:2000]
+                terminal_event = protocol.error("analysis_failed", "Photo analysis failed. Please try again.")
             await db.commit()
+
+        if terminal_event is not None:
+            await stream_bus.publish(job_id, terminal_event)
     finally:
+        await stream_bus.close_redis()
         await engine.dispose()
 
 
