@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import AsyncIterator
 from io import BytesIO
 from typing import Any
 
@@ -254,6 +255,137 @@ class OpenRouterProvider(BaseAIProvider):
                 await asyncio.sleep(retry_after if retry_after else 0.5)
 
         raise AIProviderError("OpenRouter API call failed after retries.")
+
+    async def stream_chat(
+        self,
+        model: str,
+        system_prompt: str,
+        messages: list,
+        response_format: dict | None = None,
+    ) -> "AsyncIterator[dict]":
+        """Streaming transport. Async-generates ``{"delta": str}`` items as the
+        model produces content, then a final ``{"meta": {"usage", "latency_ms",
+        "raw_text"}}`` item. Raises AIProviderError on transport/HTTP failure.
+
+        Applies the same json_schema -> json_object graceful downgrade as
+        ``_post_openrouter`` (one retry). No network-error retry: a stream that
+        drops mid-flight surfaces to the caller, which falls back to a full parse
+        of whatever text arrived."""
+        api_key = self._get_api_key()
+        full_messages = [{"role": "system", "content": system_prompt}] + messages
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": full_messages,
+            "temperature": 0.1,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if response_format:
+            payload["response_format"] = response_format
+            if response_format.get("type") == "json_schema":
+                payload["provider"] = {"require_parameters": True}
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://calry.ai",
+            "X-Title": "Calry",
+        }
+        timeout = float(settings.AI_REQUEST_TIMEOUT_SECONDS)
+        client = get_shared_client()
+        downgraded = False
+
+        for _ in range(2):  # original attempt + at most one structured-output downgrade
+            start_time = time.perf_counter()
+            parts: list[str] = []
+            usage: dict | None = None
+            try:
+                async with client.stream(
+                    "POST", OPENROUTER_URL, json=payload, headers=headers, timeout=timeout
+                ) as response:
+                    if response.status_code != 200:
+                        body = (await response.aread()).decode(errors="replace")
+                        if (
+                            response.status_code in (400, 404, 422)
+                            and not downgraded
+                            and isinstance(payload.get("response_format"), dict)
+                            and payload["response_format"].get("type") == "json_schema"
+                        ):
+                            logger.warning(
+                                f"Streaming structured output rejected ({response.status_code}); "
+                                f"falling back to json_object for model {model}."
+                            )
+                            payload["response_format"] = {"type": "json_object"}
+                            payload.pop("provider", None)
+                            downgraded = True
+                            continue
+                        raise AIProviderError(
+                            f"OpenRouter stream returned error: {response.status_code} - {body}"
+                        )
+
+                    async for raw in response.aiter_lines():
+                        if not raw:
+                            continue
+                        stripped = raw.strip()
+                        if not stripped.startswith("data:"):
+                            continue  # SSE comments / keep-alives
+                        data = stripped[len("data:"):].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(chunk.get("usage"), dict):
+                            usage = chunk["usage"]
+                        choices = chunk.get("choices") or []
+                        if choices:
+                            delta = choices[0].get("delta") or {}
+                            content = delta.get("content")
+                            if content:
+                                parts.append(content)
+                                yield {"delta": content}
+
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                yield {"meta": {"usage": usage, "latency_ms": latency_ms, "raw_text": "".join(parts)}}
+                return
+            except httpx.RequestError as e:
+                logger.warning(f"OpenRouter stream request error: {e}")
+                raise AIProviderError(f"OpenRouter stream communication failure: {str(e)}")
+
+        raise AIProviderError("OpenRouter stream failed after downgrade.")
+
+    def stream_meal_from_text(
+        self,
+        input_text: str,
+        user_context: UserContext | None = None,
+        is_voice: bool = False,
+        additional_context: str | None = None,
+    ) -> "AsyncIterator[dict]":
+        messages = self._build_text_messages(input_text, user_context, is_voice, additional_context)
+        return self.stream_chat(
+            model=settings.OPENROUTER_TEXT_MODEL,
+            system_prompt=TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT,
+            messages=messages,
+            response_format=self._response_format(MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
+        )
+
+    async def stream_meal_from_image(
+        self,
+        image_url: str,
+        user_context: UserContext | None = None,
+        optional_hint: str | None = None,
+        additional_context: str | None = None,
+    ) -> "AsyncIterator[dict]":
+        data_uri = await self._load_image_data_uri(image_url)
+        messages = self._build_image_messages(data_uri, user_context, optional_hint, additional_context)
+        async for ev in self.stream_chat(
+            model=settings.OPENROUTER_IMAGE_MODEL,
+            system_prompt=IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
+            messages=messages,
+            response_format=self._response_format(MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
+        ):
+            yield ev
 
     # ---- response normalization (C25, shared by all estimate paths) ---------
 
@@ -532,15 +664,9 @@ class OpenRouterProvider(BaseAIProvider):
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         return f"data:{content_type};base64,{b64}"
 
-    async def estimate_meal_from_image(
-        self,
-        image_url: str,
-        user_context: UserContext | None = None,
-        optional_hint: str | None = None,
-        additional_context: str | None = None,
-    ) -> MealEstimateResult:
-        model = settings.OPENROUTER_IMAGE_MODEL
-
+    async def _load_image_data_uri(self, image_url: str) -> str:
+        """Fetch/read a food image (remote URL or local path) and return a
+        (downscaled) base64 data URI. Shared by the sync and streaming paths."""
         try:
             if not (image_url.startswith("http://") or image_url.startswith("https://")):
                 clean_path = image_url.lstrip("/")
@@ -565,7 +691,63 @@ class OpenRouterProvider(BaseAIProvider):
             logger.error(f"Failed to download or load image from {image_url}: {e}")
             raise ImageAnalysisError(f"Could not retrieve food image for analysis: {str(e)}")
 
-        data_uri = self._prepare_image_data_uri(image_content, content_type)
+        return self._prepare_image_data_uri(image_content, content_type)
+
+    def _build_image_messages(
+        self,
+        data_uri: str,
+        user_context: UserContext | None,
+        optional_hint: str | None,
+        additional_context: str | None,
+    ) -> list:
+        context_str = self._build_user_context(user_context)
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": build_image_meal_estimation_user_text(
+                            optional_hint,
+                            context_str,
+                            additional_context=additional_context,
+                        ),
+                    },
+                    {"type": "image_url", "image_url": {"url": data_uri}},
+                ],
+            }
+        ]
+
+    def _build_text_messages(
+        self,
+        input_text: str,
+        user_context: UserContext | None,
+        is_voice: bool,
+        additional_context: str | None,
+    ) -> list:
+        context_str = self._build_user_context(user_context)
+        return [
+            {
+                "role": "user",
+                "content": build_text_meal_estimation_user_prompt(
+                    input_text,
+                    context_str,
+                    is_voice=is_voice,
+                    additional_context=additional_context,
+                ),
+            }
+        ]
+
+    async def estimate_meal_from_image(
+        self,
+        image_url: str,
+        user_context: UserContext | None = None,
+        optional_hint: str | None = None,
+        additional_context: str | None = None,
+    ) -> MealEstimateResult:
+        model = settings.OPENROUTER_IMAGE_MODEL
+
+        data_uri = await self._load_image_data_uri(image_url)
         context_str = self._build_user_context(user_context)
 
         messages = [

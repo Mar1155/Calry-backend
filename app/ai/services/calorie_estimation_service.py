@@ -1,7 +1,11 @@
 import logging
 import time
+from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.ai.streaming import protocol
+from app.ai.streaming.partial_parser import StreamingMealParser
 
 from app.ai.prompts.image_estimation import IMAGE_MEAL_ESTIMATION_PROMPT_VERSION
 from app.ai.prompts.meal_completion import MEAL_COMPLETION_PROMPT_VERSION
@@ -308,6 +312,197 @@ class AICalorieEstimationService:
         )
 
         return transcript, estimation_result
+
+    # ---- streaming API -------------------------------------------------------
+    #
+    # These mirror the blocking estimators but yield NDJSON *preview* protocol
+    # events (status/meal_name/item) as the model streams, then a single
+    # internal ``{"type": "__complete__", "result": MealEstimateResult}`` once
+    # the full response is parsed, validated, and finalized. The caller (route
+    # or photo worker) owns persistence and turns __complete__ into a `done`.
+    #
+    # Contract: previews are best-effort. The authoritative result is ALWAYS
+    # built from a full parse of the accumulated text (provider._parse_and_build
+    # _meal, which includes deterministic recovery + paid repair), regardless of
+    # whether the incremental parser latched off mid-stream.
+
+    @staticmethod
+    def _item_preview(it: MealEstimateItem) -> dict:
+        return {
+            "name": it.name,
+            "quantity_estimate": it.quantity_estimate,
+            "weight_grams": it.weight_grams,
+            "calories_per_100g": it.calories_per_100g,
+            "protein_g": it.protein_g,
+            "carbs_g": it.carbs_g,
+            "fat_g": it.fat_g,
+            "estimated_calories": it.estimated_calories,
+        }
+
+    def _replay_result_as_previews(self, result: MealEstimateResult) -> list[dict]:
+        events: list[dict] = []
+        if result.meal_name and result.meal_name.strip():
+            events.append(protocol.meal_name(result.meal_name))
+        for idx, it in enumerate(result.items):
+            events.append(protocol.item(idx, self._item_preview(it)))
+        return events
+
+    async def stream_estimate_from_text(
+        self,
+        text: str,
+        user_context: UserContext | None = None,
+        user_id: int | None = None,
+        *,
+        is_voice: bool = False,
+        channel: str = "text",
+        transcription_confidence: str | None = None,
+        additional_context: str | None = None,
+    ) -> AsyncIterator[dict]:
+        # 1. Pre-inference cache: serve confirmed repeat foods with no LLM call,
+        #    replaying its items as previews so the UI still animates.
+        if user_id is not None and not (additional_context and additional_context.strip()):
+            cached = await self._try_cache(user_id, text, channel)
+            if cached is not None:
+                for ev in self._replay_result_as_previews(cached):
+                    yield ev
+                yield {"type": "__complete__", "result": cached}
+                return
+
+        provider: OpenRouterProvider = self.providers["openrouter"]  # type: ignore[assignment]
+        parser = StreamingMealParser()
+        raw_text = ""
+        usage: dict | None = None
+        latency_ms: int = 0
+        item_index = 0
+        start_time = time.perf_counter()
+        success = False
+        error_msg = None
+        raw_output = None
+
+        try:
+            async for ev in provider.stream_meal_from_text(
+                text, user_context, is_voice=is_voice, additional_context=additional_context
+            ):
+                if "delta" in ev:
+                    raw_text += ev["delta"]
+                    for kind, val in parser.feed(ev["delta"]):
+                        if kind == "meal_name":
+                            yield protocol.meal_name(val)  # type: ignore[arg-type]
+                        elif kind == "item":
+                            yield protocol.item(item_index, val)  # type: ignore[arg-type]
+                            item_index += 1
+                elif "meta" in ev:
+                    meta = ev["meta"]
+                    usage = meta.get("usage")
+                    latency_ms = meta.get("latency_ms") or 0
+                    raw_text = meta.get("raw_text") or raw_text
+
+            raw_output = raw_text
+            raw_result = await provider._parse_and_build_meal(
+                raw_text, latency_ms, usage,
+                source_type="text", model=settings.OPENROUTER_TEXT_MODEL,
+                prompt_version=TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
+            )
+            validated = AIValidationService.validate_and_normalize_estimate(raw_result)
+            self._finalize(validated, user_context, channel, transcription_confidence)
+            success = True
+            yield {"type": "__complete__", "result": validated}
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error in stream_estimate_from_text: {e}")
+            raise
+        finally:
+            total_latency = int((time.perf_counter() - start_time) * 1000)
+            try:
+                await self.inference_logger.log_call(
+                    user_id=user_id,
+                    provider="openrouter",
+                    model_name=settings.OPENROUTER_TEXT_MODEL,
+                    prompt_version=TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
+                    input_type="voice_stream" if is_voice else "text_stream",
+                    raw_input=(
+                        f"{text}\n\nAdditional context: {additional_context.strip()}"
+                        if additional_context and additional_context.strip()
+                        else text
+                    ),
+                    raw_output=str(raw_output) if raw_output else None,
+                    latency_ms=total_latency,
+                    success=success,
+                    error_message=error_msg,
+                    token_usage=usage,
+                )
+            except Exception as log_err:  # logging must never break the stream
+                logger.warning(f"Stream inference log failed: {log_err}")
+
+    async def stream_estimate_from_image(
+        self,
+        image_url: str,
+        user_context: UserContext | None = None,
+        optional_hint: str | None = None,
+        user_id: int | None = None,
+        additional_context: str | None = None,
+    ) -> AsyncIterator[dict]:
+        provider: OpenRouterProvider = self.providers["openrouter"]  # type: ignore[assignment]
+        parser = StreamingMealParser()
+        raw_text = ""
+        usage: dict | None = None
+        latency_ms: int = 0
+        item_index = 0
+        start_time = time.perf_counter()
+        success = False
+        error_msg = None
+        raw_output = None
+
+        try:
+            async for ev in provider.stream_meal_from_image(
+                image_url, user_context, optional_hint, additional_context=additional_context
+            ):
+                if "delta" in ev:
+                    raw_text += ev["delta"]
+                    for kind, val in parser.feed(ev["delta"]):
+                        if kind == "meal_name":
+                            yield protocol.meal_name(val)  # type: ignore[arg-type]
+                        elif kind == "item":
+                            yield protocol.item(item_index, val)  # type: ignore[arg-type]
+                            item_index += 1
+                elif "meta" in ev:
+                    meta = ev["meta"]
+                    usage = meta.get("usage")
+                    latency_ms = meta.get("latency_ms") or 0
+                    raw_text = meta.get("raw_text") or raw_text
+
+            raw_output = raw_text
+            raw_result = await provider._parse_and_build_meal(
+                raw_text, latency_ms, usage,
+                source_type="photo", model=settings.OPENROUTER_IMAGE_MODEL,
+                prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
+            )
+            validated = AIValidationService.validate_and_normalize_estimate(raw_result)
+            self._finalize(validated, user_context, "photo")
+            success = True
+            yield {"type": "__complete__", "result": validated}
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error in stream_estimate_from_image: {e}")
+            raise
+        finally:
+            total_latency = int((time.perf_counter() - start_time) * 1000)
+            try:
+                await self.inference_logger.log_call(
+                    user_id=user_id,
+                    provider="openrouter",
+                    model_name=settings.OPENROUTER_IMAGE_MODEL,
+                    prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
+                    input_type="photo_stream",
+                    raw_input=f"Image URL: {image_url} | Hint: {optional_hint or 'None'}",
+                    raw_output=str(raw_output) if raw_output else None,
+                    latency_ms=total_latency,
+                    success=success,
+                    error_message=error_msg,
+                    token_usage=usage,
+                )
+            except Exception as log_err:
+                logger.warning(f"Stream inference log failed: {log_err}")
 
     async def refine_estimate(
         self,

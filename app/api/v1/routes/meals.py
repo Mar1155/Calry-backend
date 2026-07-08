@@ -1,14 +1,19 @@
 import datetime as dt
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
+from app.ai.streaming import protocol
+from app.db.session import SessionLocal
+from app.services import stream_bus
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.meal import Meal, MealItem, MealRevision
@@ -265,6 +270,17 @@ def _meal_response_dict(meal: Meal, estimation: MealEstimateResult) -> dict:
     }
 
 
+# NDJSON streaming responses must not be buffered by the ASGI server or any
+# reverse proxy, or the client sees the whole payload at once instead of a live
+# stream. X-Accel-Buffering disables nginx buffering; no-cache is belt-and-braces.
+_STREAM_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+def _serialize_meal(meal: Meal) -> dict:
+    """Full MealResponse contract as a JSON-ready dict (for the `done` event)."""
+    return MealResponse.model_validate(meal).model_dump(mode="json")
+
+
 @router.post("/text", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
 async def log_meal_via_text(
     payload: MealCreateText,
@@ -469,6 +485,284 @@ async def log_meal_via_voice(
         client_request_id=payload.client_request_id,
     )
     return meal
+
+
+@router.post("/text/stream")
+async def stream_log_meal_via_text(
+    payload: MealCreateText,
+    current_user: User = Depends(get_current_user),
+    accept_language: str | None = Header(default="en"),
+) -> StreamingResponse:
+    """Streams a text meal analysis as NDJSON: status -> meal_name -> item* -> done.
+
+    The final `done` event carries the persisted MealResponse; the meal is only
+    written to the DB once the full estimate is validated. A client disconnect
+    mid-stream cancels the generator and persists nothing.
+    """
+
+    async def gen():
+        async with SessionLocal() as db:
+            try:
+                existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+                if existing is not None:
+                    yield protocol.line(protocol.done(_serialize_meal(existing)))
+                    return
+
+                ai_service = AICalorieEstimationService(db)
+                user_context = await _build_user_context(db, current_user, _primary_locale(accept_language))
+                yield protocol.line(protocol.status("processing"))
+
+                estimation: MealEstimateResult | None = None
+                async for ev in ai_service.stream_estimate_from_text(
+                    payload.text,
+                    user_context=user_context,
+                    user_id=current_user.id,
+                    additional_context=payload.additional_context,
+                ):
+                    if ev.get("type") == "__complete__":
+                        estimation = ev["result"]
+                    else:
+                        yield protocol.line(ev)
+
+                if estimation is None:
+                    raise RuntimeError("stream produced no result")
+
+                meal = await _process_and_save_meal(
+                    db=db, user=current_user, source_type="text",
+                    original_input=payload.text, image_url=None, audio_url=None,
+                    estimation=estimation, client_request_id=payload.client_request_id,
+                )
+                await db.commit()
+                yield protocol.line(protocol.done(_serialize_meal(meal)))
+            except Exception as e:  # noqa: BLE001 — surface as a protocol error, never a 500 mid-stream
+                logger.error(f"Text meal stream failed: {e}")
+                await db.rollback()
+                yield protocol.line(protocol.error("stream_failed", "AI inference failed. Please try again."))
+
+    return StreamingResponse(gen(), media_type=protocol.NDJSON_MEDIA_TYPE, headers=_STREAM_HEADERS)
+
+
+@router.post("/voice/stream")
+async def stream_log_meal_via_voice(
+    payload: MealCreateVoice,
+    current_user: User = Depends(get_current_user),
+    accept_language: str | None = Header(default="en"),
+) -> StreamingResponse:
+    """Streams a voice meal analysis: status(transcribing) -> status(processing)
+    -> meal_name -> item* -> done. Transcription runs first, then the transcript
+    flows through the same streaming text pipeline."""
+
+    async def gen():
+        async with SessionLocal() as db:
+            try:
+                existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+                if existing is not None:
+                    yield protocol.line(protocol.done(_serialize_meal(existing)))
+                    return
+
+                ai_service = AICalorieEstimationService(db)
+                user_context = await _build_user_context(db, current_user, _primary_locale(accept_language))
+
+                yield protocol.line(protocol.status("transcribing"))
+                transcription = await ai_service.speech_service.transcribe_audio(
+                    audio_url=payload.audio_url, user_id=current_user.id,
+                )
+                transcript = transcription.transcript
+
+                yield protocol.line(protocol.status("processing"))
+                estimation: MealEstimateResult | None = None
+                async for ev in ai_service.stream_estimate_from_text(
+                    transcript,
+                    user_context=user_context,
+                    user_id=current_user.id,
+                    is_voice=True,
+                    channel="voice",
+                    transcription_confidence=transcription.confidence,
+                    additional_context=payload.additional_context,
+                ):
+                    if ev.get("type") == "__complete__":
+                        estimation = ev["result"]
+                    else:
+                        yield protocol.line(ev)
+
+                if estimation is None:
+                    raise RuntimeError("stream produced no result")
+
+                meal = await _process_and_save_meal(
+                    db=db, user=current_user, source_type="voice",
+                    original_input=transcript, image_url=None, audio_url=payload.audio_url,
+                    estimation=estimation, client_request_id=payload.client_request_id,
+                )
+                await db.commit()
+                yield protocol.line(protocol.done(_serialize_meal(meal)))
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Voice meal stream failed: {e}")
+                await db.rollback()
+                yield protocol.line(protocol.error("stream_failed", "AI inference failed. Please try again."))
+
+    return StreamingResponse(gen(), media_type=protocol.NDJSON_MEDIA_TYPE, headers=_STREAM_HEADERS)
+
+
+_PHOTO_STREAM_DEADLINE_SECONDS = 180
+
+
+async def _load_meal_dict(db: AsyncSession, user_id: int, meal_id: int) -> dict | None:
+    result = await db.execute(
+        select(Meal).where(Meal.id == meal_id, Meal.user_id == user_id).options(selectinload(Meal.items))
+    )
+    meal = result.scalar_one_or_none()
+    return _serialize_meal(meal) if meal is not None else None
+
+
+async def _photo_job_terminal_event(job_id: str, user_id: int) -> dict | None:
+    """Durable safety net for the relay: consult the DB job row and return a
+    terminal `done`/`error` event if the worker has finished, else None. Covers
+    a Redis snapshot that expired and any missed publish."""
+    async with SessionLocal() as db:
+        result = await db.execute(
+            select(MealAnalysisJob).where(
+                MealAnalysisJob.id == job_id, MealAnalysisJob.user_id == user_id
+            )
+        )
+        job = result.scalar_one_or_none()
+        if job is None:
+            return None
+        if job.status == "completed" and job.meal_id is not None:
+            meal_dict = await _load_meal_dict(db, user_id, job.meal_id)
+            if meal_dict is not None:
+                return protocol.done(meal_dict)
+        if job.status == "failed":
+            return protocol.error("analysis_failed", job.error_message or "Photo analysis failed.")
+        return None
+
+
+@router.post("/photo/stream")
+async def stream_log_meal_via_photo(
+    payload: MealCreatePhoto,
+    current_user: User = Depends(get_current_user),
+    accept_language: str | None = Header(default="en"),
+) -> StreamingResponse:
+    """Streams a photo meal analysis as NDJSON while the durable Celery worker
+    runs the analysis. The worker publishes partial items to the Redis stream
+    bus; this endpoint replays any missed snapshot then tails live events.
+
+    Reconnect/fallback: the existing `POST /photo/analysis` + `GET .../{id}`
+    poll pair remains the durable path — a client can always fall back to it,
+    and this relay itself consults the DB job row as a safety net.
+    """
+
+    async def gen():
+        # Phase 1 — durable job setup (short-lived session).
+        async with SessionLocal() as db:
+            existing_meal = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+            if existing_meal is not None:
+                yield protocol.line(protocol.done(_serialize_meal(existing_meal)))
+                return
+
+            job = await _find_existing_analysis_by_request_id(db, current_user.id, payload.client_request_id)
+            if job is None:
+                job = MealAnalysisJob(
+                    user_id=current_user.id,
+                    status="queued",
+                    source_type="photo",
+                    image_url=payload.image_url,
+                    text=payload.text,
+                    additional_context=payload.additional_context,
+                    locale=_primary_locale(accept_language),
+                    client_request_id=payload.client_request_id,
+                )
+                db.add(job)
+                await db.flush()
+                try:
+                    from app.tasks.meal_analysis import analyze_photo_meal
+
+                    task = analyze_photo_meal.delay(job.id)
+                    job.celery_task_id = task.id
+                    await db.commit()
+                except Exception as exc:  # noqa: BLE001
+                    job.status = "failed"
+                    job.error_message = str(exc)
+                    await db.commit()
+                    yield protocol.line(
+                        protocol.error("queue_unavailable", "Meal analysis queue is unavailable. Try again shortly.")
+                    )
+                    return
+            job_id = job.id
+            job_status = job.status
+            job_meal_id = job.meal_id
+
+        # Fast path — job already completed (idempotent replay).
+        if job_status == "completed" and job_meal_id is not None:
+            async with SessionLocal() as db:
+                meal_dict = await _load_meal_dict(db, current_user.id, job_meal_id)
+            if meal_dict is not None:
+                yield protocol.line(protocol.done(meal_dict))
+                return
+
+        # Phase 2 — relay from the stream bus. Subscribe BEFORE reading the
+        # snapshot so nothing published in between is lost; dedupe by item index.
+        pubsub = await stream_bus.subscribe(job_id)
+        emitted_name = False
+        max_index = -1
+        try:
+            snapshot = await stream_bus.read_state(job_id)
+            if snapshot:
+                if snapshot.get("meal_name"):
+                    yield protocol.line(snapshot["meal_name"])
+                    emitted_name = True
+                for it in snapshot.get("items", []):
+                    idx = it.get("index", -1)
+                    if idx > max_index:
+                        max_index = idx
+                        yield protocol.line(it)
+                if snapshot.get("terminal"):
+                    yield protocol.line(snapshot["terminal"])
+                    return
+
+            deadline = time.monotonic() + _PHOTO_STREAM_DEADLINE_SECONDS
+            while True:
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=5.0)
+                if msg is None:
+                    # No live event — check the durable job row, then heartbeat.
+                    term = await _photo_job_terminal_event(job_id, current_user.id)
+                    if term is not None:
+                        yield protocol.line(term)
+                        return
+                    if time.monotonic() > deadline:
+                        yield protocol.line(
+                            protocol.error("timeout", "Analysis is taking longer than expected. Check back shortly.")
+                        )
+                        return
+                    yield protocol.line(protocol.status("processing"))
+                    continue
+
+                try:
+                    ev = json.loads(msg["data"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                etype = ev.get("type")
+                if etype == "meal_name":
+                    if not emitted_name:
+                        emitted_name = True
+                        yield protocol.line(ev)
+                elif etype == "item":
+                    idx = ev.get("index", -1)
+                    if idx > max_index:
+                        max_index = idx
+                        yield protocol.line(ev)
+                elif etype in ("done", "error"):
+                    yield protocol.line(ev)
+                    return
+                else:
+                    yield protocol.line(ev)
+        finally:
+            try:
+                await pubsub.unsubscribe()
+                await pubsub.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+
+    return StreamingResponse(gen(), media_type=protocol.NDJSON_MEDIA_TYPE, headers=_STREAM_HEADERS)
 
 
 @router.get("", response_model=list[MealResponse])
