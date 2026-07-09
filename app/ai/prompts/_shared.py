@@ -34,6 +34,8 @@ Object:
   "total_carbs_g": number | null,
   "total_fat_g": number | null,
   "confidence": "low" | "medium" | "high",
+  "meal_category_suggestion": "breakfast" | "lunch" | "dinner" | "snack" | null,
+  "meal_category_confidence": "low" | "medium" | "high" | null,
   "items": [
     {
       "name": string,
@@ -63,7 +65,10 @@ ESTIMATION_RULES = """Estimation rules:
 5. Provide estimated_min_calories and estimated_max_calories as a realistic
    uncertainty band around the estimate.
 6. Use the user's correction history, when provided, to bias the estimate toward
-   their confirmed pattern without overfitting."""
+   their confirmed pattern without overfitting.
+7. Suggest a meal category only when food or explicit wording makes it plausible.
+   Explicit wording wins. If unsure, return null and low confidence. Keep this
+   judgement brief; it is organisation, not nutrition advice."""
 
 # One reconciled anchor table shared by both modalities (was two conflicting ones).
 REFERENCE_ANCHORS = """Reference portion anchors (typical cooked serving):

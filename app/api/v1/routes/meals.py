@@ -39,6 +39,31 @@ logger = logging.getLogger("app.api.meals")
 router = APIRouter()
 
 
+def _time_based_meal_category(now: dt.datetime | None = None) -> str:
+    hour = (now or dt.datetime.now(dt.UTC)).hour
+    if 5 <= hour < 11:
+        return "breakfast"
+    if 11 <= hour < 16:
+        return "lunch"
+    if 16 <= hour < 19:
+        return "snack"
+    if hour >= 19:
+        return "dinner"
+    return "snack"
+
+
+def _resolve_meal_category(explicit_category: str | None, estimation: MealEstimateResult) -> str:
+    """Manual choice wins; an uncertain AI label never overrides the clock."""
+    if explicit_category:
+        return explicit_category
+    if (
+        estimation.meal_category_suggestion is not None
+        and estimation.meal_category_confidence in {"medium", "high"}
+    ):
+        return estimation.meal_category_suggestion
+    return _time_based_meal_category()
+
+
 async def _process_and_save_meal(
     db: AsyncSession,
     user: User,
@@ -48,6 +73,7 @@ async def _process_and_save_meal(
     audio_url: str | None,
     estimation: MealEstimateResult,
     client_request_id: str | None = None,
+    meal_category: str | None = None,
 ) -> Meal:
     """Helper method to construct a Meal record with children and trigger summary sync."""
     meal_repo = MealRepository(db)
@@ -60,7 +86,9 @@ async def _process_and_save_meal(
         image_url=image_url,
         audio_url=audio_url,
         meal_name=estimation.meal_name,
-        meal_type="snack",
+        meal_category=_resolve_meal_category(meal_category, estimation),
+        meal_category_suggestion=estimation.meal_category_suggestion,
+        meal_category_confidence=estimation.meal_category_confidence,
         estimated_calories=estimation.estimated_calories,
         estimated_min_calories=estimation.estimated_min_calories,
         estimated_max_calories=estimation.estimated_max_calories,
@@ -220,6 +248,7 @@ def _meal_snapshot(meal: Meal) -> dict:
         "total_carbs_g": meal.total_carbs_g,
         "total_fat_g": meal.total_fat_g,
         "confidence": meal.ai_confidence,
+        "meal_category": meal.meal_category,
         "source_type": meal.source_type,
         "original_input": meal.original_input,
         "items": _meal_items_payload(meal),
@@ -236,7 +265,13 @@ def _meal_response_dict(meal: Meal, estimation: MealEstimateResult) -> dict:
         "image_url": meal.image_url,
         "audio_url": meal.audio_url,
         "meal_name": estimation.meal_name,
-        "meal_type": meal.meal_type,
+        "meal_category": (
+            estimation.meal_category_suggestion
+            if estimation.meal_category_confidence in {"medium", "high"}
+            else meal.meal_category
+        ),
+        "meal_category_suggestion": estimation.meal_category_suggestion,
+        "meal_category_confidence": estimation.meal_category_confidence,
         "estimated_calories": estimation.estimated_calories,
         "estimated_min_calories": estimation.estimated_min_calories,
         "estimated_max_calories": estimation.estimated_max_calories,
@@ -323,6 +358,7 @@ async def log_meal_via_text(
         audio_url=None,
         estimation=estimation,
         client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
     )
     return meal
 
@@ -369,6 +405,7 @@ async def log_meal_via_photo(
         audio_url=None,
         estimation=estimation,
         client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
     )
     return meal
 
@@ -396,6 +433,7 @@ async def start_photo_analysis(
         image_url=payload.image_url,
         text=payload.text,
         additional_context=payload.additional_context,
+        meal_category=payload.meal_category,
         locale=_primary_locale(accept_language),
         client_request_id=payload.client_request_id,
         meal_id=existing_meal.id if existing_meal is not None else None,
@@ -485,6 +523,7 @@ async def log_meal_via_voice(
         audio_url=payload.audio_url,
         estimation=estimation,
         client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
     )
     return meal
 
@@ -533,6 +572,7 @@ async def stream_log_meal_via_text(
                     db=db, user=current_user, source_type="text",
                     original_input=payload.text, image_url=None, audio_url=None,
                     estimation=estimation, client_request_id=payload.client_request_id,
+                    meal_category=payload.meal_category,
                 )
                 await db.commit()
                 yield protocol.line(protocol.done(_serialize_meal(meal)))
@@ -594,6 +634,7 @@ async def stream_log_meal_via_voice(
                     db=db, user=current_user, source_type="voice",
                     original_input=transcript, image_url=None, audio_url=payload.audio_url,
                     estimation=estimation, client_request_id=payload.client_request_id,
+                    meal_category=payload.meal_category,
                 )
                 await db.commit()
                 yield protocol.line(protocol.done(_serialize_meal(meal)))
@@ -670,6 +711,7 @@ async def stream_log_meal_via_photo(
                     image_url=payload.image_url,
                     text=payload.text,
                     additional_context=payload.additional_context,
+                    meal_category=payload.meal_category,
                     locale=_primary_locale(accept_language),
                     client_request_id=payload.client_request_id,
                 )

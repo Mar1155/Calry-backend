@@ -6,7 +6,7 @@ from app.ai.prompts._shared import (
     REFERENCE_ANCHORS,
 )
 
-IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v5"
+IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v6"
 
 _VISUAL_RULES = """Visual estimation:
 - If no food is visible: needs_clarification=true, confidence="low",

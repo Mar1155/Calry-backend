@@ -135,6 +135,7 @@ async def _run_photo_analysis(job_id: str) -> int | None:
             audio_url=None,
             estimation=estimation,
             client_request_id=job.client_request_id,
+            meal_category=job.meal_category,
         )
 
         job.status = "completed"

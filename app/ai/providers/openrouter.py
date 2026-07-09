@@ -470,6 +470,8 @@ class OpenRouterProvider(BaseAIProvider):
             estimated_min_calories=self._as_int(parsed.get("estimated_min_calories")),
             estimated_max_calories=self._as_int(parsed.get("estimated_max_calories")),
             confidence=self._coerce_confidence(parsed.get("confidence")),
+            meal_category_suggestion=parsed.get("meal_category_suggestion"),
+            meal_category_confidence=parsed.get("meal_category_confidence"),
             source_type=source_type,
             items=self._dict_to_items(parsed),
             assumptions=parsed.get("assumptions") or [],

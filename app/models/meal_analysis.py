@@ -21,6 +21,7 @@ class MealAnalysisJob(Base):
     image_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     additional_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meal_category: Mapped[str | None] = mapped_column(String(20), nullable=True)
     locale: Mapped[str | None] = mapped_column(String(12), nullable=True)
     client_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

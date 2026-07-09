@@ -20,6 +20,8 @@ class MealEstimateResult(BaseModel):
     estimated_min_calories: int | None = None
     estimated_max_calories: int | None = None
     confidence: Literal["low", "medium", "high"]
+    meal_category_suggestion: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
+    meal_category_confidence: Literal["low", "medium", "high"] | None = None
     source_type: Literal["text", "voice", "photo"]
     items: list[MealEstimateItem] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
@@ -94,6 +96,14 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
         "total_carbs_g": {"type": ["number", "null"]},
         "total_fat_g": {"type": ["number", "null"]},
         "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+        "meal_category_suggestion": {
+            "type": ["string", "null"],
+            "enum": ["breakfast", "lunch", "dinner", "snack", None],
+        },
+        "meal_category_confidence": {
+            "type": ["string", "null"],
+            "enum": ["low", "medium", "high", None],
+        },
         "items": {
             "type": "array",
             "items": {
