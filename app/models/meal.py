@@ -22,6 +22,8 @@ class Meal(Base):
     image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     audio_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     meal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # User-facing day section. Defaults keep legacy and in-flight meals valid.
+    meal_type: Mapped[str] = mapped_column(String(20), default="snack", nullable=False)
     estimated_calories: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     estimated_min_calories: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_max_calories: Mapped[int | None] = mapped_column(Integer, nullable=True)

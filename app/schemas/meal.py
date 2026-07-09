@@ -67,6 +67,7 @@ class MealRefineRequest(BaseModel):
 
 
 class MealUpdate(BaseModel):
+    meal_type: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     confirmed_calories: int | None = Field(default=None, ge=0)
     meal_name: str | None = Field(default=None, max_length=255)
     estimated_calories: int | None = Field(default=None, ge=0)
@@ -93,6 +94,7 @@ class MealResponse(BaseModel):
     image_url: str | None = None
     audio_url: str | None = None
     meal_name: str | None = None
+    meal_type: Literal["breakfast", "lunch", "dinner", "snack"] = "snack"
     estimated_calories: int
     estimated_min_calories: int | None = None
     estimated_max_calories: int | None = None
