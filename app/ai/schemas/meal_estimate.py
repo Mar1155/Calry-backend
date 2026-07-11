@@ -87,60 +87,139 @@ class UserContext(BaseModel):
 # structured output guarantees shape, not OpenAI-style strict value enforcement.
 MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
-        "meal_name": {"type": "string"},
-        "estimated_calories": {"type": "integer"},
-        "estimated_min_calories": {"type": ["integer", "null"]},
-        "estimated_max_calories": {"type": ["integer", "null"]},
-        "total_protein_g": {"type": ["number", "null"]},
-        "total_carbs_g": {"type": ["number", "null"]},
-        "total_fat_g": {"type": ["number", "null"]},
-        "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+        "meal_name": {"type": "string", "description": "Short user-facing name for the consumed meal."},
+        "estimated_calories": {
+            "type": "integer",
+            "description": "Central kcal estimate; rounded sum of item weight times item kcal per 100 g.",
+        },
+        "estimated_min_calories": {
+            "type": ["integer", "null"],
+            "description": "Realistic lower kcal bound, or null only for a clarification response.",
+        },
+        "estimated_max_calories": {
+            "type": ["integer", "null"],
+            "description": "Realistic upper kcal bound, or null only for a clarification response.",
+        },
+        "total_protein_g": {
+            "type": ["number", "null"],
+            "description": "Sum of protein grams across the estimated consumed item portions.",
+        },
+        "total_carbs_g": {
+            "type": ["number", "null"],
+            "description": "Sum of carbohydrate grams across the estimated consumed item portions.",
+        },
+        "total_fat_g": {
+            "type": ["number", "null"],
+            "description": "Sum of fat grams across the estimated consumed item portions.",
+        },
+        "confidence": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "Quality of evidence supporting identification, portion, and preparation.",
+        },
         "meal_category_suggestion": {
             "type": ["string", "null"],
             "enum": ["breakfast", "lunch", "dinner", "snack", None],
+            "description": "Organizational meal category when supported by context; otherwise null.",
         },
         "meal_category_confidence": {
             "type": ["string", "null"],
             "enum": ["low", "medium", "high", None],
+            "description": "Evidence quality for the category suggestion; null when category is null.",
         },
         "items": {
             "type": "array",
+            "description": "Each calorie-bearing component exactly once; no composite/component overlap.",
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
-                    "name": {"type": "string"},
-                    "quantity_estimate": {"type": ["string", "null"]},
-                    "weight_grams": {"type": ["integer", "null"]},
-                    "calories_per_100g": {"type": ["number", "null"]},
-                    "protein_g": {"type": ["number", "null"]},
-                    "carbs_g": {"type": ["number", "null"]},
-                    "fat_g": {"type": ["number", "null"]},
+                    "name": {"type": "string", "description": "Specific but non-invented food component."},
+                    "quantity_estimate": {
+                        "type": ["string", "null"],
+                        "description": "Human-readable amount actually consumed, such as '1 medium bowl'.",
+                    },
+                    "weight_grams": {
+                        "type": ["integer", "null"],
+                        "description": "Estimated edible grams consumed, in the same cooked/dry state as density.",
+                    },
+                    "calories_per_100g": {
+                        "type": ["number", "null"],
+                        "description": "Energy density in kcal per 100 g, not calories for the whole item.",
+                    },
+                    "protein_g": {
+                        "type": ["number", "null"],
+                        "description": "Protein grams in this full consumed item portion, not per 100 g.",
+                    },
+                    "carbs_g": {
+                        "type": ["number", "null"],
+                        "description": "Carbohydrate grams in this full consumed item portion, not per 100 g.",
+                    },
+                    "fat_g": {
+                        "type": ["number", "null"],
+                        "description": "Fat grams in this full consumed item portion, not per 100 g.",
+                    },
                 },
-                "required": ["name", "weight_grams", "calories_per_100g"],
+                "required": [
+                    "name",
+                    "quantity_estimate",
+                    "weight_grams",
+                    "calories_per_100g",
+                    "protein_g",
+                    "carbs_g",
+                    "fat_g",
+                ],
             },
         },
-        "assumptions": {"type": "array", "items": {"type": "string"}},
-        "needs_clarification": {"type": "boolean"},
-        "clarifying_question": {"type": ["string", "null"]},
+        "assumptions": {
+            "type": "array",
+            "description": "Short material assumptions that affect the estimate.",
+            "items": {"type": "string"},
+        },
+        "needs_clarification": {
+            "type": "boolean",
+            "description": "True only when no defensible food estimate can be made.",
+        },
+        "clarifying_question": {
+            "type": ["string", "null"],
+            "description": "One concise question when clarification is required; otherwise null.",
+        },
     },
-    "required": ["meal_name", "estimated_calories", "confidence", "items"],
+    "required": [
+        "meal_name",
+        "estimated_calories",
+        "estimated_min_calories",
+        "estimated_max_calories",
+        "total_protein_g",
+        "total_carbs_g",
+        "total_fat_g",
+        "confidence",
+        "meal_category_suggestion",
+        "meal_category_confidence",
+        "items",
+        "assumptions",
+        "needs_clarification",
+        "clarifying_question",
+    ],
 }
 
 
 MEAL_REFINEMENT_RESPONSE_SCHEMA: dict = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         **MEAL_ESTIMATE_RESPONSE_SCHEMA["properties"],
-        "ai_summary": {"type": ["string", "null"]},
-        "changes_made": {"type": "array", "items": {"type": "string"}},
+        "ai_summary": {
+            "type": ["string", "null"],
+            "description": "One short sentence explaining the supported numerical revision.",
+        },
+        "changes_made": {
+            "type": "array",
+            "description": "Concise user-visible factual changes caused by the new evidence.",
+            "items": {"type": "string"},
+        },
     },
-    "required": [
-        "meal_name",
-        "estimated_calories",
-        "confidence",
-        "items",
-        "ai_summary",
-        "changes_made",
-    ],
+    "required": [*MEAL_ESTIMATE_RESPONSE_SCHEMA["required"], "ai_summary", "changes_made"],
 }

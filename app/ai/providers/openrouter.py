@@ -132,8 +132,11 @@ class OpenRouterProvider(BaseAIProvider):
             context_parts.append(f"User Daily Calorie Goal: {user_context.daily_calorie_goal} kcal")
         if user_context.previous_corrections_summary:
             context_parts.append(
-                "User Recent Calorie Correction Patterns:\n"
-                f"{user_context.previous_corrections_summary}"
+                "User Recent Meal Confirmations (meal-specific reference only):\n"
+                f"{user_context.previous_corrections_summary}\n"
+                "Use a prior value only when it clearly describes the same or a "
+                "closely equivalent meal. Do not apply the aggregate correction "
+                "percentage: systematic bias is handled deterministically after inference."
             )
         if not context_parts:
             return ""
@@ -187,7 +190,6 @@ class OpenRouterProvider(BaseAIProvider):
         payload: dict[str, Any] = {
             "model": model,
             "messages": full_messages,
-            "temperature": 0.1,
         }
         if response_format:
             payload["response_format"] = response_format
@@ -276,7 +278,6 @@ class OpenRouterProvider(BaseAIProvider):
         payload: dict[str, Any] = {
             "model": model,
             "messages": full_messages,
-            "temperature": 0.1,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -715,7 +716,7 @@ class OpenRouterProvider(BaseAIProvider):
                             additional_context=additional_context,
                         ),
                     },
-                    {"type": "image_url", "image_url": {"url": data_uri}},
+                    {"type": "image_url", "image_url": {"url": data_uri, "detail": "high"}},
                 ],
             }
         ]
@@ -764,7 +765,7 @@ class OpenRouterProvider(BaseAIProvider):
                             additional_context=additional_context,
                         ),
                     },
-                    {"type": "image_url", "image_url": {"url": data_uri}},
+                    {"type": "image_url", "image_url": {"url": data_uri, "detail": "high"}},
                 ],
             }
         ]
