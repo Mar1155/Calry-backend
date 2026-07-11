@@ -45,7 +45,11 @@ async def get_meal_favorite(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    meal = await db.get(Meal, meal_id)
+    meal = (
+        await db.execute(
+            select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items))
+        )
+    ).scalar_one_or_none()
     if meal is None or meal.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found.")
     memory = await FoodMemoryRepository(db).get_for_meal(meal, current_user.id)
@@ -60,7 +64,11 @@ async def toggle_meal_favorite(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    meal = await db.get(Meal, meal_id)
+    meal = (
+        await db.execute(
+            select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items))
+        )
+    ).scalar_one_or_none()
     if meal is None or meal.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found.")
     memory = await FoodMemoryRepository(db).get_for_meal(meal, current_user.id)
