@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -201,6 +202,36 @@ async def test_start_photo_analysis_queues_job(client: AsyncClient) -> None:
     status_data = status_response.json()
     assert status_data["status"] == "queued"
     assert status_data["meal"] is None
+
+
+@pytest.mark.asyncio
+async def test_start_photo_analysis_logs_queue_failure(
+    client: AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    headers = {"Authorization": "Bearer mock_token_photo_analysis_queue_failure"}
+    await client.get("/api/v1/users/me", headers=headers)
+    caplog.set_level(logging.ERROR, logger="app.api.meals")
+
+    with patch(
+        "app.tasks.meal_analysis.analyze_photo_meal.delay",
+        side_effect=ConnectionError("Redis connection refused"),
+    ):
+        response = await client.post(
+            "/api/v1/meals/photo/analysis",
+            json={
+                "image_url": "https://storage.googleapis.com/calry/photo.jpg",
+                "client_request_id": "analysis-queue-failure-test",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 503
+    queue_failure = next(
+        record for record in caplog.records if "event=meal_analysis_queue_unavailable" in record.message
+    )
+    assert "transport=poll" in queue_failure.message
+    assert "error_type=ConnectionError" in queue_failure.message
+    assert queue_failure.exc_info is not None
 
 
 @pytest.mark.asyncio

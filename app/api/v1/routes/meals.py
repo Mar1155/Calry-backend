@@ -447,13 +447,42 @@ async def start_photo_analysis(
         try:
             from app.tasks.meal_analysis import analyze_photo_meal
 
+            logger.info(
+                "event=meal_analysis_enqueue_started transport=poll job_id=%s user_id=%s client_request_id=%s",
+                job.id,
+                current_user.id,
+                payload.client_request_id,
+            )
             task = analyze_photo_meal.delay(job.id)
             job.celery_task_id = task.id
             await db.commit()
+            logger.info(
+                "event=meal_analysis_enqueue_succeeded transport=poll job_id=%s user_id=%s celery_task_id=%s",
+                job.id,
+                current_user.id,
+                task.id,
+            )
         except Exception as exc:
+            logger.exception(
+                "event=meal_analysis_queue_unavailable transport=poll job_id=%s user_id=%s "
+                "client_request_id=%s job_status=%s error_type=%s error=%s",
+                job.id,
+                current_user.id,
+                payload.client_request_id,
+                job.status,
+                type(exc).__name__,
+                str(exc),
+            )
             job.status = "failed"
             job.error_message = str(exc)
             await db.commit()
+            logger.error(
+                "event=meal_analysis_queue_failure_persisted transport=poll job_id=%s user_id=%s "
+                "job_status=%s",
+                job.id,
+                current_user.id,
+                job.status,
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Meal analysis queue is unavailable. Try again shortly.",
@@ -720,13 +749,44 @@ async def stream_log_meal_via_photo(
                 try:
                     from app.tasks.meal_analysis import analyze_photo_meal
 
+                    logger.info(
+                        "event=meal_analysis_enqueue_started transport=stream job_id=%s user_id=%s "
+                        "client_request_id=%s",
+                        job.id,
+                        current_user.id,
+                        payload.client_request_id,
+                    )
                     task = analyze_photo_meal.delay(job.id)
                     job.celery_task_id = task.id
                     await db.commit()
+                    logger.info(
+                        "event=meal_analysis_enqueue_succeeded transport=stream job_id=%s user_id=%s "
+                        "celery_task_id=%s",
+                        job.id,
+                        current_user.id,
+                        task.id,
+                    )
                 except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "event=meal_analysis_queue_unavailable transport=stream job_id=%s user_id=%s "
+                        "client_request_id=%s job_status=%s error_type=%s error=%s",
+                        job.id,
+                        current_user.id,
+                        payload.client_request_id,
+                        job.status,
+                        type(exc).__name__,
+                        str(exc),
+                    )
                     job.status = "failed"
                     job.error_message = str(exc)
                     await db.commit()
+                    logger.error(
+                        "event=meal_analysis_queue_failure_persisted transport=stream job_id=%s user_id=%s "
+                        "job_status=%s",
+                        job.id,
+                        current_user.id,
+                        job.status,
+                    )
                     yield protocol.line(
                         protocol.error("queue_unavailable", "Meal analysis queue is unavailable. Try again shortly.")
                     )
