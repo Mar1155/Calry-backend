@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -29,6 +29,7 @@ class UserFoodMemory(Base):
     items_snapshot = Column(JSON, nullable=True)
 
     use_count = Column(Integer, nullable=False, default=1)
+    is_favorite = Column(Boolean, nullable=False, default=False)
     last_used_at = Column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: dt.datetime.now(dt.UTC))
 

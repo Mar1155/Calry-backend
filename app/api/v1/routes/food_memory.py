@@ -21,12 +21,69 @@ router = APIRouter()
 
 @router.get("/recents", response_model=list[FoodMemoryResponse])
 async def get_recent_foods(
+    limit: int = Query(default=20, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None, max_length=100),
+    favorites_only: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list:
     """Returns the user's most recently confirmed foods for one-tap repeat logging."""
     repo = FoodMemoryRepository(db)
-    return await repo.get_recents(user_id=current_user.id, limit=10)
+    return await repo.get_recents(
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+        search=search,
+        favorites_only=favorites_only,
+    )
+
+
+@router.get("/meal/{meal_id}/favorite", response_model=FoodMemoryResponse)
+async def get_meal_favorite(
+    meal_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    meal = await db.get(Meal, meal_id)
+    if meal is None or meal.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found.")
+    memory = await FoodMemoryRepository(db).get_for_meal(meal, current_user.id)
+    if memory is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food memory entry not found.")
+    return memory
+
+
+@router.patch("/meal/{meal_id}/favorite", response_model=FoodMemoryResponse)
+async def toggle_meal_favorite(
+    meal_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    meal = await db.get(Meal, meal_id)
+    if meal is None or meal.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found.")
+    memory = await FoodMemoryRepository(db).get_for_meal(meal, current_user.id)
+    if memory is None:
+        calories = meal.confirmed_calories or meal.estimated_calories
+        memory = await FoodMemoryRepository(db).upsert_from_meal(meal, calories)
+    memory.is_favorite = not memory.is_favorite
+    await db.flush()
+    return memory
+
+
+@router.patch("/{memory_id}/favorite", response_model=FoodMemoryResponse)
+async def toggle_memory_favorite(
+    memory_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    memory = await FoodMemoryRepository(db).get_by_id(memory_id, current_user.id)
+    if memory is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food memory entry not found.")
+    memory.is_favorite = not memory.is_favorite
+    await db.flush()
+    return memory
 
 
 @router.post("/{memory_id}/log", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
