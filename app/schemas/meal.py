@@ -51,7 +51,7 @@ class MealPhotoAnalysisCreate(MealCreatePhoto):
 
 class MealPhotoAnalysisStartResponse(BaseModel):
     id: str
-    status: Literal["queued", "processing", "completed", "failed"]
+    status: Literal["queued", "processing", "completed", "failed", "cancelled"]
     meal_id: int | None = None
 
 
@@ -150,7 +150,7 @@ class MealResponse(BaseModel):
 
 class MealPhotoAnalysisStatusResponse(BaseModel):
     id: str
-    status: Literal["queued", "processing", "completed", "failed"]
+    status: Literal["queued", "processing", "completed", "failed", "cancelled"]
     meal_id: int | None = None
     meal: MealResponse | None = None
     error_message: str | None = None

@@ -258,6 +258,38 @@ async def test_start_photo_analysis_is_idempotent(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancel_photo_analysis_revokes_running_worker(client: AsyncClient) -> None:
+    headers = {"Authorization": "Bearer mock_token_photo_analysis_cancel"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    class DummyTask:
+        id = "celery-task-cancel"
+
+    payload = {
+        "image_url": "https://storage.googleapis.com/calry/cancel.jpg",
+        "client_request_id": "analysis-cancel-1",
+    }
+    with patch("app.tasks.meal_analysis.analyze_photo_meal.delay", return_value=DummyTask()):
+        started = await client.post("/api/v1/meals/photo/analysis", json=payload, headers=headers)
+
+    with patch("app.worker.celery_app.celery_app.control.revoke") as revoke:
+        cancelled = await client.delete(
+            "/api/v1/meals/photo/analysis/request/analysis-cancel-1",
+            headers=headers,
+        )
+
+    assert cancelled.status_code == 204
+    revoke.assert_called_once_with("celery-task-cancel", terminate=True, signal="SIGTERM")
+
+    status_response = await client.get(
+        f"/api/v1/meals/photo/analysis/{started.json()['id']}", headers=headers
+    )
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "cancelled"
+    assert status_response.json()["meal_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_log_meal_via_voice(client: AsyncClient, mock_estimation_result) -> None:
     """Tests POST /api/v1/meals/voice using a mocked speech transcription and estimation service."""
     headers = {"Authorization": "Bearer mock_token_voice_test"}

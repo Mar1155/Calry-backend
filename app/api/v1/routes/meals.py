@@ -13,7 +13,6 @@ from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.ai.streaming import protocol
 from app.db.session import SessionLocal
-from app.services import stream_bus
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.meal import Meal, MealItem, MealRevision
@@ -32,6 +31,7 @@ from app.schemas.meal import (
     MealResponse,
     MealUpdate,
 )
+from app.services import stream_bus
 from app.services.storage import save_upload
 from app.services.summary import SummaryService
 
@@ -512,6 +512,58 @@ async def get_photo_analysis(
     return await _analysis_status_response(db, job)
 
 
+@router.delete("/photo/analysis/request/{client_request_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_photo_analysis(
+    client_request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Cancel the durable photo job started by this client request.
+
+    The DB state is changed first so a task racing toward persistence can see
+    the cancellation. Celery termination then interrupts an already-running
+    task; revoking alone would only prevent queued tasks from starting.
+    """
+    job = await _find_existing_analysis_by_request_id(db, current_user.id, client_request_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal analysis not found.")
+    if job.status in {"failed", "cancelled"}:
+        return
+
+    # The UI can still show "processing" for a few milliseconds after the
+    # worker commits. Honor the user's X in that race by removing the resulting
+    # unconfirmed meal as part of the same cancellation operation.
+    if job.status == "completed" and job.meal_id is not None:
+        meal = await db.get(Meal, job.meal_id)
+        if meal is not None and meal.confirmed_calories is None:
+            meal_date = meal.created_at.date()
+            await db.delete(meal)
+            await db.flush()
+            await SummaryService(db).sync_daily_summary(current_user.id, meal_date)
+        job.status = "cancelled"
+        job.meal_id = None
+        job.completed_at = dt.datetime.now(dt.UTC)
+        await db.commit()
+        return
+
+    job.status = "cancelled"
+    job.error_message = None
+    job.completed_at = dt.datetime.now(dt.UTC)
+    task_id = job.celery_task_id
+    await db.commit()
+
+    if task_id:
+        from app.worker.celery_app import celery_app
+
+        celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+    logger.info(
+        "event=meal_analysis_cancelled job_id=%s user_id=%s celery_task_id=%s",
+        job.id,
+        current_user.id,
+        task_id,
+    )
+
+
 @router.post("/voice", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
 async def log_meal_via_voice(
     payload: MealCreateVoice,
@@ -705,6 +757,8 @@ async def _photo_job_terminal_event(job_id: str, user_id: int) -> dict | None:
                 return protocol.done(meal_dict)
         if job.status == "failed":
             return protocol.error("analysis_failed", job.error_message or "Photo analysis failed.")
+        if job.status == "cancelled":
+            return protocol.error("analysis_cancelled", "Photo analysis was cancelled.")
         return None
 
 
