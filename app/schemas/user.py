@@ -46,3 +46,11 @@ class UserResponse(UserBase):
     daily_fat_goal: int | None = None
     created_at: dt.datetime
     updated_at: dt.datetime | None = None
+    onboarding_status: str = "not_started"
+    onboarding_step: str | None = None
+    onboarding_version: int = 2
+    onboarding_completed_at: dt.datetime | None = None
+    preferred_unit_system: str = "metric"
+    activity_level: str | None = None
+    target_pace: str | None = None
+    calorie_target_source: str = "calculated"

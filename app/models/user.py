@@ -20,6 +20,16 @@ class User(Base):
     age: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    # Account-owned onboarding state. Never use a device flag as source of truth.
+    onboarding_status: Mapped[str] = mapped_column(String(32), default="not_started", nullable=False)
+    onboarding_step: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    onboarding_version: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    onboarding_started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    onboarding_completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    preferred_unit_system: Mapped[str] = mapped_column(String(16), default="metric", nullable=False)
+    activity_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target_pace: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    calorie_target_source: Mapped[str] = mapped_column(String(32), default="calculated", nullable=False)
 
     # Premium Billing Fields
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
