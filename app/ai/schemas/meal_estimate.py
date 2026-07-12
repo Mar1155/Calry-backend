@@ -102,23 +102,6 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
             "type": ["integer", "null"],
             "description": "Realistic upper kcal bound, or null only for a clarification response.",
         },
-        "total_protein_g": {
-            "type": ["number", "null"],
-            "description": "Sum of protein grams across the estimated consumed item portions.",
-        },
-        "total_carbs_g": {
-            "type": ["number", "null"],
-            "description": "Sum of carbohydrate grams across the estimated consumed item portions.",
-        },
-        "total_fat_g": {
-            "type": ["number", "null"],
-            "description": "Sum of fat grams across the estimated consumed item portions.",
-        },
-        "confidence": {
-            "type": "string",
-            "enum": ["low", "medium", "high"],
-            "description": "Quality of evidence supporting identification, portion, and preparation.",
-        },
         "meal_category_suggestion": {
             "type": ["string", "null"],
             "enum": ["breakfast", "lunch", "dinner", "snack", None],
@@ -173,11 +156,6 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
                 ],
             },
         },
-        "assumptions": {
-            "type": "array",
-            "description": "Short material assumptions that affect the estimate.",
-            "items": {"type": "string"},
-        },
         "needs_clarification": {
             "type": "boolean",
             "description": "True only when no defensible food estimate can be made.",
@@ -192,14 +170,9 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
         "estimated_calories",
         "estimated_min_calories",
         "estimated_max_calories",
-        "total_protein_g",
-        "total_carbs_g",
-        "total_fat_g",
-        "confidence",
         "meal_category_suggestion",
         "meal_category_confidence",
         "items",
-        "assumptions",
         "needs_clarification",
         "clarifying_question",
     ],

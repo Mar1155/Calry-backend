@@ -22,10 +22,6 @@ write all other strings in the requested output language.
   "estimated_calories": integer,
   "estimated_min_calories": integer | null,
   "estimated_max_calories": integer | null,
-  "total_protein_g": number | null,
-  "total_carbs_g": number | null,
-  "total_fat_g": number | null,
-  "confidence": "low" | "medium" | "high",
   "meal_category_suggestion": "breakfast" | "lunch" | "dinner" | "snack" | null,
   "meal_category_confidence": "low" | "medium" | "high" | null,
   "items": [{
@@ -37,7 +33,6 @@ write all other strings in the requested output language.
     "carbs_g": number | null,
     "fat_g": number | null
   }],
-  "assumptions": string[],
   "needs_clarification": boolean,
   "clarifying_question": string | null
 }
@@ -83,7 +78,6 @@ ESTIMATION_RULES = """<estimation_rules>
 - The uncertainty range must contain the central estimate and reflect the main
   plausible variation in portion, recipe, and hidden fats. Do not use a narrow
   range to imply precision the evidence does not support.
-- assumptions contains only short, material assumptions that affect the number.
 - Suggest a meal category only from explicit wording or strong contextual
   evidence. Return null when uncertain; this is organization, not nutrition
   advice.
@@ -102,16 +96,8 @@ Use these only as sanity checks, never to override stronger evidence:
 
 
 CONFIDENCE_AND_CLARIFICATION = """<uncertainty_policy>
-Confidence describes evidence quality, not how familiar the food seems:
-- high: quantity and energy are grounded by a readable label/menu value,
-  explicit weight/recipe, or an unmistakable standardized package.
-- medium: food and portion are reasonably grounded but at least one material
-  quantity or preparation detail is inferred.
-- low: portion, composition, cooking fat, occlusion, or transcript ambiguity can
-  materially change the estimate.
-
 Prefer a useful low-confidence estimate and honest range over a question. Set
-needs_clarification=true, confidence="low", estimated_calories=0, range fields
+needs_clarification=true, estimated_calories=0, range fields
 to null, and items=[] only when no food can be identified or the input contains
 too little information for any defensible estimate. Then ask exactly one concise,
 high-information question. Otherwise set needs_clarification=false and

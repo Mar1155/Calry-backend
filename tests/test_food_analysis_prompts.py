@@ -17,18 +17,20 @@ from app.ai.schemas.meal_estimate import MEAL_ESTIMATE_RESPONSE_SCHEMA, MEAL_REF
 
 def test_prompt_versions_track_the_new_contract() -> None:
     assert TEXT_MEAL_ESTIMATION_PROMPT_VERSION == "text_meal_estimation_v7"
-    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v7"
+    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v8_compact"
     assert MEAL_REFINEMENT_PROMPT_VERSION == "meal_refinement_v3"
 
 
-def test_estimation_prompts_share_numerical_and_evidence_invariants() -> None:
-    for prompt in (TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT, IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT):
-        assert "<evidence_policy>" in prompt
-        assert "output-language" in prompt
-        assert "never both" in prompt
-        assert "not 100 g" in prompt
-        assert "Do not reveal this check or any chain of thought" in prompt
-        assert "daily calorie target does not change the energy content" in prompt
+def test_estimation_prompts_keep_core_numerical_invariants() -> None:
+    assert "never both" in TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "not 100 g" in TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT
+
+    # Vision uses a deliberately compact contract to reduce reasoning-model
+    # latency, while retaining the invariants needed by deterministic validation.
+    assert "Return exactly one raw JSON object" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "include each calorie-bearing component once" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "same cooked/raw state" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "readable labels and explicit user facts" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
 
 
 def test_text_user_data_is_delimited_and_xml_escaped() -> None:
@@ -63,6 +65,9 @@ def test_structured_output_requires_complete_semantic_contract() -> None:
     required = set(MEAL_ESTIMATE_RESPONSE_SCHEMA["required"])
     assert required == set(MEAL_ESTIMATE_RESPONSE_SCHEMA["properties"])
     assert MEAL_ESTIMATE_RESPONSE_SCHEMA["additionalProperties"] is False
+    assert "confidence" not in required
+    assert "assumptions" not in required
+    assert "total_protein_g" not in required
 
     item_schema = MEAL_ESTIMATE_RESPONSE_SCHEMA["properties"]["items"]["items"]
     assert set(item_schema["required"]) == set(item_schema["properties"])

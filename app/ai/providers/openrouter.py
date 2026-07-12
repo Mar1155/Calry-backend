@@ -190,6 +190,12 @@ class OpenRouterProvider(BaseAIProvider):
         payload: dict[str, Any] = {
             "model": model,
             "messages": full_messages,
+            "max_completion_tokens": settings.AI_MAX_COMPLETION_TOKENS,
+            "temperature": settings.AI_TEMPERATURE,
+            "reasoning": {
+                "effort": settings.AI_REASONING_EFFORT,
+                "exclude": settings.AI_EXCLUDE_REASONING,
+            },
         }
         if response_format:
             payload["response_format"] = response_format
@@ -280,6 +286,12 @@ class OpenRouterProvider(BaseAIProvider):
             "messages": full_messages,
             "stream": True,
             "stream_options": {"include_usage": True},
+            "max_completion_tokens": settings.AI_MAX_COMPLETION_TOKENS,
+            "temperature": settings.AI_TEMPERATURE,
+            "reasoning": {
+                "effort": settings.AI_REASONING_EFFORT,
+                "exclude": settings.AI_EXCLUDE_REASONING,
+            },
         }
         if response_format:
             payload["response_format"] = response_format
