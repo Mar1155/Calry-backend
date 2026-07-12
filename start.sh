@@ -5,8 +5,7 @@
 set -e
 
 if [ "${CALRY_PROCESS:-api}" = "worker" ]; then
-  echo "==> Starting Celery worker"
-  exec celery -A app.worker.celery_app.celery_app worker --loglevel="${LOG_LEVEL:-info}"
+  exec ./start_worker.sh
 fi
 
 echo "==> Applying database migrations (alembic upgrade head)"

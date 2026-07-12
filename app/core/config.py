@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str | None = None
     MEAL_ANALYSIS_MAX_RETRIES: int = 2
+    # Keep Railway worker memory predictable. Celery otherwise defaults to one
+    # prefork child per visible CPU, duplicating the full application in each.
+    CELERY_WORKER_CONCURRENCY: int = 1
+    CELERY_WORKER_MAX_TASKS_PER_CHILD: int = 20
+    CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB: int = 384_000
 
     # Media storage. "local" keeps current app/static/uploads behavior for dev.
     # "s3" uploads to S3-compatible storage and returns an HTTP URL.

@@ -118,6 +118,9 @@ Set these in the service's **Variables** tab:
 | `LOG_LEVEL` | `info` | Log verbosity |
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Reference the Postgres plugin; app auto-rewrites to the async driver |
 | `REDIS_URL` | `${{Redis.REDIS_URL}}` | Celery broker/result backend for background analysis |
+| `CELERY_WORKER_CONCURRENCY` | `1` | Caps prefork children so worker memory does not scale with visible CPUs |
+| `CELERY_WORKER_MAX_TASKS_PER_CHILD` | `20` | Periodically recycles the child to release fragmented/leaked memory |
+| `CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB` | `384000` | Recycles a child after a task when its RSS exceeds 384 MB |
 | `STORAGE_BACKEND` | `s3` | Stores uploads outside the Railway container |
 | `S3_BUCKET` / `S3_REGION` | your bucket settings | S3-compatible storage target |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | credentials | S3 upload credentials |
