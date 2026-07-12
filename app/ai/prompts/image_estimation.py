@@ -1,35 +1,24 @@
-from app.ai.prompts._shared import (
-    CONFIDENCE_AND_CLARIFICATION,
-    ESTIMATION_RULES,
-    OUTPUT_CONTRACT,
-    PRODUCT_PREAMBLE,
-    REFERENCE_ANCHORS,
-)
+from xml.sax.saxutils import escape
 
-IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v5"
+from app.ai.prompts._shared import OUTPUT_CONTRACT
 
-_VISUAL_RULES = """Visual estimation:
-- If no food is visible: needs_clarification=true, confidence="low",
-  estimated_calories=0, items=[], clarifying_question="Try another photo or
-  describe the meal with text."
-- Estimate total plate weight first using visible scale (dinner plate ~26 cm,
-  side plate ~18 cm, cup/glass ~250 ml, and stacking/depth for burgers, fries,
-  pasta, rice bowls, lasagna, cakes), then split weight across components.
-- Density cues: leafy salad is low density; meat, cheese, grains, and pasta are
-  high density.
-- Use the user's hint as evidence but do not ignore the image."""
+IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v8_compact"
+
+_VISUAL_RULES = """<rules>
+Use evidence in this order: readable labels and explicit user facts; visible food
+and portion; typical local serving data. Estimate the edible amount consumed and
+include each calorie-bearing component once. Item macros are for the full portion;
+weight and kcal/100g must use the same cooked/raw state. Use realistic uncertainty
+bounds. Ask for clarification only when no food or caloric drink can be identified.
+Never invent a brand, recipe, preparation, or exact portion.
+</rules>"""
 
 IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT = "\n\n".join(
     [
-        "You are Calry, an AI visual calorie-awareness assistant.",
-        PRODUCT_PREAMBLE,
-        "Objective: understand the meal in the image and return one realistic "
-        "calorie estimate. Structured facts only, no chatty explanation.",
+        "<role>You are a visual food-energy estimation engine.</role>",
+        "<task>Identify the food and estimate calories and macronutrients.</task>",
         OUTPUT_CONTRACT,
         _VISUAL_RULES,
-        ESTIMATION_RULES,
-        REFERENCE_ANCHORS,
-        CONFIDENCE_AND_CLARIFICATION,
     ]
 )
 
@@ -39,12 +28,19 @@ def build_image_meal_estimation_user_text(
     context: str = "",
     additional_context: str | None = None,
 ) -> str:
-    prompt = "Task: analyze this food photo and estimate the meal calories."
+    prompt = "<input>\n<media>one_attached_food_image</media>"
     if optional_hint:
-        prompt += f"\n\nUser hint:\n{optional_hint.strip()}"
+        prompt += f"\n<user_hint>{escape(optional_hint.strip())}</user_hint>"
     if additional_context and additional_context.strip():
-        prompt += f"\n\nAdditional user context:\n{additional_context.strip()}"
+        prompt += (
+            "\n<additional_user_context>"
+            f"{escape(additional_context.strip())}"
+            "</additional_user_context>"
+        )
     if context:
-        prompt += f"\n\n{context.strip()}"
-    prompt += "\n\nReturn the JSON object now."
+        prompt += f"\n<user_context>{escape(context.strip())}</user_context>"
+    prompt += """
+</input>
+<task>Based on the input above and the attached image, estimate the meal and
+return the required JSON object now.</task>"""
     return prompt

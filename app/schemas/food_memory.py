@@ -24,4 +24,5 @@ class FoodMemoryResponse(BaseModel):
     carbs_g: float | None = None
     fat_g: float | None = None
     use_count: int
+    is_favorite: bool = False
     last_used_at: dt.datetime

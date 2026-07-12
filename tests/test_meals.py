@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -6,7 +7,7 @@ from sqlalchemy import select
 
 from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult
 from app.ai.services.validation_service import AIValidationService
-from app.models.meal import MealRevision
+from app.models.meal import Meal, MealRevision
 
 
 def test_meal_estimate_schema_validation():
@@ -90,6 +91,36 @@ def test_ai_validation_service_rules():
     validated_clarify = AIValidationService.validate_and_normalize_estimate(data_clarify)
     assert validated_clarify.clarifying_question == "Could you tell me more about what you ate?"
     assert validated_clarify.estimated_calories == 0
+
+
+@pytest.mark.asyncio
+async def test_meal_detail_favorite_creates_and_toggles_memory(
+    client: AsyncClient, db_session
+) -> None:
+    headers = {"Authorization": "Bearer mock_token_meal_favorite"}
+    user_response = await client.get("/api/v1/users/me", headers=headers)
+    user_id = user_response.json()["id"]
+    meal = Meal(
+        user_id=user_id,
+        source_type="text",
+        original_input="Pasta al pomodoro",
+        meal_name="Pasta al pomodoro",
+        estimated_calories=540,
+    )
+    db_session.add(meal)
+    await db_session.commit()
+
+    first = await client.patch(
+        f"/api/v1/food-memory/meal/{meal.id}/favorite", headers=headers
+    )
+    assert first.status_code == 200
+    assert first.json()["is_favorite"] is True
+
+    second = await client.patch(
+        f"/api/v1/food-memory/meal/{meal.id}/favorite", headers=headers
+    )
+    assert second.status_code == 200
+    assert second.json()["is_favorite"] is False
 
 
 @pytest.fixture
@@ -204,6 +235,36 @@ async def test_start_photo_analysis_queues_job(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_photo_analysis_logs_queue_failure(
+    client: AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    headers = {"Authorization": "Bearer mock_token_photo_analysis_queue_failure"}
+    await client.get("/api/v1/users/me", headers=headers)
+    caplog.set_level(logging.ERROR, logger="app.api.meals")
+
+    with patch(
+        "app.tasks.meal_analysis.analyze_photo_meal.delay",
+        side_effect=ConnectionError("Redis connection refused"),
+    ):
+        response = await client.post(
+            "/api/v1/meals/photo/analysis",
+            json={
+                "image_url": "https://storage.googleapis.com/calry/photo.jpg",
+                "client_request_id": "analysis-queue-failure-test",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 503
+    queue_failure = next(
+        record for record in caplog.records if "event=meal_analysis_queue_unavailable" in record.message
+    )
+    assert "transport=poll" in queue_failure.message
+    assert "error_type=ConnectionError" in queue_failure.message
+    assert queue_failure.exc_info is not None
+
+
+@pytest.mark.asyncio
 async def test_start_photo_analysis_is_idempotent(client: AsyncClient) -> None:
     headers = {"Authorization": "Bearer mock_token_photo_analysis_idempotent"}
     await client.get("/api/v1/users/me", headers=headers)
@@ -224,6 +285,38 @@ async def test_start_photo_analysis_is_idempotent(client: AsyncClient) -> None:
     assert second.status_code == 202
     assert first.json()["id"] == second.json()["id"]
     mock_delay.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_photo_analysis_revokes_running_worker(client: AsyncClient) -> None:
+    headers = {"Authorization": "Bearer mock_token_photo_analysis_cancel"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    class DummyTask:
+        id = "celery-task-cancel"
+
+    payload = {
+        "image_url": "https://storage.googleapis.com/calry/cancel.jpg",
+        "client_request_id": "analysis-cancel-1",
+    }
+    with patch("app.tasks.meal_analysis.analyze_photo_meal.delay", return_value=DummyTask()):
+        started = await client.post("/api/v1/meals/photo/analysis", json=payload, headers=headers)
+
+    with patch("app.worker.celery_app.celery_app.control.revoke") as revoke:
+        cancelled = await client.delete(
+            "/api/v1/meals/photo/analysis/request/analysis-cancel-1",
+            headers=headers,
+        )
+
+    assert cancelled.status_code == 204
+    revoke.assert_called_once_with("celery-task-cancel", terminate=True, signal="SIGTERM")
+
+    status_response = await client.get(
+        f"/api/v1/meals/photo/analysis/{started.json()['id']}", headers=headers
+    )
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "cancelled"
+    assert status_response.json()["meal_id"] is None
 
 
 @pytest.mark.asyncio

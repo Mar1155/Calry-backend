@@ -13,7 +13,6 @@ from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.ai.streaming import protocol
 from app.db.session import SessionLocal
-from app.services import stream_bus
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.meal import Meal, MealItem, MealRevision
@@ -32,11 +31,37 @@ from app.schemas.meal import (
     MealResponse,
     MealUpdate,
 )
+from app.services import stream_bus
 from app.services.storage import save_upload
 from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.meals")
 router = APIRouter()
+
+
+def _time_based_meal_category(now: dt.datetime | None = None) -> str:
+    hour = (now or dt.datetime.now(dt.UTC)).hour
+    if 5 <= hour < 11:
+        return "breakfast"
+    if 11 <= hour < 16:
+        return "lunch"
+    if 16 <= hour < 19:
+        return "snack"
+    if hour >= 19:
+        return "dinner"
+    return "snack"
+
+
+def _resolve_meal_category(explicit_category: str | None, estimation: MealEstimateResult) -> str:
+    """Manual choice wins; an uncertain AI label never overrides the clock."""
+    if explicit_category:
+        return explicit_category
+    if (
+        estimation.meal_category_suggestion is not None
+        and estimation.meal_category_confidence in {"medium", "high"}
+    ):
+        return estimation.meal_category_suggestion
+    return _time_based_meal_category()
 
 
 async def _process_and_save_meal(
@@ -48,6 +73,7 @@ async def _process_and_save_meal(
     audio_url: str | None,
     estimation: MealEstimateResult,
     client_request_id: str | None = None,
+    meal_category: str | None = None,
 ) -> Meal:
     """Helper method to construct a Meal record with children and trigger summary sync."""
     meal_repo = MealRepository(db)
@@ -60,6 +86,9 @@ async def _process_and_save_meal(
         image_url=image_url,
         audio_url=audio_url,
         meal_name=estimation.meal_name,
+        meal_category=_resolve_meal_category(meal_category, estimation),
+        meal_category_suggestion=estimation.meal_category_suggestion,
+        meal_category_confidence=estimation.meal_category_confidence,
         estimated_calories=estimation.estimated_calories,
         estimated_min_calories=estimation.estimated_min_calories,
         estimated_max_calories=estimation.estimated_max_calories,
@@ -219,6 +248,7 @@ def _meal_snapshot(meal: Meal) -> dict:
         "total_carbs_g": meal.total_carbs_g,
         "total_fat_g": meal.total_fat_g,
         "confidence": meal.ai_confidence,
+        "meal_category": meal.meal_category,
         "source_type": meal.source_type,
         "original_input": meal.original_input,
         "items": _meal_items_payload(meal),
@@ -235,6 +265,13 @@ def _meal_response_dict(meal: Meal, estimation: MealEstimateResult) -> dict:
         "image_url": meal.image_url,
         "audio_url": meal.audio_url,
         "meal_name": estimation.meal_name,
+        "meal_category": (
+            estimation.meal_category_suggestion
+            if estimation.meal_category_confidence in {"medium", "high"}
+            else meal.meal_category
+        ),
+        "meal_category_suggestion": estimation.meal_category_suggestion,
+        "meal_category_confidence": estimation.meal_category_confidence,
         "estimated_calories": estimation.estimated_calories,
         "estimated_min_calories": estimation.estimated_min_calories,
         "estimated_max_calories": estimation.estimated_max_calories,
@@ -321,6 +358,7 @@ async def log_meal_via_text(
         audio_url=None,
         estimation=estimation,
         client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
     )
     return meal
 
@@ -367,6 +405,7 @@ async def log_meal_via_photo(
         audio_url=None,
         estimation=estimation,
         client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
     )
     return meal
 
@@ -394,6 +433,7 @@ async def start_photo_analysis(
         image_url=payload.image_url,
         text=payload.text,
         additional_context=payload.additional_context,
+        meal_category=payload.meal_category,
         locale=_primary_locale(accept_language),
         client_request_id=payload.client_request_id,
         meal_id=existing_meal.id if existing_meal is not None else None,
@@ -407,13 +447,42 @@ async def start_photo_analysis(
         try:
             from app.tasks.meal_analysis import analyze_photo_meal
 
+            logger.info(
+                "event=meal_analysis_enqueue_started transport=poll job_id=%s user_id=%s client_request_id=%s",
+                job.id,
+                current_user.id,
+                payload.client_request_id,
+            )
             task = analyze_photo_meal.delay(job.id)
             job.celery_task_id = task.id
             await db.commit()
+            logger.info(
+                "event=meal_analysis_enqueue_succeeded transport=poll job_id=%s user_id=%s celery_task_id=%s",
+                job.id,
+                current_user.id,
+                task.id,
+            )
         except Exception as exc:
+            logger.exception(
+                "event=meal_analysis_queue_unavailable transport=poll job_id=%s user_id=%s "
+                "client_request_id=%s job_status=%s error_type=%s error=%s",
+                job.id,
+                current_user.id,
+                payload.client_request_id,
+                job.status,
+                type(exc).__name__,
+                str(exc),
+            )
             job.status = "failed"
             job.error_message = str(exc)
             await db.commit()
+            logger.error(
+                "event=meal_analysis_queue_failure_persisted transport=poll job_id=%s user_id=%s "
+                "job_status=%s",
+                job.id,
+                current_user.id,
+                job.status,
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Meal analysis queue is unavailable. Try again shortly.",
@@ -441,6 +510,58 @@ async def get_photo_analysis(
             detail="Meal analysis not found.",
         )
     return await _analysis_status_response(db, job)
+
+
+@router.delete("/photo/analysis/request/{client_request_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_photo_analysis(
+    client_request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Cancel the durable photo job started by this client request.
+
+    The DB state is changed first so a task racing toward persistence can see
+    the cancellation. Celery termination then interrupts an already-running
+    task; revoking alone would only prevent queued tasks from starting.
+    """
+    job = await _find_existing_analysis_by_request_id(db, current_user.id, client_request_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal analysis not found.")
+    if job.status in {"failed", "cancelled"}:
+        return
+
+    # The UI can still show "processing" for a few milliseconds after the
+    # worker commits. Honor the user's X in that race by removing the resulting
+    # unconfirmed meal as part of the same cancellation operation.
+    if job.status == "completed" and job.meal_id is not None:
+        meal = await db.get(Meal, job.meal_id)
+        if meal is not None and meal.confirmed_calories is None:
+            meal_date = meal.created_at.date()
+            await db.delete(meal)
+            await db.flush()
+            await SummaryService(db).sync_daily_summary(current_user.id, meal_date)
+        job.status = "cancelled"
+        job.meal_id = None
+        job.completed_at = dt.datetime.now(dt.UTC)
+        await db.commit()
+        return
+
+    job.status = "cancelled"
+    job.error_message = None
+    job.completed_at = dt.datetime.now(dt.UTC)
+    task_id = job.celery_task_id
+    await db.commit()
+
+    if task_id:
+        from app.worker.celery_app import celery_app
+
+        celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+    logger.info(
+        "event=meal_analysis_cancelled job_id=%s user_id=%s celery_task_id=%s",
+        job.id,
+        current_user.id,
+        task_id,
+    )
 
 
 @router.post("/voice", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
@@ -483,6 +604,7 @@ async def log_meal_via_voice(
         audio_url=payload.audio_url,
         estimation=estimation,
         client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
     )
     return meal
 
@@ -531,6 +653,7 @@ async def stream_log_meal_via_text(
                     db=db, user=current_user, source_type="text",
                     original_input=payload.text, image_url=None, audio_url=None,
                     estimation=estimation, client_request_id=payload.client_request_id,
+                    meal_category=payload.meal_category,
                 )
                 await db.commit()
                 yield protocol.line(protocol.done(_serialize_meal(meal)))
@@ -592,6 +715,7 @@ async def stream_log_meal_via_voice(
                     db=db, user=current_user, source_type="voice",
                     original_input=transcript, image_url=None, audio_url=payload.audio_url,
                     estimation=estimation, client_request_id=payload.client_request_id,
+                    meal_category=payload.meal_category,
                 )
                 await db.commit()
                 yield protocol.line(protocol.done(_serialize_meal(meal)))
@@ -633,6 +757,8 @@ async def _photo_job_terminal_event(job_id: str, user_id: int) -> dict | None:
                 return protocol.done(meal_dict)
         if job.status == "failed":
             return protocol.error("analysis_failed", job.error_message or "Photo analysis failed.")
+        if job.status == "cancelled":
+            return protocol.error("analysis_cancelled", "Photo analysis was cancelled.")
         return None
 
 
@@ -668,6 +794,7 @@ async def stream_log_meal_via_photo(
                     image_url=payload.image_url,
                     text=payload.text,
                     additional_context=payload.additional_context,
+                    meal_category=payload.meal_category,
                     locale=_primary_locale(accept_language),
                     client_request_id=payload.client_request_id,
                 )
@@ -676,13 +803,44 @@ async def stream_log_meal_via_photo(
                 try:
                     from app.tasks.meal_analysis import analyze_photo_meal
 
+                    logger.info(
+                        "event=meal_analysis_enqueue_started transport=stream job_id=%s user_id=%s "
+                        "client_request_id=%s",
+                        job.id,
+                        current_user.id,
+                        payload.client_request_id,
+                    )
                     task = analyze_photo_meal.delay(job.id)
                     job.celery_task_id = task.id
                     await db.commit()
+                    logger.info(
+                        "event=meal_analysis_enqueue_succeeded transport=stream job_id=%s user_id=%s "
+                        "celery_task_id=%s",
+                        job.id,
+                        current_user.id,
+                        task.id,
+                    )
                 except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "event=meal_analysis_queue_unavailable transport=stream job_id=%s user_id=%s "
+                        "client_request_id=%s job_status=%s error_type=%s error=%s",
+                        job.id,
+                        current_user.id,
+                        payload.client_request_id,
+                        job.status,
+                        type(exc).__name__,
+                        str(exc),
+                    )
                     job.status = "failed"
                     job.error_message = str(exc)
                     await db.commit()
+                    logger.error(
+                        "event=meal_analysis_queue_failure_persisted transport=stream job_id=%s user_id=%s "
+                        "job_status=%s",
+                        job.id,
+                        current_user.id,
+                        job.status,
+                    )
                     yield protocol.line(
                         protocol.error("queue_unavailable", "Meal analysis queue is unavailable. Try again shortly.")
                     )

@@ -1,24 +1,30 @@
+from xml.sax.saxutils import escape
+
 from app.ai.prompts._shared import (
     CONFIDENCE_AND_CLARIFICATION,
     ESTIMATION_RULES,
+    EVIDENCE_POLICY,
+    INTERNAL_CHECK,
     OUTPUT_CONTRACT,
     PRODUCT_PREAMBLE,
     REFERENCE_ANCHORS,
 )
 
-TEXT_MEAL_ESTIMATION_PROMPT_VERSION = "text_meal_estimation_v5"
+TEXT_MEAL_ESTIMATION_PROMPT_VERSION = "text_meal_estimation_v7"
 JSON_REPAIR_PROMPT_VERSION = "json_repair_v2"
 
 TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT = "\n\n".join(
     [
-        "You are Calry, an AI calorie-awareness assistant.",
+        "<role>You are Calry, a precise food-energy estimation engine.</role>",
         PRODUCT_PREAMBLE,
-        "Objective: return one fast, realistic calorie estimate for the user's meal. "
-        "Be useful, calm, and correction-friendly.",
+        "<task>Identify the consumed food and return one calibrated estimate of "
+        "calories and macronutrients.</task>",
         OUTPUT_CONTRACT,
+        EVIDENCE_POLICY,
         ESTIMATION_RULES,
         REFERENCE_ANCHORS,
         CONFIDENCE_AND_CLARIFICATION,
+        INTERNAL_CHECK,
     ]
 )
 
@@ -36,21 +42,23 @@ def build_text_meal_estimation_user_prompt(
     is_voice: bool = False,
     additional_context: str | None = None,
 ) -> str:
-    prompt = f"""Task: estimate calories for this meal description.
-
-Meal description:
-{input_text.strip()}
+    prompt = f"""<input>
+<meal_description>{escape(input_text.strip())}</meal_description>
 """
     if additional_context and additional_context.strip():
-        prompt += f"\nAdditional user context:\n{additional_context.strip()}\n"
-    if is_voice:
         prompt += (
-            "\nNote: the description above is an automatic voice transcript and may "
-            "contain speech-recognition errors, filler words, or run-on phrasing. "
-            "Infer the intended meal and estimate it. Do not ask for clarification "
-            "unless no food is mentioned at all.\n"
+            "<additional_user_context>"
+            f"{escape(additional_context.strip())}"
+            "</additional_user_context>\n"
         )
+    if is_voice:
+        prompt += "<input_source>automatic_voice_transcript</input_source>\n"
     if context:
-        prompt += f"\n{context.strip()}\n"
-    prompt += "\nReturn the JSON object now."
+        prompt += f"<user_context>{escape(context.strip())}</user_context>\n"
+    prompt += """</input>
+<task>
+Based on the input above, estimate the meal. If this is a voice transcript,
+silently tolerate filler words and plausible recognition errors, but do not
+invent a food that was not mentioned. Return the required JSON object now.
+</task>"""
     return prompt

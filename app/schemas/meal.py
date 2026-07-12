@@ -32,12 +32,14 @@ class MealItemResponse(MealItemBase):
 # returns the already-created meal instead of re-running the LLM.
 class MealCreateText(BaseModel):
     text: str = Field(..., min_length=2, max_length=2000)
+    meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     additional_context: str | None = Field(default=None, max_length=1000)
     client_request_id: str | None = Field(default=None, max_length=64)
 
 
 class MealCreatePhoto(BaseModel):
     image_url: str = Field(..., min_length=5, max_length=1024)
+    meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     text: str | None = Field(default=None, max_length=1000)
     additional_context: str | None = Field(default=None, max_length=1000)
     client_request_id: str | None = Field(default=None, max_length=64)
@@ -49,12 +51,13 @@ class MealPhotoAnalysisCreate(MealCreatePhoto):
 
 class MealPhotoAnalysisStartResponse(BaseModel):
     id: str
-    status: Literal["queued", "processing", "completed", "failed"]
+    status: Literal["queued", "processing", "completed", "failed", "cancelled"]
     meal_id: int | None = None
 
 
 class MealCreateVoice(BaseModel):
     audio_url: str = Field(..., min_length=5, max_length=1024)
+    meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     # Optional pre-transcribed text if client performs on-device transcription
     text: str | None = Field(default=None, max_length=2000)
     additional_context: str | None = Field(default=None, max_length=1000)
@@ -67,6 +70,7 @@ class MealRefineRequest(BaseModel):
 
 
 class MealUpdate(BaseModel):
+    meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     confirmed_calories: int | None = Field(default=None, ge=0)
     meal_name: str | None = Field(default=None, max_length=255)
     estimated_calories: int | None = Field(default=None, ge=0)
@@ -93,6 +97,9 @@ class MealResponse(BaseModel):
     image_url: str | None = None
     audio_url: str | None = None
     meal_name: str | None = None
+    meal_category: Literal["breakfast", "lunch", "dinner", "snack"] = "snack"
+    meal_category_suggestion: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
+    meal_category_confidence: Literal["low", "medium", "high"] | None = None
     estimated_calories: int
     estimated_min_calories: int | None = None
     estimated_max_calories: int | None = None
@@ -143,7 +150,7 @@ class MealResponse(BaseModel):
 
 class MealPhotoAnalysisStatusResponse(BaseModel):
     id: str
-    status: Literal["queued", "processing", "completed", "failed"]
+    status: Literal["queued", "processing", "completed", "failed", "cancelled"]
     meal_id: int | None = None
     meal: MealResponse | None = None
     error_message: str | None = None

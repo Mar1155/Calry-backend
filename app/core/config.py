@@ -81,11 +81,17 @@ class Settings(BaseSettings):
     # -84% out) is adequate. Vision genuinely benefits from flash, so photos
     # stay on the stronger model. Voice transcription stays on flash for ASR
     # quality, then its transcript is estimated with the text model.
-    OPENROUTER_TEXT_MODEL: str = "google/gemini-2.5-flash-lite"
+    OPENROUTER_TEXT_MODEL: str = "google/gemini-2.5-flash"
     OPENROUTER_IMAGE_MODEL: str = "google/gemini-2.5-flash"
     OPENROUTER_AUDIO_MODEL: str = "google/gemini-2.5-flash"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     AI_MAX_RETRIES: int = 1
+    # Keep structured food responses short. Reasoning-capable budget models can
+    # otherwise spend thousands of completion tokens thinking before emitting JSON.
+    AI_MAX_COMPLETION_TOKENS: int = 900
+    AI_TEMPERATURE: float = 0.1
+    AI_REASONING_EFFORT: str = "minimal"
+    AI_EXCLUDE_REASONING: bool = True
 
     # Structured outputs (C16): use OpenRouter json_schema response_format. Falls
     # back to json_object automatically if a routed model rejects it.

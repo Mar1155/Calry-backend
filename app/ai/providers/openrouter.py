@@ -132,8 +132,11 @@ class OpenRouterProvider(BaseAIProvider):
             context_parts.append(f"User Daily Calorie Goal: {user_context.daily_calorie_goal} kcal")
         if user_context.previous_corrections_summary:
             context_parts.append(
-                "User Recent Calorie Correction Patterns:\n"
-                f"{user_context.previous_corrections_summary}"
+                "User Recent Meal Confirmations (meal-specific reference only):\n"
+                f"{user_context.previous_corrections_summary}\n"
+                "Use a prior value only when it clearly describes the same or a "
+                "closely equivalent meal. Do not apply the aggregate correction "
+                "percentage: systematic bias is handled deterministically after inference."
             )
         if not context_parts:
             return ""
@@ -187,7 +190,12 @@ class OpenRouterProvider(BaseAIProvider):
         payload: dict[str, Any] = {
             "model": model,
             "messages": full_messages,
-            "temperature": 0.1,
+            "max_completion_tokens": settings.AI_MAX_COMPLETION_TOKENS,
+            "temperature": settings.AI_TEMPERATURE,
+            "reasoning": {
+                "effort": settings.AI_REASONING_EFFORT,
+                "exclude": settings.AI_EXCLUDE_REASONING,
+            },
         }
         if response_format:
             payload["response_format"] = response_format
@@ -276,9 +284,14 @@ class OpenRouterProvider(BaseAIProvider):
         payload: dict[str, Any] = {
             "model": model,
             "messages": full_messages,
-            "temperature": 0.1,
             "stream": True,
             "stream_options": {"include_usage": True},
+            "max_completion_tokens": settings.AI_MAX_COMPLETION_TOKENS,
+            "temperature": settings.AI_TEMPERATURE,
+            "reasoning": {
+                "effort": settings.AI_REASONING_EFFORT,
+                "exclude": settings.AI_EXCLUDE_REASONING,
+            },
         }
         if response_format:
             payload["response_format"] = response_format
@@ -470,6 +483,8 @@ class OpenRouterProvider(BaseAIProvider):
             estimated_min_calories=self._as_int(parsed.get("estimated_min_calories")),
             estimated_max_calories=self._as_int(parsed.get("estimated_max_calories")),
             confidence=self._coerce_confidence(parsed.get("confidence")),
+            meal_category_suggestion=parsed.get("meal_category_suggestion"),
+            meal_category_confidence=parsed.get("meal_category_confidence"),
             source_type=source_type,
             items=self._dict_to_items(parsed),
             assumptions=parsed.get("assumptions") or [],
@@ -713,7 +728,7 @@ class OpenRouterProvider(BaseAIProvider):
                             additional_context=additional_context,
                         ),
                     },
-                    {"type": "image_url", "image_url": {"url": data_uri}},
+                    {"type": "image_url", "image_url": {"url": data_uri, "detail": "high"}},
                 ],
             }
         ]
@@ -762,7 +777,7 @@ class OpenRouterProvider(BaseAIProvider):
                             additional_context=additional_context,
                         ),
                     },
-                    {"type": "image_url", "image_url": {"url": data_uri}},
+                    {"type": "image_url", "image_url": {"url": data_uri, "detail": "high"}},
                 ],
             }
         ]

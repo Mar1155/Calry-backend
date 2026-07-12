@@ -20,15 +20,39 @@ class FoodMemoryRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_recents(self, user_id: int, limit: int = 10) -> list[UserFoodMemory]:
+    async def get_recents(
+        self,
+        user_id: int,
+        limit: int = 20,
+        offset: int = 0,
+        search: str | None = None,
+        favorites_only: bool = False,
+    ) -> list[UserFoodMemory]:
         stmt = (
             select(UserFoodMemory)
             .where(UserFoodMemory.user_id == user_id)
-            .order_by(UserFoodMemory.last_used_at.desc())
+            .order_by(UserFoodMemory.is_favorite.desc(), UserFoodMemory.last_used_at.desc())
+            .offset(offset)
             .limit(limit)
         )
+        if search:
+            safe_search = search.strip()[:100].replace("%", "\\%").replace("_", "\\_")
+            stmt = stmt.where(UserFoodMemory.display_name.ilike(f"%{safe_search}%", escape="\\"))
+        if favorites_only:
+            stmt = stmt.where(UserFoodMemory.is_favorite.is_(True))
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
+
+    async def get_for_meal(self, meal: Meal, user_id: int) -> UserFoodMemory | None:
+        canonical = canonicalize_food_name(meal.meal_name or meal.original_input)
+        stmt = select(UserFoodMemory).where(UserFoodMemory.user_id == user_id)
+        if canonical:
+            stmt = stmt.where(UserFoodMemory.canonical_key == canonical)
+        else:
+            stmt = stmt.where(
+                UserFoodMemory.normalized_name == (meal.meal_name or meal.original_input).lower().strip()
+            )
+        return (await self.db.execute(stmt)).scalars().first()
 
     async def get_by_id(self, memory_id: int, user_id: int) -> UserFoodMemory | None:
         stmt = select(UserFoodMemory).where(

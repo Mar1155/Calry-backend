@@ -77,6 +77,8 @@ async def _run_photo_analysis(job_id: str) -> int | None:
         job = await _get_job(db, job_id)
         if job is None:
             return None
+        if job.status == "cancelled":
+            return None
         if job.status == "completed":
             # Late subscriber: re-publish the terminal `done` from the persisted meal.
             if job.meal_id is not None:
@@ -122,8 +124,19 @@ async def _run_photo_analysis(job_id: str) -> int | None:
             else:
                 await stream_bus.publish(job_id, ev)
 
+            # Cancellation normally terminates this Celery task immediately.
+            # This durable check also covers workers/pools that cannot terminate
+            # a running task and the race where cancellation arrives at the end.
+            await db.refresh(job, attribute_names=["status"])
+            if job.status == "cancelled":
+                return None
+
         if estimation is None:
             raise RuntimeError("stream produced no result")
+
+        await db.refresh(job, attribute_names=["status"])
+        if job.status == "cancelled":
+            return None
 
         raw_desc = estimation.meal_name.strip() or (job.text or "Meal photo")
         meal = await _process_and_save_meal(
@@ -135,7 +148,22 @@ async def _run_photo_analysis(job_id: str) -> int | None:
             audio_url=None,
             estimation=estimation,
             client_request_id=job.client_request_id,
+            meal_category=job.meal_category,
         )
+
+        # Cancellation may land while _process_and_save_meal is flushing and
+        # synchronizing the daily summary. Never overwrite cancelled with
+        # completed or leave the just-created unconfirmed meal behind.
+        await db.refresh(job, attribute_names=["status"])
+        if job.status == "cancelled":
+            meal_date = meal.created_at.date()
+            await db.delete(meal)
+            await db.flush()
+            from app.services.summary import SummaryService
+
+            await SummaryService(db).sync_daily_summary(user.id, meal_date)
+            await db.commit()
+            return None
 
         job.status = "completed"
         job.meal_id = meal.id
@@ -157,7 +185,7 @@ async def _mark_job_queued(job_id: str, error: str) -> None:
     try:
         async with SessionLocal() as db:
             job = await _get_job(db, job_id)
-            if job is None or job.status == "completed":
+            if job is None or job.status in {"completed", "cancelled"}:
                 return
             job.status = "queued"
             job.error_message = error[:2000]
@@ -175,7 +203,7 @@ async def _mark_job_failed(job_id: str, error: str) -> None:
     try:
         async with SessionLocal() as db:
             job = await _get_job(db, job_id)
-            if job is None or job.status == "completed":
+            if job is None or job.status in {"completed", "cancelled"}:
                 return
 
             existing_meal = await _find_existing_meal(db, job.user_id, job.client_request_id)

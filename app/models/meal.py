@@ -22,6 +22,10 @@ class Meal(Base):
     image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     audio_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     meal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # A light organisational label, never a required daily checklist.
+    meal_category: Mapped[str] = mapped_column(String(20), default="snack", nullable=False)
+    meal_category_suggestion: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    meal_category_confidence: Mapped[str | None] = mapped_column(String(10), nullable=True)
     estimated_calories: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     estimated_min_calories: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_max_calories: Mapped[int | None] = mapped_column(Integer, nullable=True)

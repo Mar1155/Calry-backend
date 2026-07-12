@@ -22,6 +22,7 @@ from app.api.v1.routes.revenuecat_webhook import router as webhook_router
 from app.api.v1.routes.summaries import router as summaries_router
 from app.api.v1.routes.system import router as system_router
 from app.api.v1.routes.users import router as users_router
+from app.api.v1.routes.onboarding import router as onboarding_router
 from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.core.logging import setup_logging
@@ -161,6 +162,7 @@ async def fallback_exception_handler(request: Request, exc: Exception) -> JSONRe
 # Register Versioned API Routes under namespace /api/v1
 app.include_router(system_router, prefix="/api/v1", tags=["System"])
 app.include_router(users_router, prefix="/api/v1/users", tags=["Users"])
+app.include_router(onboarding_router, prefix="/api/v1/onboarding", tags=["Onboarding"])
 app.include_router(meals_router, prefix="/api/v1/meals", tags=["Meals"])
 app.include_router(meal_completion_router, prefix="/api/v1/meals", tags=["Meal Completion"])
 app.include_router(burned_router, prefix="/api/v1/burned-calories", tags=["Burned Calories"])
