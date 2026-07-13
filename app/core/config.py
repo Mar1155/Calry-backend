@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -27,6 +28,13 @@ class Settings(BaseSettings):
     # In production set an explicit list (e.g. "https://app.calry.ai") to allow
     # credentialed requests; "*" disables credentials per the CORS spec.
     ALLOWED_ORIGINS: str = "*"
+
+    # Public legal documents used by the App Store, Google Play and the
+    # RevenueCat-hosted paywall. Configure the real legal entity and a monitored
+    # inbox before release; the store-listing fallback keeps local builds usable.
+    LEGAL_OPERATOR_NAME: str = "Calry"
+    LEGAL_CONTACT_EMAIL: str | None = None
+    LEGAL_EFFECTIVE_DATE: date = date(2026, 7, 13)
 
     # Database URLs
     # Must use postgresql+asyncpg:// for SQLAlchemy async connections

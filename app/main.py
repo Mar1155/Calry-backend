@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.public.legal import router as legal_router
 from app.api.v1.routes.awareness import router as awareness_router
 from app.api.v1.routes.burned_calories import router as burned_router
 from app.api.v1.routes.food_memory import router as food_memory_router
@@ -17,12 +18,12 @@ from app.api.v1.routes.habits import router as habits_router
 from app.api.v1.routes.insights import router as insights_router
 from app.api.v1.routes.meal_completion import router as meal_completion_router
 from app.api.v1.routes.meals import router as meals_router
+from app.api.v1.routes.onboarding import router as onboarding_router
 from app.api.v1.routes.premium import router as premium_router
 from app.api.v1.routes.revenuecat_webhook import router as webhook_router
 from app.api.v1.routes.summaries import router as summaries_router
 from app.api.v1.routes.system import router as system_router
 from app.api.v1.routes.users import router as users_router
-from app.api.v1.routes.onboarding import router as onboarding_router
 from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.core.logging import setup_logging
@@ -173,6 +174,9 @@ app.include_router(webhook_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
 app.include_router(food_memory_router, prefix="/api/v1/food-memory", tags=["Food Memory"])
 app.include_router(habits_router, prefix="/api/v1/habits", tags=["Habits"])
 app.include_router(awareness_router, prefix="/api/v1/awareness", tags=["Awareness"])
+
+# Public HTTPS pages used by store metadata and RevenueCat paywalls.
+app.include_router(legal_router, tags=["Legal"])
 
 
 @app.get("/", tags=["Root"])

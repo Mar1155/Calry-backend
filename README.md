@@ -131,6 +131,9 @@ Set these in the service's **Variables** tab:
 | `DEFAULT_AI_PROVIDER` | `openrouter` | Default AI engine |
 | `FIREBASE_PROJECT_ID` | `calry-62362` | Firebase project for ID-token verification |
 | `FIREBASE_CREDENTIALS` | full service account JSON | Firebase Admin credentials. Paste the complete JSON from Firebase Console → Project settings → Service accounts |
+| `LEGAL_OPERATOR_NAME` | legal person/company name | Data controller and contracting party shown on public legal pages |
+| `LEGAL_CONTACT_EMAIL` | monitored legal/support inbox | Public contact for privacy and terms requests |
+| `LEGAL_EFFECTIVE_DATE` | `2026-07-13` | Effective date shown on both documents (ISO format) |
 
 > `PORT` is injected by Railway automatically — do **not** set it manually.
 
@@ -163,3 +166,24 @@ Railway builds the image and runs `start.sh`. API services apply migrations and 
 
 ### Persistent uploads
 Use `STORAGE_BACKEND=s3` in production. `/static` local uploads remain for development only and are lost on redeploy/restart.
+
+---
+
+## Public legal pages
+
+The backend exposes mobile-friendly, unauthenticated documents in English and Italian:
+
+| Document | Stable URL | Italian URL |
+| :--- | :--- | :--- |
+| Privacy Policy | `/privacy` | `/privacy?lang=it` |
+| Terms & Conditions | `/terms` | `/terms?lang=it` |
+
+The routes also honor `Accept-Language` and provide `/privacy-policy` and
+`/terms-and-conditions` aliases. After deployment, use the absolute Railway
+URLs in the RevenueCat Paywall Builder button actions **Navigate to → Privacy
+Policy** and **Navigate to → Terms of Service**. Also use `/privacy` for the
+privacy-policy URL required by App Store Connect and Google Play Console.
+
+Before store submission, set `LEGAL_OPERATOR_NAME` to the real legal entity and
+`LEGAL_CONTACT_EMAIL` to a monitored inbox, then have the text reviewed for the
+operator's launch markets and actual data-retention practices.

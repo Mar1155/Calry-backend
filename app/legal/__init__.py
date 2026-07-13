@@ -1,0 +1,1 @@
+"""Localized legal document content."""
