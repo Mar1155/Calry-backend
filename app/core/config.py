@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     REVENUECAT_API_TIMEOUT_SECONDS: float = 10.0
     REVENUECAT_API_MAX_RETRIES: int = 2
 
+    # Custom free-access codes. Codes are never stored in plaintext: this
+    # server-only pepper HMACs them before lookup. It must be a long random
+    # secret in production and must stay stable across deployments.
+    PROMO_CODE_PEPPER: str | None = None
+    PROMO_CODE_REDEMPTION_ENABLED: bool = True
+    PROMO_CODE_MAX_ATTEMPTS: int = 8
+    PROMO_CODE_ATTEMPT_WINDOW_MINUTES: int = 15
+
     # Tester deployments: treat every authenticated user as premium, so testers
     # never pay. Pair with the app-side PREMIUM_BYPASS dart-define. Must stay
     # False on the real production deployment.
@@ -121,7 +129,7 @@ class Settings(BaseSettings):
     FOOD_MEMORY_CACHE_ENABLED: bool = True
     FOOD_MEMORY_FUZZY_ENABLED: bool = True
     FOOD_MEMORY_FUZZY_THRESHOLD: int = 92  # rapidfuzz token_set_ratio [0-100]
-    FOOD_MEMORY_MIN_USE_COUNT: int = 2     # only serve a memory confirmed >= N times
+    FOOD_MEMORY_MIN_USE_COUNT: int = 2  # only serve a memory confirmed >= N times
 
     @property
     def cors_origins(self) -> list[str]:

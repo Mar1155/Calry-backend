@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.dependencies.premium import free_history_cutoff, has_premium_access
 from app.models.daily_summary import DailySummary
 from app.models.user import User
 from app.repositories.daily_summary import DailySummaryRepository
@@ -62,6 +63,13 @@ async def get_historical_summaries(
     """Retrieves a historical list of daily summaries, sorted chronologically descending."""
     repo = DailySummaryRepository(db)
 
+    cutoff_date = None
+    if not await has_premium_access(current_user, db):
+        cutoff_date = free_history_cutoff()
+
     return await repo.get_history(
-        user_id=current_user.id, skip=skip, limit=limit
+        user_id=current_user.id,
+        skip=skip,
+        limit=limit,
+        cutoff_date=cutoff_date,
     )

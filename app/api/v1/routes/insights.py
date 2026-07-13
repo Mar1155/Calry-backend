@@ -2,15 +2,14 @@ import datetime as dt
 import logging
 from collections import Counter
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.services.correction_context_service import AICorrectionContextService
-from app.core.config import settings
-from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.dependencies.premium import require_premium_user
 from app.models.daily_summary import DailySummary
 from app.models.meal import Meal
 from app.models.user import User
@@ -22,26 +21,17 @@ router = APIRouter()
 
 @router.get("/summary/weekly", response_model=WeeklyReportResponse)
 async def get_weekly_report(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_premium_user),
     db: AsyncSession = Depends(get_db),
 ) -> WeeklyReportResponse:
     """Computes weekly caloric stats and generates a real AI observation."""
-    if not current_user.is_premium and not settings.PREMIUM_BYPASS:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Calry Premium subscription required to view weekly reports.",
-        )
-
     today = dt.date.today()
     start_date = today - dt.timedelta(days=6)
 
-    stmt = (
-        select(DailySummary)
-        .where(
-            DailySummary.user_id == current_user.id,
-            DailySummary.date >= start_date,
-            DailySummary.date <= today,
-        )
+    stmt = select(DailySummary).where(
+        DailySummary.user_id == current_user.id,
+        DailySummary.date >= start_date,
+        DailySummary.date <= today,
     )
     result = await db.execute(stmt)
     summaries = result.scalars().all()
@@ -114,16 +104,10 @@ async def get_weekly_report(
 
 @router.get("/insights/patterns", response_model=PatternInsightsResponse)
 async def get_pattern_insights(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_premium_user),
     db: AsyncSession = Depends(get_db),
 ) -> PatternInsightsResponse:
     """Returns real AI-generated pattern insights from the user's tracking history."""
-    if not current_user.is_premium and not settings.PREMIUM_BYPASS:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Calry Premium subscription required to view AI pattern insights.",
-        )
-
     today = dt.date.today()
     start_date = today - dt.timedelta(days=29)
 

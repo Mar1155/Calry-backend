@@ -15,6 +15,11 @@ from app.ai.streaming import protocol
 from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.dependencies.premium import (
+    ensure_history_date_access,
+    free_history_cutoff,
+    has_premium_access,
+)
 from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.user import User
@@ -56,10 +61,7 @@ def _resolve_meal_category(explicit_category: str | None, estimation: MealEstima
     """Manual choice wins; an uncertain AI label never overrides the clock."""
     if explicit_category:
         return explicit_category
-    if (
-        estimation.meal_category_suggestion is not None
-        and estimation.meal_category_confidence in {"medium", "high"}
-    ):
+    if estimation.meal_category_suggestion is not None and estimation.meal_category_confidence in {"medium", "high"}:
         return estimation.meal_category_suggestion
     return _time_based_meal_category()
 
@@ -172,9 +174,7 @@ async def _build_user_context(
     )
 
 
-async def _find_existing_by_request_id(
-    db: AsyncSession, user_id: int, client_request_id: str | None
-) -> Meal | None:
+async def _find_existing_by_request_id(db: AsyncSession, user_id: int, client_request_id: str | None) -> Meal | None:
     """Idempotency lookup (C13): a repeat with the same client_request_id returns
     the already-created meal instead of re-running the LLM."""
     if not client_request_id:
@@ -477,8 +477,7 @@ async def start_photo_analysis(
             job.error_message = str(exc)
             await db.commit()
             logger.error(
-                "event=meal_analysis_queue_failure_persisted transport=poll job_id=%s user_id=%s "
-                "job_status=%s",
+                "event=meal_analysis_queue_failure_persisted transport=poll job_id=%s user_id=%s " "job_status=%s",
                 job.id,
                 current_user.id,
                 job.status,
@@ -650,9 +649,14 @@ async def stream_log_meal_via_text(
                     raise RuntimeError("stream produced no result")
 
                 meal = await _process_and_save_meal(
-                    db=db, user=current_user, source_type="text",
-                    original_input=payload.text, image_url=None, audio_url=None,
-                    estimation=estimation, client_request_id=payload.client_request_id,
+                    db=db,
+                    user=current_user,
+                    source_type="text",
+                    original_input=payload.text,
+                    image_url=None,
+                    audio_url=None,
+                    estimation=estimation,
+                    client_request_id=payload.client_request_id,
                     meal_category=payload.meal_category,
                 )
                 await db.commit()
@@ -688,7 +692,8 @@ async def stream_log_meal_via_voice(
 
                 yield protocol.line(protocol.status("transcribing"))
                 transcription = await ai_service.speech_service.transcribe_audio(
-                    audio_url=payload.audio_url, user_id=current_user.id,
+                    audio_url=payload.audio_url,
+                    user_id=current_user.id,
                 )
                 transcript = transcription.transcript
 
@@ -712,9 +717,14 @@ async def stream_log_meal_via_voice(
                     raise RuntimeError("stream produced no result")
 
                 meal = await _process_and_save_meal(
-                    db=db, user=current_user, source_type="voice",
-                    original_input=transcript, image_url=None, audio_url=payload.audio_url,
-                    estimation=estimation, client_request_id=payload.client_request_id,
+                    db=db,
+                    user=current_user,
+                    source_type="voice",
+                    original_input=transcript,
+                    image_url=None,
+                    audio_url=payload.audio_url,
+                    estimation=estimation,
+                    client_request_id=payload.client_request_id,
                     meal_category=payload.meal_category,
                 )
                 await db.commit()
@@ -744,9 +754,7 @@ async def _photo_job_terminal_event(job_id: str, user_id: int) -> dict | None:
     a Redis snapshot that expired and any missed publish."""
     async with SessionLocal() as db:
         result = await db.execute(
-            select(MealAnalysisJob).where(
-                MealAnalysisJob.id == job_id, MealAnalysisJob.user_id == user_id
-            )
+            select(MealAnalysisJob).where(MealAnalysisJob.id == job_id, MealAnalysisJob.user_id == user_id)
         )
         job = result.scalar_one_or_none()
         if job is None:
@@ -933,8 +941,15 @@ async def list_user_meals(
     """Retrieves a paginated timeline of meals logged by the user."""
     meal_repo = MealRepository(db)
 
+    cutoff = None
+    if not await has_premium_access(current_user, db):
+        cutoff = dt.datetime.combine(free_history_cutoff(), dt.time.min).replace(tzinfo=dt.UTC)
+
     return await meal_repo.get_by_user(
-        user_id=current_user.id, skip=skip, limit=limit
+        user_id=current_user.id,
+        skip=skip,
+        limit=limit,
+        cutoff_date=cutoff,
     )
 
 
@@ -945,6 +960,7 @@ async def list_meals_on_date(
     db: AsyncSession = Depends(get_db),
 ) -> list[Meal]:
     """Retrieves all meals logged on a specific calendar date (YYYY-MM-DD)."""
+    await ensure_history_date_access(date_val, current_user, db)
     meal_repo = MealRepository(db)
     return await meal_repo.get_user_meals_on_date(user_id=current_user.id, date_val=date_val)
 
@@ -975,6 +991,8 @@ async def refine_meal_estimate(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Meal record not found or access forbidden.",
         )
+
+    await ensure_history_date_access(meal.created_at.date(), current_user, db)
 
     ai_service = AICalorieEstimationService(db)
     user_context = await _build_user_context(
@@ -1048,6 +1066,7 @@ async def get_meal_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Meal record not found or access forbidden.",
         )
+    await ensure_history_date_access(meal.created_at.date(), current_user, db)
     return meal
 
 
@@ -1070,6 +1089,8 @@ async def update_meal(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Meal record not found or access forbidden.",
         )
+
+    await ensure_history_date_access(meal.created_at.date(), current_user, db)
 
     # Perform repository updates
     updated_meal = await meal_repo.update(meal, payload)
@@ -1110,6 +1131,8 @@ async def delete_meal(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Meal record not found or access forbidden.",
         )
+
+    await ensure_history_date_access(meal.created_at.date(), current_user, db)
 
     meal_date = meal.created_at.date()
 

@@ -86,6 +86,8 @@ def derive_entitlement_state(
         purchases = (subscriber.get("non_subscriptions") or {}).get(product_id) or []
         if purchases and isinstance(purchases[0], dict):
             store = purchases[0].get("store")
+    if store is None and isinstance(product_id, str) and product_id.startswith("rc_promo"):
+        store = "promotional"
 
     return EntitlementState(is_active=is_active, expires_at=expires_at, product_id=product_id, store=store)
 
@@ -164,6 +166,76 @@ class RevenueCatClient:
                 await asyncio.sleep(0.5 * (2**attempt))
 
         raise RevenueCatAPIError(f"RevenueCat API unavailable after {self.max_retries + 1} attempts ({last_error})")
+
+    async def grant_promotional_entitlement(
+        self,
+        app_user_id: str,
+        entitlement_id: str,
+        *,
+        duration: str = "lifetime",
+    ) -> dict[str, Any]:
+        """Grants a RevenueCat promotional entitlement using a secret API key.
+
+        RevenueCat treats the grant as an entitlement source alongside store
+        transactions, so CustomerInfo, restores and backend verification all
+        converge on the same state.
+        """
+        if not self.is_configured:
+            raise RevenueCatAPIError("REVENUECAT_API_KEY is not configured.")
+
+        allowed_durations = {
+            "daily",
+            "three_day",
+            "weekly",
+            "two_week",
+            "monthly",
+            "two_month",
+            "three_month",
+            "six_month",
+            "yearly",
+            "lifetime",
+        }
+        if duration not in allowed_durations:
+            raise RevenueCatAPIError("Unsupported promotional entitlement duration.")
+
+        user_id = quote(app_user_id, safe="")
+        entitlement = quote(entitlement_id, safe="")
+        url = f"{REVENUECAT_API_BASE_URL}/subscribers/{user_id}/entitlements/{entitlement}/promotional"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        last_error = "unknown error"
+        for attempt in range(self.max_retries + 1):
+            response: httpx.Response | None = None
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    response = await client.post(url, headers=headers, json={"duration": duration})
+            except httpx.HTTPError as exc:
+                last_error = f"network error: {type(exc).__name__}"
+            else:
+                if response.status_code in {200, 201}:
+                    return response.json()
+                last_error = f"HTTP {response.status_code}"
+                if response.status_code != 429 and response.status_code < 500:
+                    raise RevenueCatAPIError(f"RevenueCat API returned {last_error}")
+
+            logger.warning(
+                "revenuecat_promo_grant_error attempt=%d app_user_id=%s error=%s",
+                attempt + 1,
+                app_user_id,
+                last_error,
+            )
+            if attempt < self.max_retries:
+                if response is not None:
+                    await asyncio.sleep(self._retry_delay(response, attempt))
+                else:
+                    await asyncio.sleep(0.5 * (2**attempt))
+
+        raise RevenueCatAPIError(
+            f"RevenueCat promotional grant failed after {self.max_retries + 1} attempts ({last_error})"
+        )
 
     @staticmethod
     def _retry_delay(response: httpx.Response, attempt: int) -> float:

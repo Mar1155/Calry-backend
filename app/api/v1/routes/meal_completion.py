@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.schemas.meal_completion import MealCompletionRequest
 from app.ai.schemas.meal_estimate import UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
-from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.dependencies.premium import require_premium_user
 from app.models.user import User
 from app.repositories.meal import MealRepository
 from app.schemas.meal_completion import MealCompletionResponse, MealSuggestionResponse
@@ -20,28 +20,28 @@ router = APIRouter()
 GUARDRAIL_MSG = {
     "en": {
         "summary": "You consumed {consumed} kcal out of a {goal} kcal goal. You have {remaining} kcal remaining. You have almost reached your goal for today!",
-        "note": "No further meal suggestions are needed for today."
+        "note": "No further meal suggestions are needed for today.",
     },
     "it": {
         "summary": "Hai consumato {consumed} kcal su un obiettivo di {goal} kcal. Ti rimangono {remaining} kcal. Hai quasi raggiunto il tuo obiettivo per oggi!",
-        "note": "Non sono necessari ulteriori suggerimenti di pasti per oggi."
+        "note": "Non sono necessari ulteriori suggerimenti di pasti per oggi.",
     },
     "es": {
         "summary": "Has consumido {consumed} kcal de un objetivo de {goal} kcal. Te quedan {remaining} kcal. ¡Casi has alcanzado tu objetivo hoy!",
-        "note": "No se necesitan más sugerencias de comidas para hoy."
+        "note": "No se necesitan más sugerencias de comidas para hoy.",
     },
     "zh": {
         "summary": "您已摄入 {consumed} 千卡（目标为 {goal} 千卡）。您还剩 {remaining} 千卡。今天您已几乎达到目标！",
-        "note": "今天不需要更多的膳食建议。"
+        "note": "今天不需要更多的膳食建议。",
     },
     "ja": {
         "summary": "目標 {goal} kcal のうち {consumed} kcal を摂取しました。残り {remaining} kcal です。今日の目標をほぼ達成しました！",
-        "note": "今日の食事の提案はもう必要ありません。"
+        "note": "今日の食事の提案はもう必要ありません。",
     },
     "ar": {
         "summary": "لقد استهلكت {consumed} سعرة حرارية من هدفك البالغ {goal} سعرة حرارية. يتبقى لديك {remaining} سعرة حرارية. لقد اقتربت من تحقيق هدفك اليوم!",
-        "note": "لا حاجة لمزيد من اقتراحات الوجبات اليوم."
-    }
+        "note": "لا حاجة لمزيد من اقتراحات الوجبات اليوم.",
+    },
 }
 
 
@@ -74,7 +74,7 @@ async def _build_user_context(db: AsyncSession, user: User, locale: str | None =
 
 @router.post("/complete-day", response_model=MealCompletionResponse)
 async def suggest_daily_completion(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_premium_user),
     db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default="en"),
 ) -> MealCompletionResponse:

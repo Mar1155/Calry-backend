@@ -57,6 +57,16 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
     # 1. Register user
     profile_res = await client.get("/api/v1/users/me", headers=headers)
     user_id = profile_res.json()["id"]
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "Calry Pro",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "completion_test_uid",
+        },
+    )
 
     # 2. Add today's meal consuming 1200 calories
     today = dt.date.today()
@@ -76,8 +86,7 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
 
     # 3. Patch the AICalorieEstimationService.suggest_meal_completion method
     with patch(
-        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion",
-        new_callable=AsyncMock
+        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion", new_callable=AsyncMock
     ) as mock_complete:
         mock_complete.return_value = mock_completion_result
 
@@ -105,6 +114,16 @@ async def test_meal_completion_guardrail(client: AsyncClient, db_session: AsyncS
     # 1. Register user
     profile_res = await client.get("/api/v1/users/me", headers=headers)
     user_id = profile_res.json()["id"]
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "Calry Pro",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "completion_guardrail_test_uid",
+        },
+    )
 
     # 2. Add today's meal consuming 1850 calories
     today = dt.date.today()
@@ -124,8 +143,7 @@ async def test_meal_completion_guardrail(client: AsyncClient, db_session: AsyncS
 
     # 3. Patch the AI service to verify it is NOT called
     with patch(
-        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion",
-        new_callable=AsyncMock
+        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion", new_callable=AsyncMock
     ) as mock_complete:
         # 4. Trigger the route
         response = await client.post("/api/v1/meals/complete-day", headers=headers)

@@ -48,6 +48,7 @@ class UserRepository(BaseRepository[User]):
         user.revenuecat_app_user_id = revenuecat_app_user_id
         user.premium_store = premium_store
         user.premium_product_id = premium_product_id
+        user.premium_last_verified_at = dt.datetime.now(dt.UTC)
 
         self.db.add(user)
         await self.db.flush()

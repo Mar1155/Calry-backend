@@ -39,6 +39,7 @@ class User(Base):
     # Store the entitlement came from ("app_store", "play_store", ...) and the product bought.
     premium_store: Mapped[str | None] = mapped_column(String(50), nullable=True)
     premium_product_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    premium_last_verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Macro goals (premium feature)
     daily_protein_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
     daily_carbs_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -68,4 +69,10 @@ class User(Base):
     )
     food_memories: Mapped[list["UserFoodMemory"]] = relationship(
         "UserFoodMemory", back_populates="user", cascade="all, delete-orphan"
+    )
+    promo_code_redemptions: Mapped[list["PromoCodeRedemption"]] = relationship(
+        "PromoCodeRedemption", back_populates="user", cascade="all, delete-orphan"
+    )
+    promo_code_attempts: Mapped[list["PromoCodeAttempt"]] = relationship(
+        "PromoCodeAttempt", back_populates="user", cascade="all, delete-orphan"
     )

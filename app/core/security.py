@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 import firebase_admin
 from firebase_admin import auth, credentials
@@ -59,8 +60,12 @@ def verify_firebase_token(token: str) -> dict:
     to allow robust, local unit tests to execute without hitting Firebase servers.
     """
     if settings.is_testing or (settings.ENVIRONMENT == "development" and token.startswith("mock_")):
-        uid = "mock_uid_123"
-        email = "google.user@calry.ai" if "google" in token else "developer@calry.ai"
+        # Derive a stable identity per mock token so committed integration-test
+        # state cannot leak between otherwise unrelated users.
+        suffix = re.sub(r"[^a-zA-Z0-9_-]", "_", token.removeprefix("mock_token_"))[:80]
+        suffix = suffix or "default"
+        uid = suffix
+        email = f"{suffix.lower()}@example.com"
         name = "Google User" if "google" in token else "Calry Developer"
         return {
             "uid": uid,

@@ -94,18 +94,45 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
         created_at=dt.datetime.combine(old_date, dt.time(12, 0)).replace(tzinfo=dt.UTC),
     )
     db_session.add(old_meal)
+    recent_date = today - dt.timedelta(days=3)
+    recent_meal = Meal(
+        user_id=user_id,
+        source_type="text",
+        original_input="Recent Pasta",
+        meal_name="Recent Pasta",
+        estimated_calories=450,
+        created_at=dt.datetime.combine(recent_date, dt.time(12, 0)).replace(tzinfo=dt.UTC),
+    )
+    db_session.add(recent_meal)
     await db_session.commit()
 
     # 2. Fetch as FREE user (user is not premium yet)
     # Check Meals history
     meals_res = await client.get("/api/v1/meals", headers=headers)
     assert meals_res.status_code == 200
-    assert len(meals_res.json()) == 0  # Gated/truncated since it's 10 days old
+    assert [meal["original_input"] for meal in meals_res.json()] == ["Recent Pasta"]
+
+    # Previous days within the free 7-day window remain editable.
+    recent_update = await client.patch(
+        f"/api/v1/meals/{recent_meal.id}",
+        headers=headers,
+        json={"confirmed_calories": 475},
+    )
+    assert recent_update.status_code == 200
+    assert recent_update.json()["confirmed_calories"] == 475
+
+    # Direct IDs cannot bypass the history paywall.
+    old_update = await client.patch(
+        f"/api/v1/meals/{old_meal.id}",
+        headers=headers,
+        json={"confirmed_calories": 525},
+    )
+    assert old_update.status_code == 403
 
     # Check Summaries history
     summaries_res = await client.get("/api/v1/summary/history", headers=headers)
     assert summaries_res.status_code == 200
-    assert len(summaries_res.json()) == 0  # Gated/truncated since it's 10 days old
+    assert [summary["date"] for summary in summaries_res.json()] == [recent_date.isoformat()]
 
     # 3. Elevate user to premium status
     sync_payload = {
@@ -120,11 +147,24 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
     # Check Meals history
     meals_res_premium = await client.get("/api/v1/meals", headers=headers)
     assert meals_res_premium.status_code == 200
-    assert len(meals_res_premium.json()) == 1
-    assert meals_res_premium.json()[0]["original_input"] == "Old Pasta"
+    assert len(meals_res_premium.json()) == 2
+    assert {meal["original_input"] for meal in meals_res_premium.json()} == {
+        "Old Pasta",
+        "Recent Pasta",
+    }
+
+    old_update_premium = await client.patch(
+        f"/api/v1/meals/{old_meal.id}",
+        headers=headers,
+        json={"confirmed_calories": 525},
+    )
+    assert old_update_premium.status_code == 200
 
     # Check Summaries history
     summaries_res_premium = await client.get("/api/v1/summary/history", headers=headers)
     assert summaries_res_premium.status_code == 200
-    assert len(summaries_res_premium.json()) == 1
-    assert summaries_res_premium.json()[0]["consumed_calories"] == 1500
+    assert len(summaries_res_premium.json()) == 2
+    assert any(
+        summary["date"] == old_date.isoformat() and summary["consumed_calories"] == 525
+        for summary in summaries_res_premium.json()
+    )

@@ -22,8 +22,8 @@ def test_calorie_target_service_math():
     assert CalorieTargetService.calculate_daily_target(maint_m, "maintain") == 2450
     # Lose: 2436 - 400 = 2036 -> 2050
     assert CalorieTargetService.calculate_daily_target(maint_m, "lose") == 2050
-    # Gain: 2436 + 300 = 2736 -> 2750
-    assert CalorieTargetService.calculate_daily_target(maint_m, "gain") == 2750
+    # Gain (balanced pace): 2436 + 250 = 2686 -> 2700
+    assert CalorieTargetService.calculate_daily_target(maint_m, "gain") == 2700
 
 
 @pytest.mark.asyncio

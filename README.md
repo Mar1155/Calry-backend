@@ -134,6 +134,11 @@ Set these in the service's **Variables** tab:
 | `LEGAL_OPERATOR_NAME` | legal person/company name | Data controller and contracting party shown on public legal pages |
 | `LEGAL_CONTACT_EMAIL` | monitored legal/support inbox | Public contact for privacy and terms requests |
 | `LEGAL_EFFECTIVE_DATE` | `2026-07-13` | Effective date shown on both documents (ISO format) |
+| `REVENUECAT_WEBHOOK_SECRET` | long random secret | Authorization value required by `/api/v1/webhooks/revenuecat` |
+| `REVENUECAT_API_KEY` | RevenueCat secret `sk_…` key | Server-side subscriber verification and promotional grants; never ship this in Flutter |
+| `REVENUECAT_ENTITLEMENT_ID` | `Calry Pro` | Must exactly match the entitlement identifier in RevenueCat |
+| `PROMO_CODE_PEPPER` | stable random 48+ byte secret | HMAC key for free-access codes; rotating it invalidates outstanding codes |
+| `PROMO_CODE_REDEMPTION_ENABLED` | `true` | Operational kill switch for custom free-access redemption |
 
 > `PORT` is injected by Railway automatically — do **not** set it manually.
 
@@ -187,3 +192,53 @@ privacy-policy URL required by App Store Connect and Google Play Console.
 Before store submission, set `LEGAL_OPERATOR_NAME` to the real legal entity and
 `LEGAL_CONTACT_EMAIL` to a monitored inbox, then have the text reviewed for the
 operator's launch markets and actual data-retention practices.
+
+---
+
+## RevenueCat and Calry Pro
+
+RevenueCat is the billing source of truth. Flutter identifies the customer with
+the authenticated Firebase UID; the backend verifies the same UID through the
+RevenueCat REST API and caches the effective entitlement on `users` for fast API
+authorization.
+
+Dashboard checklist:
+
+1. Keep the entitlement identifier exactly `Calry Pro`.
+2. Attach the published paywall to the **Current/Default Offering** and ensure
+   that offering contains at least one package. A paywall named `default` alone
+   is not enough unless it is attached to the current offering.
+3. Optionally configure RevenueCat placements named `onboarding_end`,
+   `feature_gate`, and `profile`. The app falls back to the Current Offering
+   when a placement is unavailable.
+4. Point the webhook to `/api/v1/webhooks/revenuecat` and send the configured
+   `REVENUECAT_WEBHOOK_SECRET` in its Authorization header.
+5. Store only public platform SDK keys in Flutter builds. `REVENUECAT_API_KEY`
+   is a backend/Railway secret.
+
+After an SDK purchase or restore, Flutter calls `POST /api/v1/premium/refresh`.
+The backend independently reads RevenueCat and never accepts a client-provided
+premium boolean in production. Weekly reports, AI pattern insights, complete-day
+AI suggestions, and history older than seven days are also enforced server-side.
+
+### Free-access codes
+
+Free codes are HMAC-hashed in PostgreSQL and grant a RevenueCat **lifetime
+promotional entitlement**. They are rate-limited, usage-limited, auditable, and
+idempotent per user. Plaintext is printed once when a code is created:
+
+```bash
+PROMO_CODE_PEPPER='the-same-secret-as-Railway' \
+python scripts/create_promo_code.py --max-redemptions 1
+
+# Optional controlled campaign code:
+python scripts/create_promo_code.py \
+  --code CALRY-FOUNDERS-2026 \
+  --max-redemptions 25 \
+  --valid-days 30
+```
+
+The schema reserves `discounted_offering` as a second code kind, but it is not
+redeemable yet. A future discounted code must resolve to a real
+RevenueCat/App Store/Play Store discounted offering; the backend must never
+invent or override a store price.
