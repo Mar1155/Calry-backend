@@ -242,3 +242,21 @@ The schema reserves `discounted_offering` as a second code kind, but it is not
 redeemable yet. A future discounted code must resolve to a real
 RevenueCat/App Store/Play Store discounted offering; the backend must never
 invent or override a store price.
+
+### Delete a user by email
+
+The administrative deletion script shows an account/data summary and requires
+an exact confirmation before permanently deleting the RevenueCat customer,
+Firebase Auth identity, backend user, meals, analysis jobs, AI input logs,
+history, memories, promo-code records, and RevenueCat audit snapshots:
+
+```bash
+venv/bin/python scripts/delete_user.py user@example.com
+```
+
+For non-interactive trusted automation, add `--yes`. For local fixtures that do
+not exist in Firebase or RevenueCat, use `--backend-only`. The narrower
+`--keep-firebase` and `--keep-revenuecat` switches must be explicitly requested
+when retaining either external identity. Deleting a RevenueCat customer does
+not cancel the underlying App Store or Play Store subscription; cancellation
+remains a separate store operation.
