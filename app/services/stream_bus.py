@@ -69,11 +69,25 @@ async def publish(job_id: str, event: dict) -> None:
     immediately after receiving a published event never sees a snapshot that
     lags the channel."""
     r = get_redis()
+    event_type = event.get("type")
     try:
         await _update_state(r, job_id, event)
-        await r.publish(_chan(job_id), json.dumps(event, ensure_ascii=False, default=str))
+        subscribers = await r.publish(_chan(job_id), json.dumps(event, ensure_ascii=False, default=str))
+        logger.info(
+            "event=meal_stream_bus_published job_id=%s event_type=%s item_index=%s subscribers=%s",
+            job_id,
+            event_type,
+            event.get("index"),
+            subscribers,
+        )
     except Exception as e:  # noqa: BLE001 — streaming is best-effort; never break the worker
-        logger.warning(f"stream_bus.publish failed for job {job_id}: {e}")
+        logger.exception(
+            "event=meal_stream_bus_publish_failed job_id=%s event_type=%s error_type=%s error=%s",
+            job_id,
+            event_type,
+            type(e).__name__,
+            str(e),
+        )
 
 
 async def _update_state(r: aioredis.Redis, job_id: str, event: dict) -> None:
@@ -93,7 +107,15 @@ async def _update_state(r: aioredis.Redis, job_id: str, event: dict) -> None:
 async def read_state(job_id: str) -> dict | None:
     r = get_redis()
     raw = await r.get(_state_key(job_id))
-    return json.loads(raw) if raw else None
+    state = json.loads(raw) if raw else None
+    logger.info(
+        "event=meal_stream_bus_state_read job_id=%s found=%s item_count=%s terminal=%s",
+        job_id,
+        state is not None,
+        len(state.get("items", [])) if state else 0,
+        state.get("terminal", {}).get("type") if state and state.get("terminal") else None,
+    )
+    return state
 
 
 async def subscribe(job_id: str):
@@ -101,4 +123,5 @@ async def subscribe(job_id: str):
     r = get_redis()
     pubsub = r.pubsub()
     await pubsub.subscribe(_chan(job_id))
+    logger.info("event=meal_stream_bus_subscribed job_id=%s", job_id)
     return pubsub

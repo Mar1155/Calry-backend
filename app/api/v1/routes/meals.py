@@ -489,7 +489,7 @@ async def start_photo_analysis(
             job.error_message = str(exc)
             await db.commit()
             logger.error(
-                "event=meal_analysis_queue_failure_persisted transport=poll job_id=%s user_id=%s " "job_status=%s",
+                "event=meal_analysis_queue_failure_persisted transport=poll job_id=%s user_id=%s job_status=%s",
                 job.id,
                 current_user.id,
                 job.status,
@@ -760,29 +760,39 @@ async def _load_meal_dict(db: AsyncSession, user_id: int, meal_id: int) -> dict 
     return _serialize_meal(meal) if meal is not None else None
 
 
-async def _photo_job_terminal_event(job_id: str, user_id: int) -> dict | None:
-    """Durable safety net for the relay: consult the DB job row and return a
-    terminal `done`/`error` event if the worker has finished, else None. Covers
-    a Redis snapshot that expired and any missed publish."""
+async def _photo_job_probe(job_id: str, user_id: int) -> tuple[dict | None, dict | None]:
+    """Return safe worker diagnostics plus an optional terminal stream event.
+
+    This durable probe makes a dead/misconfigured worker distinguishable from
+    a slow AI provider without logging image URLs, prompts, or credentials.
+    """
     async with SessionLocal() as db:
         result = await db.execute(
             select(MealAnalysisJob).where(MealAnalysisJob.id == job_id, MealAnalysisJob.user_id == user_id)
         )
         job = result.scalar_one_or_none()
         if job is None:
-            return None
+            return None, None
+        diagnostics = {
+            "status": job.status,
+            "attempts": job.attempts,
+            "has_celery_task_id": bool(job.celery_task_id),
+        }
         if job.status == "completed" and job.meal_id is not None:
             meal_dict = await _load_meal_dict(db, user_id, job.meal_id)
             if meal_dict is not None:
-                return protocol.done(meal_dict)
+                return diagnostics, protocol.done(meal_dict)
         if job.status == "failed":
-            return protocol.error(
-                "analysis_failed",
-                "We couldn't analyze this photo. Try again or add a short description.",
+            return (
+                diagnostics,
+                protocol.error(
+                    "analysis_failed",
+                    "We couldn't analyze this photo. Try again or add a short description.",
+                ),
             )
         if job.status == "cancelled":
-            return protocol.error("analysis_cancelled", "Photo analysis was cancelled.")
-        return None
+            return diagnostics, protocol.error("analysis_cancelled", "Photo analysis was cancelled.")
+        return diagnostics, None
 
 
 @router.post("/photo/stream")
@@ -801,14 +811,29 @@ async def stream_log_meal_via_photo(
     """
 
     async def gen():
+        stream_started_at = time.monotonic()
+        logger.info(
+            "event=meal_analysis_stream_received user_id=%s client_request_id=%s has_hint=%s has_additional_context=%s",
+            current_user.id,
+            payload.client_request_id,
+            bool(payload.text),
+            bool(payload.additional_context),
+        )
         # Phase 1 — durable job setup (short-lived session).
         async with SessionLocal() as db:
             existing_meal = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
             if existing_meal is not None:
+                logger.info(
+                    "event=meal_analysis_stream_idempotent_result user_id=%s client_request_id=%s meal_id=%s",
+                    current_user.id,
+                    payload.client_request_id,
+                    existing_meal.id,
+                )
                 yield protocol.line(protocol.done(_serialize_meal(existing_meal)))
                 return
 
             job = await _find_existing_analysis_by_request_id(db, current_user.id, payload.client_request_id)
+            reused_job = job is not None
             if job is None:
                 job = MealAnalysisJob(
                     user_id=current_user.id,
@@ -837,8 +862,7 @@ async def stream_log_meal_via_photo(
                     job.celery_task_id = task.id
                     await db.commit()
                     logger.info(
-                        "event=meal_analysis_enqueue_succeeded transport=stream job_id=%s user_id=%s "
-                        "celery_task_id=%s",
+                        "event=meal_analysis_enqueue_succeeded transport=stream job_id=%s user_id=%s celery_task_id=%s",
                         job.id,
                         current_user.id,
                         task.id,
@@ -871,12 +895,31 @@ async def stream_log_meal_via_photo(
             job_id = job.id
             job_status = job.status
             job_meal_id = job.meal_id
+            job_attempts = job.attempts
+            has_celery_task_id = bool(job.celery_task_id)
+
+        logger.info(
+            "event=meal_analysis_stream_job_ready job_id=%s user_id=%s client_request_id=%s "
+            "status=%s attempts=%s has_celery_task_id=%s reused=%s",
+            job_id,
+            current_user.id,
+            payload.client_request_id,
+            job_status,
+            job_attempts,
+            has_celery_task_id,
+            reused_job,
+        )
 
         # Fast path — job already completed (idempotent replay).
         if job_status == "completed" and job_meal_id is not None:
             async with SessionLocal() as db:
                 meal_dict = await _load_meal_dict(db, current_user.id, job_meal_id)
             if meal_dict is not None:
+                logger.info(
+                    "event=meal_analysis_stream_completed_replay job_id=%s meal_id=%s",
+                    job_id,
+                    job_meal_id,
+                )
                 yield protocol.line(protocol.done(meal_dict))
                 return
 
@@ -885,6 +928,8 @@ async def stream_log_meal_via_photo(
         pubsub = await stream_bus.subscribe(job_id)
         emitted_name = False
         max_index = -1
+        heartbeat_count = 0
+        outcome = "client_disconnected"
         try:
             snapshot = await stream_bus.read_state(job_id)
             if snapshot:
@@ -897,6 +942,7 @@ async def stream_log_meal_via_photo(
                         max_index = idx
                         yield protocol.line(it)
                 if snapshot.get("terminal"):
+                    outcome = f"snapshot_{snapshot['terminal'].get('type', 'terminal')}"
                     yield protocol.line(snapshot["terminal"])
                     return
 
@@ -905,11 +951,37 @@ async def stream_log_meal_via_photo(
                 msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=5.0)
                 if msg is None:
                     # No live event — check the durable job row, then heartbeat.
-                    term = await _photo_job_terminal_event(job_id, current_user.id)
+                    heartbeat_count += 1
+                    diagnostics, term = await _photo_job_probe(job_id, current_user.id)
+                    if heartbeat_count == 1 or heartbeat_count % 3 == 0:
+                        log = (
+                            logger.warning
+                            if diagnostics and diagnostics["status"] == "queued" and diagnostics["attempts"] == 0
+                            else logger.info
+                        )
+                        log(
+                            "event=meal_analysis_stream_waiting job_id=%s status=%s attempts=%s "
+                            "has_celery_task_id=%s heartbeat=%s elapsed_ms=%s",
+                            job_id,
+                            diagnostics.get("status") if diagnostics else "missing",
+                            diagnostics.get("attempts") if diagnostics else None,
+                            diagnostics.get("has_celery_task_id") if diagnostics else None,
+                            heartbeat_count,
+                            int((time.monotonic() - stream_started_at) * 1000),
+                        )
                     if term is not None:
+                        outcome = f"database_{term.get('type', 'terminal')}"
                         yield protocol.line(term)
                         return
                     if time.monotonic() > deadline:
+                        outcome = "relay_timeout"
+                        logger.error(
+                            "event=meal_analysis_stream_timeout job_id=%s status=%s attempts=%s elapsed_ms=%s",
+                            job_id,
+                            diagnostics.get("status") if diagnostics else "missing",
+                            diagnostics.get("attempts") if diagnostics else None,
+                            int((time.monotonic() - stream_started_at) * 1000),
+                        )
                         yield protocol.line(
                             protocol.error("timeout", "Analysis is taking longer than expected. Check back shortly.")
                         )
@@ -920,8 +992,15 @@ async def stream_log_meal_via_photo(
                 try:
                     ev = json.loads(msg["data"])
                 except (json.JSONDecodeError, TypeError):
+                    logger.warning("event=meal_analysis_stream_invalid_bus_event job_id=%s", job_id)
                     continue
                 etype = ev.get("type")
+                logger.info(
+                    "event=meal_analysis_stream_event_received job_id=%s event_type=%s item_index=%s",
+                    job_id,
+                    etype,
+                    ev.get("index"),
+                )
                 if etype == "meal_name":
                     if not emitted_name:
                         emitted_name = True
@@ -932,6 +1011,7 @@ async def stream_log_meal_via_photo(
                         max_index = idx
                         yield protocol.line(ev)
                 elif etype in ("done", "error"):
+                    outcome = f"live_{etype}"
                     yield protocol.line(ev)
                     return
                 else:
@@ -942,6 +1022,12 @@ async def stream_log_meal_via_photo(
                 await pubsub.aclose()
             except Exception:  # noqa: BLE001
                 pass
+            logger.info(
+                "event=meal_analysis_stream_closed job_id=%s outcome=%s elapsed_ms=%s",
+                job_id,
+                outcome,
+                int((time.monotonic() - stream_started_at) * 1000),
+            )
 
     return StreamingResponse(gen(), media_type=protocol.NDJSON_MEDIA_TYPE, headers=_STREAM_HEADERS)
 

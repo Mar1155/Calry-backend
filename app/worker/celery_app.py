@@ -1,6 +1,12 @@
+import logging
+from urllib.parse import urlsplit
+
 from celery import Celery
+from celery.signals import worker_ready, worker_shutdown
 
 from app.core.config import settings
+
+logger = logging.getLogger("app.worker.celery")
 
 celery_app = Celery(
     "calry",
@@ -27,3 +33,20 @@ celery_app.conf.update(
     worker_max_tasks_per_child=settings.CELERY_WORKER_MAX_TASKS_PER_CHILD,
     worker_max_memory_per_child=settings.CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB,
 )
+
+
+@worker_ready.connect
+def log_worker_ready(**_: object) -> None:
+    broker = urlsplit(settings.REDIS_URL)
+    logger.info(
+        "event=meal_analysis_worker_ready broker_scheme=%s broker_host=%s concurrency=%s max_retries=%s",
+        broker.scheme,
+        broker.hostname,
+        settings.CELERY_WORKER_CONCURRENCY,
+        settings.MEAL_ANALYSIS_MAX_RETRIES,
+    )
+
+
+@worker_shutdown.connect
+def log_worker_shutdown(**_: object) -> None:
+    logger.warning("event=meal_analysis_worker_shutdown")
