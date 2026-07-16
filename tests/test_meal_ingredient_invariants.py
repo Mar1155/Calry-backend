@@ -13,6 +13,15 @@ from app.services.meal_invariants import normalize_meal_ingredients
 from scripts.seed_user_history import FoodItem, MealTemplate, build_meal
 
 
+def _load_migration():
+    migration_path = Path(__file__).parents[1] / "alembic/versions/2026_07_16_0001_meal_ingredient_invariants.py"
+    spec = importlib.util.spec_from_file_location("meal_invariant_migration", migration_path)
+    assert spec and spec.loader
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
 def _estimate() -> MealEstimateResult:
     return MealEstimateResult(
         meal_name="Rice bowl",
@@ -91,6 +100,17 @@ def test_history_seed_builds_ingredient_derived_meal() -> None:
     assert meal.estimated_calories == sum(item.estimated_calories for item in meal.items)
 
 
+def test_postgres_guards_execute_one_command_per_statement() -> None:
+    migration = _load_migration()
+
+    with patch.object(migration.op, "execute") as execute:
+        migration._create_postgres_guards()
+
+    statements = [call.args[0].strip() for call in execute.call_args_list]
+    assert len(statements) == 7
+    assert all(statement.upper().startswith("CREATE") for statement in statements)
+
+
 @pytest.mark.asyncio
 async def test_meal_api_rejects_independent_total_and_empty_ingredients(client: AsyncClient) -> None:
     headers = {"Authorization": "Bearer mock_token_ingredient_invariant"}
@@ -161,11 +181,7 @@ async def test_meal_update_derives_and_confirms_total_from_ingredients(client: A
 
 
 def test_historical_backfill_repairs_empty_and_partial_meals() -> None:
-    migration_path = Path(__file__).parents[1] / "alembic/versions/2026_07_16_0001_meal_ingredient_invariants.py"
-    spec = importlib.util.spec_from_file_location("meal_invariant_migration", migration_path)
-    assert spec and spec.loader
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    migration = _load_migration()
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as connection:

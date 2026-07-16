@@ -179,11 +179,12 @@ def _create_postgres_guards() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-
+        """)
+    op.execute("""
         CREATE TRIGGER trg_meal_items_sync_calories
         AFTER INSERT OR UPDATE OR DELETE ON meal_items
         FOR EACH ROW EXECUTE FUNCTION calry_sync_meal_calories_from_items();
-        """)
+    """)
     op.execute("""
         CREATE OR REPLACE FUNCTION calry_derive_meal_calories()
         RETURNS trigger AS $$
@@ -202,11 +203,12 @@ def _create_postgres_guards() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-
+        """)
+    op.execute("""
         CREATE TRIGGER trg_meals_derive_calories
         BEFORE INSERT OR UPDATE OF estimated_calories, confirmed_calories ON meals
         FOR EACH ROW EXECUTE FUNCTION calry_derive_meal_calories();
-        """)
+    """)
     op.execute("""
         CREATE OR REPLACE FUNCTION calry_require_meal_ingredient()
         RETURNS trigger AS $$
@@ -232,17 +234,19 @@ def _create_postgres_guards() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-
+        """)
+    op.execute("""
         CREATE CONSTRAINT TRIGGER trg_meals_require_ingredient
         AFTER INSERT OR UPDATE ON meals
         DEFERRABLE INITIALLY DEFERRED
         FOR EACH ROW EXECUTE FUNCTION calry_require_meal_ingredient();
-
+    """)
+    op.execute("""
         CREATE CONSTRAINT TRIGGER trg_meal_items_require_ingredient
         AFTER INSERT OR UPDATE OR DELETE ON meal_items
         DEFERRABLE INITIALLY DEFERRED
         FOR EACH ROW EXECUTE FUNCTION calry_require_meal_ingredient();
-        """)
+    """)
 
 
 def upgrade() -> None:
