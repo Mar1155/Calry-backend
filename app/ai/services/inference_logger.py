@@ -31,23 +31,25 @@ class AIInferenceLogger:
     ) -> None:
         usage = token_usage or {}
         try:
-            log_entry = AIInferenceLog(
-                user_id=user_id,
-                provider=provider,
-                model_name=model_name,
-                prompt_version=prompt_version,
-                input_type=input_type,
-                raw_input=raw_input,
-                raw_output=raw_output,
-                latency_ms=latency_ms,
-                success=success,
-                error_message=error_message,
-                prompt_tokens=usage.get("prompt_tokens"),
-                completion_tokens=usage.get("completion_tokens"),
-                cached_tokens=usage.get("cached_tokens"),
-            )
-            await self.repo.create(log_entry)
-            await self.db.flush()
+            # Keep observability best-effort without poisoning the meal's outer
+            # transaction when a log insert fails.
+            async with self.db.begin_nested():
+                log_entry = AIInferenceLog(
+                    user_id=user_id,
+                    provider=provider,
+                    model_name=model_name,
+                    prompt_version=prompt_version,
+                    input_type=input_type,
+                    raw_input=raw_input,
+                    raw_output=raw_output,
+                    latency_ms=latency_ms,
+                    success=success,
+                    error_message=error_message,
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
+                    cached_tokens=usage.get("cached_tokens"),
+                )
+                await self.repo.create(log_entry)
         except Exception as e:
             # We fail silently to prevent logger errors from blocking core user flows
             logger.error(f"Inference logging failed: {e}")

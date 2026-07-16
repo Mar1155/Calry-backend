@@ -153,6 +153,7 @@ class MealPhotoAnalysisStatusResponse(BaseModel):
     status: Literal["queued", "processing", "completed", "failed", "cancelled"]
     meal_id: int | None = None
     meal: MealResponse | None = None
+    error_code: str | None = None
     error_message: str | None = None
     attempts: int = 0
     created_at: dt.datetime

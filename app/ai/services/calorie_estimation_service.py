@@ -4,9 +4,7 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.streaming import protocol
-from app.ai.streaming.partial_parser import StreamingMealParser
-
+from app.ai.errors import AIProviderError
 from app.ai.prompts.image_estimation import IMAGE_MEAL_ESTIMATION_PROMPT_VERSION
 from app.ai.prompts.meal_completion import MEAL_COMPLETION_PROMPT_VERSION
 from app.ai.prompts.meal_estimation import TEXT_MEAL_ESTIMATION_PROMPT_VERSION
@@ -19,6 +17,8 @@ from app.ai.services.confidence_service import AIConfidenceService, bucket_confi
 from app.ai.services.inference_logger import AIInferenceLogger
 from app.ai.services.speech_service import AISpeechService
 from app.ai.services.validation_service import AIValidationService
+from app.ai.streaming import protocol
+from app.ai.streaming.partial_parser import StreamingMealParser
 from app.core.config import settings
 from app.models.food_memory import UserFoodMemory
 from app.repositories.food_memory import FoodMemoryRepository
@@ -67,8 +67,13 @@ class AICalorieEstimationService:
                 val = getattr(it, attr)
                 if val is not None:
                     setattr(it, attr, round(val * mult, 1))
-        for attr in ("total_protein_g", "total_carbs_g", "total_fat_g",
-                     "estimated_min_calories", "estimated_max_calories"):
+        for attr in (
+            "total_protein_g",
+            "total_carbs_g",
+            "total_fat_g",
+            "estimated_min_calories",
+            "estimated_max_calories",
+        ):
             val = getattr(result, attr)
             if val is not None:
                 setattr(result, attr, round(val * mult, 1) if "_g" in attr else round(val * mult))
@@ -96,7 +101,7 @@ class AICalorieEstimationService:
         """Build a result from a user-confirmed food memory — no LLM, no jitter."""
         cal = memory.learned_calories
         items: list[MealEstimateItem] = []
-        for snap in (memory.items_snapshot or []):
+        for snap in memory.items_snapshot or []:
             items.append(
                 MealEstimateItem(
                     name=snap.get("name", memory.display_name),
@@ -380,27 +385,48 @@ class AICalorieEstimationService:
         raw_output = None
 
         try:
-            async for ev in provider.stream_meal_from_text(
-                text, user_context, is_voice=is_voice, additional_context=additional_context
-            ):
-                if "delta" in ev:
-                    raw_text += ev["delta"]
-                    for kind, val in parser.feed(ev["delta"]):
-                        if kind == "meal_name":
-                            yield protocol.meal_name(val)  # type: ignore[arg-type]
-                        elif kind == "item":
-                            yield protocol.item(item_index, val)  # type: ignore[arg-type]
-                            item_index += 1
-                elif "meta" in ev:
-                    meta = ev["meta"]
-                    usage = meta.get("usage")
-                    latency_ms = meta.get("latency_ms") or 0
-                    raw_text = meta.get("raw_text") or raw_text
+            try:
+                async for ev in provider.stream_meal_from_text(
+                    text, user_context, is_voice=is_voice, additional_context=additional_context
+                ):
+                    if "delta" in ev:
+                        raw_text += ev["delta"]
+                        for kind, val in parser.feed(ev["delta"]):
+                            if kind == "meal_name":
+                                yield protocol.meal_name(val)  # type: ignore[arg-type]
+                            elif kind == "item":
+                                yield protocol.item(item_index, val)  # type: ignore[arg-type]
+                                item_index += 1
+                    elif "meta" in ev:
+                        meta = ev["meta"]
+                        usage = meta.get("usage")
+                        latency_ms = meta.get("latency_ms") or 0
+                        raw_text = meta.get("raw_text") or raw_text
+            except AIProviderError as exc:
+                if exc.details.get("retryable") is not True:
+                    raise
+                logger.warning("Text stream interrupted; falling back to a non-streaming estimate.")
+                fallback = await provider.estimate_meal_from_text(
+                    text,
+                    user_context,
+                    is_voice=is_voice,
+                    additional_context=additional_context,
+                )
+                raw_output = fallback.raw_output
+                usage = fallback.token_usage
+                validated = AIValidationService.validate_and_normalize_estimate(fallback)
+                self._finalize(validated, user_context, channel, transcription_confidence)
+                success = True
+                yield {"type": "__complete__", "result": validated}
+                return
 
             raw_output = raw_text
             raw_result = await provider._parse_and_build_meal(
-                raw_text, latency_ms, usage,
-                source_type="text", model=settings.OPENROUTER_TEXT_MODEL,
+                raw_text,
+                latency_ms,
+                usage,
+                source_type="text",
+                model=settings.OPENROUTER_TEXT_MODEL,
                 prompt_version=TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
@@ -454,27 +480,48 @@ class AICalorieEstimationService:
         raw_output = None
 
         try:
-            async for ev in provider.stream_meal_from_image(
-                image_url, user_context, optional_hint, additional_context=additional_context
-            ):
-                if "delta" in ev:
-                    raw_text += ev["delta"]
-                    for kind, val in parser.feed(ev["delta"]):
-                        if kind == "meal_name":
-                            yield protocol.meal_name(val)  # type: ignore[arg-type]
-                        elif kind == "item":
-                            yield protocol.item(item_index, val)  # type: ignore[arg-type]
-                            item_index += 1
-                elif "meta" in ev:
-                    meta = ev["meta"]
-                    usage = meta.get("usage")
-                    latency_ms = meta.get("latency_ms") or 0
-                    raw_text = meta.get("raw_text") or raw_text
+            try:
+                async for ev in provider.stream_meal_from_image(
+                    image_url, user_context, optional_hint, additional_context=additional_context
+                ):
+                    if "delta" in ev:
+                        raw_text += ev["delta"]
+                        for kind, val in parser.feed(ev["delta"]):
+                            if kind == "meal_name":
+                                yield protocol.meal_name(val)  # type: ignore[arg-type]
+                            elif kind == "item":
+                                yield protocol.item(item_index, val)  # type: ignore[arg-type]
+                                item_index += 1
+                    elif "meta" in ev:
+                        meta = ev["meta"]
+                        usage = meta.get("usage")
+                        latency_ms = meta.get("latency_ms") or 0
+                        raw_text = meta.get("raw_text") or raw_text
+            except AIProviderError as exc:
+                if exc.details.get("retryable") is not True:
+                    raise
+                logger.warning("Image stream interrupted; falling back to a non-streaming estimate.")
+                fallback = await provider.estimate_meal_from_image(
+                    image_url,
+                    user_context,
+                    optional_hint,
+                    additional_context=additional_context,
+                )
+                raw_output = fallback.raw_output
+                usage = fallback.token_usage
+                validated = AIValidationService.validate_and_normalize_estimate(fallback)
+                self._finalize(validated, user_context, "photo")
+                success = True
+                yield {"type": "__complete__", "result": validated}
+                return
 
             raw_output = raw_text
             raw_result = await provider._parse_and_build_meal(
-                raw_text, latency_ms, usage,
-                source_type="photo", model=settings.OPENROUTER_IMAGE_MODEL,
+                raw_text,
+                latency_ms,
+                usage,
+                source_type="photo",
+                model=settings.OPENROUTER_IMAGE_MODEL,
                 prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
@@ -585,9 +632,7 @@ class AICalorieEstimationService:
             raise e
         finally:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
-            prompt_version = (
-                raw_result.prompt_version if raw_result is not None else MEAL_COMPLETION_PROMPT_VERSION
-            )
+            prompt_version = raw_result.prompt_version if raw_result is not None else MEAL_COMPLETION_PROMPT_VERSION
             await self.inference_logger.log_call(
                 user_id=user_id,
                 provider=provider.provider_name,

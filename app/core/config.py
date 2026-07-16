@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     S3_SECRET_ACCESS_KEY: str | None = None
     S3_PUBLIC_URL_BASE: str | None = None
     S3_PUBLIC_READ: bool = True
+    MEAL_UPLOAD_MAX_BYTES: int = 20 * 1024 * 1024
 
     # Firebase configuration
     FIREBASE_PROJECT_ID: str = "calry-62362"

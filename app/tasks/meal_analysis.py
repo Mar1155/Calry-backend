@@ -3,10 +3,13 @@ import datetime as dt
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from app.ai.errors import AIInvalidResponseError, AIProviderError, ImageAnalysisError
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.core.config import settings
+from app.core.exceptions import CalryException
 from app.db.session import SessionLocal, engine
 from app.models.meal import Meal
 from app.models.meal_analysis import MealAnalysisJob
@@ -21,12 +24,30 @@ def analyze_photo_meal(self, job_id: str) -> int | None:
     try:
         return asyncio.run(_run_photo_analysis_with_cleanup(job_id))
     except Exception as exc:
-        if self.request.retries < settings.MEAL_ANALYSIS_MAX_RETRIES:
+        if _is_retryable_failure(exc) and self.request.retries < settings.MEAL_ANALYSIS_MAX_RETRIES:
             asyncio.run(_mark_job_queued(job_id, str(exc)))
             raise self.retry(exc=exc, countdown=min(60, 5 * (2**self.request.retries)))
         asyncio.run(_mark_job_failed(job_id, str(exc)))
         logger.exception("Meal analysis job failed permanently: %s", job_id)
         raise
+
+
+def _is_retryable_failure(exc: Exception) -> bool:
+    """Retry transient transport/provider/DB failures, not bad user input or
+    malformed AI output. Unknown infrastructure failures get a bounded retry."""
+    if isinstance(exc, AIInvalidResponseError):
+        return False
+    if isinstance(exc, CalryException):
+        explicit = exc.details.get("retryable")
+        if isinstance(explicit, bool):
+            return explicit
+        if isinstance(exc, (ImageAnalysisError, AIProviderError)):
+            return False
+    if isinstance(exc, (FileNotFoundError, TypeError, ValueError)):
+        return False
+    if isinstance(exc, IntegrityError):
+        return True
+    return True
 
 
 async def _run_photo_analysis_with_cleanup(job_id: str) -> int | None:
@@ -211,9 +232,7 @@ async def _mark_job_failed(job_id: str, error: str) -> None:
                 job.status = "completed"
                 job.meal_id = existing_meal.id
                 job.completed_at = dt.datetime.now(dt.UTC)
-                terminal_event = protocol.done(
-                    MealResponse.model_validate(existing_meal).model_dump(mode="json")
-                )
+                terminal_event = protocol.done(MealResponse.model_validate(existing_meal).model_dump(mode="json"))
             else:
                 job.status = "failed"
                 job.error_message = error[:2000]

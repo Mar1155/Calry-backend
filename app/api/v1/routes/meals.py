@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.ai.streaming import protocol
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
@@ -126,11 +127,14 @@ async def _process_and_save_meal(
 
     # 3. Synchronize User's Daily Summary for this meal's creation date
     try:
-        summary_service = SummaryService(db)
-        meal_date = meal.created_at.date()
-        await summary_service.sync_daily_summary(user.id, meal_date)
-    except Exception as e:
-        logger.error(f"Failed to synchronize daily summary on meal log: {e}")
+        # Summary is secondary to returning the analysis. Isolate it in a
+        # savepoint so a summary write failure cannot poison meal persistence.
+        async with db.begin_nested():
+            summary_service = SummaryService(db)
+            meal_date = meal.created_at.date()
+            await summary_service.sync_daily_summary(user.id, meal_date)
+    except Exception:
+        logger.exception("Failed to synchronize daily summary on meal log")
 
     # 4. Asynchronously retrieve the completed Meal with preloaded items to prevent lazyloading issues
     from sqlalchemy.future import select
@@ -214,7 +218,10 @@ async def _analysis_status_response(db: AsyncSession, job: MealAnalysisJob) -> M
         status=job.status,
         meal_id=job.meal_id,
         meal=meal,
-        error_message=job.error_message,
+        error_code="analysis_failed" if job.status == "failed" else None,
+        error_message=(
+            "We couldn't analyze this photo. Try again or add a short description." if job.status == "failed" else None
+        ),
         attempts=job.attempts,
         created_at=job.created_at,
         updated_at=job.updated_at,
@@ -661,8 +668,8 @@ async def stream_log_meal_via_text(
                 )
                 await db.commit()
                 yield protocol.line(protocol.done(_serialize_meal(meal)))
-            except Exception as e:  # noqa: BLE001 — surface as a protocol error, never a 500 mid-stream
-                logger.error(f"Text meal stream failed: {e}")
+            except Exception:  # noqa: BLE001 — surface as a protocol error, never a 500 mid-stream
+                logger.exception("Text meal stream failed")
                 await db.rollback()
                 yield protocol.line(protocol.error("stream_failed", "AI inference failed. Please try again."))
 
@@ -729,8 +736,8 @@ async def stream_log_meal_via_voice(
                 )
                 await db.commit()
                 yield protocol.line(protocol.done(_serialize_meal(meal)))
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"Voice meal stream failed: {e}")
+            except Exception:  # noqa: BLE001
+                logger.exception("Voice meal stream failed")
                 await db.rollback()
                 yield protocol.line(protocol.error("stream_failed", "AI inference failed. Please try again."))
 
@@ -764,7 +771,10 @@ async def _photo_job_terminal_event(job_id: str, user_id: int) -> dict | None:
             if meal_dict is not None:
                 return protocol.done(meal_dict)
         if job.status == "failed":
-            return protocol.error("analysis_failed", job.error_message or "Photo analysis failed.")
+            return protocol.error(
+                "analysis_failed",
+                "We couldn't analyze this photo. Try again or add a short description.",
+            )
         if job.status == "cancelled":
             return protocol.error("analysis_cancelled", "Photo analysis was cancelled.")
         return None
@@ -971,6 +981,40 @@ async def upload_media(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Uploads a media file and returns a URL usable by AI providers and clients."""
+    allowed_types = {
+        "application/octet-stream",
+        "audio/3gpp",
+        "audio/aac",
+        "audio/m4a",
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/ogg",
+        "audio/wav",
+        "audio/x-m4a",
+        "audio/x-wav",
+        "audio/webm",
+        "image/gif",
+        "image/heic",
+        "image/heif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    }
+    if file.content_type and file.content_type.lower() not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Choose a supported photo or audio file.",
+        )
+    if file.size is not None and file.size <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The selected file is empty.",
+        )
+    if file.size is not None and file.size > settings.MEAL_UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="The selected file is too large.",
+        )
     return await save_upload(file, current_user.id)
 
 

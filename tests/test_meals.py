@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult
 from app.ai.services.validation_service import AIValidationService
 from app.models.meal import Meal, MealRevision
+from app.models.meal_analysis import MealAnalysisJob
 
 
 def test_meal_estimate_schema_validation():
@@ -21,13 +22,13 @@ def test_meal_estimate_schema_validation():
         "source_type": "text",
         "items": [
             {"name": "Chicken Breast", "quantity_estimate": "150g", "estimated_calories": 250},
-            {"name": "Brown Rice", "quantity_estimate": "1 cup", "estimated_calories": 250}
+            {"name": "Brown Rice", "quantity_estimate": "1 cup", "estimated_calories": 250},
         ],
         "assumptions": ["Assumed cooked weight"],
         "needs_clarification": False,
         "clarifying_question": None,
         "model_name": "gemini-1.5-flash",
-        "prompt_version": "text_meal_estimation_v1"
+        "prompt_version": "text_meal_estimation_v1",
     }
     result = MealEstimateResult(**data)
     assert result.meal_name == "Chicken and Rice"
@@ -46,12 +47,12 @@ def test_ai_validation_service_rules():
         source_type="text",
         items=[
             MealEstimateItem(name="oats", quantity_estimate="50g", estimated_calories=150),
-            MealEstimateItem(name="banana", quantity_estimate="1 medium", estimated_calories=150)
+            MealEstimateItem(name="banana", quantity_estimate="1 medium", estimated_calories=150),
         ],
         assumptions=[],
         needs_clarification=False,
         model_name="test-model",
-        prompt_version="test-v1"
+        prompt_version="test-v1",
     )
     validated = AIValidationService.validate_and_normalize_estimate(data)
     assert validated.estimated_calories == 300  # aligned to sum of items
@@ -69,7 +70,7 @@ def test_ai_validation_service_rules():
         assumptions=[],
         needs_clarification=False,
         model_name="test-model",
-        prompt_version="test-v1"
+        prompt_version="test-v1",
     )
     validated_high = AIValidationService.validate_and_normalize_estimate(data_high)
     assert validated_high.estimated_calories == 5000  # Clamped to 5000 max
@@ -86,7 +87,7 @@ def test_ai_validation_service_rules():
         needs_clarification=True,
         clarifying_question="",
         model_name="test-model",
-        prompt_version="test-v1"
+        prompt_version="test-v1",
     )
     validated_clarify = AIValidationService.validate_and_normalize_estimate(data_clarify)
     assert validated_clarify.clarifying_question == "Could you tell me more about what you ate?"
@@ -94,9 +95,7 @@ def test_ai_validation_service_rules():
 
 
 @pytest.mark.asyncio
-async def test_meal_detail_favorite_creates_and_toggles_memory(
-    client: AsyncClient, db_session
-) -> None:
+async def test_meal_detail_favorite_creates_and_toggles_memory(client: AsyncClient, db_session) -> None:
     headers = {"Authorization": "Bearer mock_token_meal_favorite"}
     user_response = await client.get("/api/v1/users/me", headers=headers)
     user_id = user_response.json()["id"]
@@ -110,15 +109,11 @@ async def test_meal_detail_favorite_creates_and_toggles_memory(
     db_session.add(meal)
     await db_session.commit()
 
-    first = await client.patch(
-        f"/api/v1/food-memory/meal/{meal.id}/favorite", headers=headers
-    )
+    first = await client.patch(f"/api/v1/food-memory/meal/{meal.id}/favorite", headers=headers)
     assert first.status_code == 200
     assert first.json()["is_favorite"] is True
 
-    second = await client.patch(
-        f"/api/v1/food-memory/meal/{meal.id}/favorite", headers=headers
-    )
+    second = await client.patch(f"/api/v1/food-memory/meal/{meal.id}/favorite", headers=headers)
     assert second.status_code == 200
     assert second.json()["is_favorite"] is False
 
@@ -134,14 +129,14 @@ def mock_estimation_result():
         source_type="text",
         items=[
             MealEstimateItem(name="Spaghetti al pomodoro", quantity_estimate="2 plates", estimated_calories=850),
-            MealEstimateItem(name="Coke Zero", quantity_estimate="1 can", estimated_calories=0)
+            MealEstimateItem(name="Coke Zero", quantity_estimate="1 can", estimated_calories=0),
         ],
         assumptions=["Assumed regular size plates"],
         needs_clarification=False,
         clarifying_question=None,
         model_name="gemini-1.5-flash",
         prompt_version="text_meal_estimation_v1",
-        latency_ms=120
+        latency_ms=120,
     )
 
 
@@ -154,8 +149,7 @@ async def test_log_meal_via_text(client: AsyncClient, mock_estimation_result) ->
     payload = {"text": "two plates of spaghetti with tomato sauce and a coke zero"}
 
     with patch(
-        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_text",
-        new_callable=AsyncMock
+        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_text", new_callable=AsyncMock
     ) as mock_est:
         mock_est.return_value = mock_estimation_result
 
@@ -186,8 +180,7 @@ async def test_log_meal_via_photo(client: AsyncClient, mock_estimation_result) -
     payload = {"image_url": "https://storage.googleapis.com/calry/photo.jpg"}
 
     with patch(
-        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_image",
-        new_callable=AsyncMock
+        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_image", new_callable=AsyncMock
     ) as mock_est:
         mock_est.return_value = mock_estimation_result
 
@@ -235,9 +228,67 @@ async def test_start_photo_analysis_queues_job(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_photo_analysis_logs_queue_failure(
-    client: AsyncClient, caplog: pytest.LogCaptureFixture
-) -> None:
+async def test_photo_analysis_status_hides_worker_error(client: AsyncClient, db_session) -> None:
+    headers = {"Authorization": "Bearer mock_token_photo_analysis_sanitized_error"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    class DummyTask:
+        id = "celery-task-sanitized-error"
+
+    with patch("app.tasks.meal_analysis.analyze_photo_meal.delay", return_value=DummyTask()):
+        started = await client.post(
+            "/api/v1/meals/photo/analysis",
+            json={
+                "image_url": "https://storage.googleapis.com/calry/photo.jpg",
+                "client_request_id": "analysis-sanitized-error",
+            },
+            headers=headers,
+        )
+
+    result = await db_session.execute(select(MealAnalysisJob).where(MealAnalysisJob.id == started.json()["id"]))
+    job = result.scalar_one()
+    job.status = "failed"
+    job.error_message = "redis://user:password@internal-host connection refused"
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/meals/photo/analysis/{job.id}", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["error_code"] == "analysis_failed"
+    assert body["error_message"] == "We couldn't analyze this photo. Try again or add a short description."
+    assert "redis://" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_meal_upload_rejects_invalid_media_before_analysis(client: AsyncClient) -> None:
+    headers = {"Authorization": "Bearer mock_token_meal_upload_validation"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    empty = await client.post(
+        "/api/v1/meals/upload",
+        files={"file": ("empty.jpg", b"", "image/jpeg")},
+        headers=headers,
+    )
+    assert empty.status_code == 422
+
+    unsupported = await client.post(
+        "/api/v1/meals/upload",
+        files={"file": ("notes.txt", b"not a meal", "text/plain")},
+        headers=headers,
+    )
+    assert unsupported.status_code == 415
+
+    with patch("app.api.v1.routes.meals.settings.MEAL_UPLOAD_MAX_BYTES", 4):
+        oversized = await client.post(
+            "/api/v1/meals/upload",
+            files={"file": ("meal.jpg", b"12345", "image/jpeg")},
+            headers=headers,
+        )
+    assert oversized.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_start_photo_analysis_logs_queue_failure(client: AsyncClient, caplog: pytest.LogCaptureFixture) -> None:
     headers = {"Authorization": "Bearer mock_token_photo_analysis_queue_failure"}
     await client.get("/api/v1/users/me", headers=headers)
     caplog.set_level(logging.ERROR, logger="app.api.meals")
@@ -311,9 +362,7 @@ async def test_cancel_photo_analysis_revokes_running_worker(client: AsyncClient)
     assert cancelled.status_code == 204
     revoke.assert_called_once_with("celery-task-cancel", terminate=True, signal="SIGTERM")
 
-    status_response = await client.get(
-        f"/api/v1/meals/photo/analysis/{started.json()['id']}", headers=headers
-    )
+    status_response = await client.get(f"/api/v1/meals/photo/analysis/{started.json()['id']}", headers=headers)
     assert status_response.status_code == 200
     assert status_response.json()["status"] == "cancelled"
     assert status_response.json()["meal_id"] is None
@@ -329,13 +378,9 @@ async def test_log_meal_via_voice(client: AsyncClient, mock_estimation_result) -
     payload = {"audio_url": "https://storage.googleapis.com/calry/voice.mp3"}
 
     with patch(
-        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_voice",
-        new_callable=AsyncMock
+        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_voice", new_callable=AsyncMock
     ) as mock_est:
-        mock_est.return_value = (
-            "two plates of spaghetti with tomato sauce and a coke zero",
-            mock_estimation_result
-        )
+        mock_est.return_value = ("two plates of spaghetti with tomato sauce and a coke zero", mock_estimation_result)
 
         response = await client.post("/api/v1/meals/voice", json=payload, headers=headers)
         assert response.status_code == 201
@@ -354,8 +399,7 @@ async def test_meal_correction_tracking(client: AsyncClient, mock_estimation_res
 
     # 1. Log a meal first
     with patch(
-        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_text",
-        new_callable=AsyncMock
+        "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_text", new_callable=AsyncMock
     ) as mock_est:
         mock_est.return_value = mock_estimation_result
         payload = {"text": "spaghetti"}
@@ -366,9 +410,7 @@ async def test_meal_correction_tracking(client: AsyncClient, mock_estimation_res
     update_payload = {
         "confirmed_calories": 950,
         "meal_name": "Spaghetti Bolognese",
-        "items": [
-            {"name": "Spaghetti al pomodoro", "quantity_estimate": "2 plates", "estimated_calories": 950}
-        ]
+        "items": [{"name": "Spaghetti al pomodoro", "quantity_estimate": "2 plates", "estimated_calories": 950}],
     }
 
     response = await client.patch(f"/api/v1/meals/{meal_id}", json=update_payload, headers=headers)

@@ -64,6 +64,7 @@ _LANGUAGE_NAMES = {
 }
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+_RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 # C7: a single connection-pooled client reused across all calls (and across the
 # retry loop), instead of a fresh TLS handshake per attempt / per media fetch.
@@ -172,9 +173,13 @@ class OpenRouterProvider(BaseAIProvider):
         if not value:
             return None
         try:
-            return min(float(value), 5.0)
+            return min(float(value), 10.0)
         except ValueError:
             return None
+
+    @staticmethod
+    def _retry_delay(attempt: int, retry_after: float | None = None) -> float:
+        return retry_after if retry_after is not None else min(4.0, 0.5 * (2**attempt))
 
     async def _post_openrouter(
         self,
@@ -215,52 +220,73 @@ class OpenRouterProvider(BaseAIProvider):
         client = get_shared_client()
         downgraded = False
 
-        for attempt in range(max_retries + 1):
-            retry_after: float | None = None
+        attempt = 0
+        while attempt <= max_retries:
             try:
                 start_time = time.perf_counter()
                 response = await client.post(OPENROUTER_URL, json=payload, headers=headers, timeout=timeout)
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
-
-                if response.status_code == 200:
-                    res_json = response.json()
-                    try:
-                        text_out = res_json["choices"][0]["message"]["content"]
-                    except (KeyError, IndexError):
-                        logger.error(f"Malformed OpenRouter API structure: {res_json}")
-                        raise AIProviderError("Invalid response format received from OpenRouter API.")
-                    return text_out, latency_ms, res_json.get("usage")
-
-                # C16 graceful degrade: a routed model may reject json_schema.
-                if (
-                    response.status_code in (400, 404, 422)
-                    and not downgraded
-                    and isinstance(payload.get("response_format"), dict)
-                    and payload["response_format"].get("type") == "json_schema"
-                ):
-                    logger.warning(
-                        f"Structured output rejected ({response.status_code}); "
-                        f"falling back to json_object for model {model}."
-                    )
-                    payload["response_format"] = {"type": "json_object"}
-                    payload.pop("provider", None)
-                    downgraded = True
-                    continue
-
-                logger.warning(
-                    f"OpenRouter API attempt {attempt + 1} failed: {response.status_code} - {response.text}"
-                )
-                if attempt == max_retries:
-                    raise AIProviderError(f"OpenRouter API returned error: {response.status_code} - {response.text}")
-                retry_after = self._retry_after_seconds(response)
-
             except httpx.RequestError as e:
                 logger.warning(f"OpenRouter API request error on attempt {attempt + 1}: {e}")
                 if attempt == max_retries:
-                    raise AIProviderError(f"OpenRouter service communication failure: {str(e)}")
+                    raise AIProviderError(
+                        details={"retryable": True, "reason": type(e).__name__},
+                    )
+                await asyncio.sleep(self._retry_delay(attempt))
+                attempt += 1
+                continue
 
-            if attempt < max_retries:
-                await asyncio.sleep(retry_after if retry_after else 0.5)
+            if response.status_code == 200:
+                try:
+                    res_json = response.json()
+                    text_out = res_json["choices"][0]["message"]["content"]
+                    if not isinstance(text_out, str) or not text_out.strip():
+                        raise ValueError("empty completion content")
+                    return text_out, latency_ms, res_json.get("usage")
+                except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                    logger.warning("Malformed OpenRouter response on attempt %s: %s", attempt + 1, exc)
+                    if attempt == max_retries:
+                        raise AIProviderError(
+                            "AI service returned an unreadable response. Please try again.",
+                            details={"retryable": True, "reason": type(exc).__name__},
+                        )
+                    await asyncio.sleep(self._retry_delay(attempt))
+                    attempt += 1
+                    continue
+
+            # C16 graceful degrade: a routed model may reject json_schema.
+            if (
+                response.status_code in (400, 404, 422)
+                and not downgraded
+                and isinstance(payload.get("response_format"), dict)
+                and payload["response_format"].get("type") == "json_schema"
+            ):
+                logger.warning(
+                    f"Structured output rejected ({response.status_code}); "
+                    f"falling back to json_object for model {model}."
+                )
+                payload["response_format"] = {"type": "json_object"}
+                payload.pop("provider", None)
+                downgraded = True
+                continue
+
+            logger.warning(
+                "OpenRouter API attempt %s failed: status=%s body=%s",
+                attempt + 1,
+                response.status_code,
+                response.text[:500],
+            )
+            if response.status_code not in _RETRYABLE_STATUS_CODES:
+                raise AIProviderError(
+                    "AI service rejected the request. Please try a different input.",
+                    details={"retryable": False, "status_code": response.status_code},
+                )
+            if attempt == max_retries:
+                raise AIProviderError(
+                    details={"retryable": True, "status_code": response.status_code},
+                )
+            await asyncio.sleep(self._retry_delay(attempt, self._retry_after_seconds(response)))
+            attempt += 1
 
         raise AIProviderError("OpenRouter API call failed after retries.")
 
@@ -307,11 +333,14 @@ class OpenRouterProvider(BaseAIProvider):
         timeout = float(settings.AI_REQUEST_TIMEOUT_SECONDS)
         client = get_shared_client()
         downgraded = False
+        attempt = 0
+        max_retries = int(settings.AI_MAX_RETRIES)
 
-        for _ in range(2):  # original attempt + at most one structured-output downgrade
+        while True:
             start_time = time.perf_counter()
             parts: list[str] = []
             usage: dict | None = None
+            emitted_content = False
             try:
                 async with client.stream(
                     "POST", OPENROUTER_URL, json=payload, headers=headers, timeout=timeout
@@ -332,8 +361,21 @@ class OpenRouterProvider(BaseAIProvider):
                             payload.pop("provider", None)
                             downgraded = True
                             continue
+                        logger.warning(
+                            "OpenRouter stream failed: status=%s body=%s",
+                            response.status_code,
+                            body[:500],
+                        )
+                        if response.status_code in _RETRYABLE_STATUS_CODES and attempt < max_retries:
+                            retry_after = self._retry_after_seconds(response)
+                            await asyncio.sleep(self._retry_delay(attempt, retry_after))
+                            attempt += 1
+                            continue
                         raise AIProviderError(
-                            f"OpenRouter stream returned error: {response.status_code} - {body}"
+                            details={
+                                "retryable": response.status_code in _RETRYABLE_STATUS_CODES,
+                                "status_code": response.status_code,
+                            },
                         )
 
                     async for raw in response.aiter_lines():
@@ -342,7 +384,7 @@ class OpenRouterProvider(BaseAIProvider):
                         stripped = raw.strip()
                         if not stripped.startswith("data:"):
                             continue  # SSE comments / keep-alives
-                        data = stripped[len("data:"):].strip()
+                        data = stripped[len("data:") :].strip()
                         if data == "[DONE]":
                             break
                         try:
@@ -357,6 +399,7 @@ class OpenRouterProvider(BaseAIProvider):
                             content = delta.get("content")
                             if content:
                                 parts.append(content)
+                                emitted_content = True
                                 yield {"delta": content}
 
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
@@ -364,9 +407,13 @@ class OpenRouterProvider(BaseAIProvider):
                 return
             except httpx.RequestError as e:
                 logger.warning(f"OpenRouter stream request error: {e}")
-                raise AIProviderError(f"OpenRouter stream communication failure: {str(e)}")
-
-        raise AIProviderError("OpenRouter stream failed after downgrade.")
+                if not emitted_content and attempt < max_retries:
+                    await asyncio.sleep(self._retry_delay(attempt))
+                    attempt += 1
+                    continue
+                raise AIProviderError(
+                    details={"retryable": True, "reason": type(e).__name__},
+                )
 
     def stream_meal_from_text(
         self,
@@ -447,7 +494,7 @@ class OpenRouterProvider(BaseAIProvider):
     @classmethod
     def _dict_to_items(cls, parsed: dict[str, Any]) -> list[MealEstimateItem]:
         items = []
-        for item in (parsed.get("items") or []):
+        for item in parsed.get("items") or []:
             if not isinstance(item, dict):
                 continue
             items.append(
@@ -519,8 +566,12 @@ class OpenRouterProvider(BaseAIProvider):
             degraded = True
 
         kwargs = {
-            "source_type": source_type, "model": model, "prompt_version": prompt_version,
-            "raw_text": raw_text, "latency_ms": latency_ms, "usage": usage,
+            "source_type": source_type,
+            "model": model,
+            "prompt_version": prompt_version,
+            "raw_text": raw_text,
+            "latency_ms": latency_ms,
+            "usage": usage,
         }
         try:
             return self._build_meal_estimate(parsed, degraded=degraded, **kwargs)
@@ -597,9 +648,9 @@ class OpenRouterProvider(BaseAIProvider):
             "name": meal_name,
             "quantity_estimate": None,
             "weight_grams": weight_grams,
-            "calories_per_100g": round(estimated_calories / weight_grams * 100, 1)
-            if weight_grams and weight_grams > 0
-            else None,
+            "calories_per_100g": (
+                round(estimated_calories / weight_grams * 100, 1) if weight_grams and weight_grams > 0 else None
+            ),
             "protein_g": protein,
             "carbs_g": carbs,
             "fat_g": fat,
@@ -651,8 +702,12 @@ class OpenRouterProvider(BaseAIProvider):
             response_format=self._response_format(MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
         )
         return await self._parse_and_build_meal(
-            raw_text, latency_ms, usage,
-            source_type="text", model=model, prompt_version=TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
+            raw_text,
+            latency_ms,
+            usage,
+            source_type="text",
+            model=model,
+            prompt_version=TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
         )
 
     def _prepare_image_data_uri(self, image_bytes: bytes, content_type: str) -> str:
@@ -700,11 +755,34 @@ class OpenRouterProvider(BaseAIProvider):
                 client = get_shared_client()
                 image_res = await client.get(image_url, timeout=15.0)
                 image_res.raise_for_status()
-                content_type = image_res.headers.get("content-type", "image/jpeg")
+                content_type = image_res.headers.get("content-type", "image/jpeg").split(";", 1)[0].lower()
                 image_content = image_res.content
-        except Exception as e:
-            logger.error(f"Failed to download or load image from {image_url}: {e}")
-            raise ImageAnalysisError(f"Could not retrieve food image for analysis: {str(e)}")
+            if not image_content or len(image_content) > settings.MEAL_UPLOAD_MAX_BYTES:
+                raise ValueError("image is empty or exceeds the analysis size limit")
+            if not content_type.startswith("image/"):
+                raise ValueError(f"unsupported image content type: {content_type}")
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            logger.warning("Image download returned HTTP %s", status_code)
+            raise ImageAnalysisError(
+                "The photo is no longer available. Please choose it again.",
+                details={
+                    "retryable": status_code in _RETRYABLE_STATUS_CODES,
+                    "status_code": status_code,
+                },
+            )
+        except httpx.RequestError as exc:
+            logger.warning("Temporary image download failure: %s", exc)
+            raise ImageAnalysisError(
+                "The photo could not be downloaded. Please try again.",
+                details={"retryable": True, "reason": type(exc).__name__},
+            )
+        except (OSError, ValueError) as exc:
+            logger.warning("Unable to read image input: %s", exc)
+            raise ImageAnalysisError(
+                "The photo could not be read. Please choose another photo.",
+                details={"retryable": False, "reason": type(exc).__name__},
+            )
 
         return self._prepare_image_data_uri(image_content, content_type)
 
@@ -789,8 +867,12 @@ class OpenRouterProvider(BaseAIProvider):
             response_format=self._response_format(MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
         )
         return await self._parse_and_build_meal(
-            raw_text, latency_ms, usage,
-            source_type="photo", model=model, prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
+            raw_text,
+            latency_ms,
+            usage,
+            source_type="photo",
+            model=model,
+            prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
         )
 
     async def refine_meal_estimate(
@@ -857,7 +939,7 @@ class OpenRouterProvider(BaseAIProvider):
                 client = get_shared_client()
                 audio_res = await client.get(audio_url, timeout=20.0)
                 audio_res.raise_for_status()
-                content_type = audio_res.headers.get("content-type", "audio/mp3")
+                content_type = audio_res.headers.get("content-type", "audio/mp3").split(";", 1)[0].lower()
                 if content_type == "application/octet-stream":
                     if audio_url.endswith(".m4a"):
                         content_type = "audio/m4a"
@@ -866,10 +948,33 @@ class OpenRouterProvider(BaseAIProvider):
                     else:
                         content_type = "audio/mp3"
                 audio_content = audio_res.content
+            if not audio_content or len(audio_content) > settings.MEAL_UPLOAD_MAX_BYTES:
+                raise ValueError("audio is empty or exceeds the analysis size limit")
+            if not content_type.startswith("audio/"):
+                raise ValueError(f"unsupported audio content type: {content_type}")
             audio_base64 = base64.b64encode(audio_content).decode("utf-8")
-        except Exception as e:
-            logger.error(f"Failed to download or load audio from {audio_url}: {e}")
-            raise SpeechTranscriptionError(f"Could not retrieve spoken audio for transcription: {str(e)}")
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            logger.warning("Audio download returned HTTP %s", status_code)
+            raise SpeechTranscriptionError(
+                "The recording is no longer available. Please record it again.",
+                details={
+                    "retryable": status_code in _RETRYABLE_STATUS_CODES,
+                    "status_code": status_code,
+                },
+            )
+        except httpx.RequestError as exc:
+            logger.warning("Temporary audio download failure: %s", exc)
+            raise SpeechTranscriptionError(
+                "The recording could not be downloaded. Please try again.",
+                details={"retryable": True, "reason": type(exc).__name__},
+            )
+        except (OSError, ValueError) as exc:
+            logger.warning("Unable to read audio input: %s", exc)
+            raise SpeechTranscriptionError(
+                "The recording could not be read. Please record it again.",
+                details={"retryable": False, "reason": type(exc).__name__},
+            )
 
         messages = [
             {
