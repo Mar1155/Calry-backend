@@ -38,6 +38,10 @@ from app.schemas.meal import (
     MealUpdate,
 )
 from app.services import stream_bus
+from app.services.meal_invariants import (
+    InvalidMealIngredients,
+    enforce_estimate_ingredient_invariants,
+)
 from app.services.storage import save_upload
 from app.services.summary import SummaryService
 
@@ -80,6 +84,7 @@ async def _process_and_save_meal(
 ) -> Meal:
     """Helper method to construct a Meal record with children and trigger summary sync."""
     meal_repo = MealRepository(db)
+    estimation = enforce_estimate_ingredient_invariants(estimation)
 
     # 1. Instantiate Core Meal entity with new AI pipeline fields
     meal = Meal(
@@ -1074,6 +1079,8 @@ async def refine_meal_estimate(
             detail="I couldn't confidently update this estimate. Try adding a little more detail.",
         )
 
+    estimation = enforce_estimate_ingredient_invariants(estimation)
+
     revised_items = [item.model_dump() for item in estimation.items]
     revision = MealRevision(
         meal_id=meal.id,
@@ -1136,14 +1143,23 @@ async def update_meal(
 
     await ensure_history_date_access(meal.created_at.date(), current_user, db)
 
-    # Perform repository updates
-    updated_meal = await meal_repo.update(meal, payload)
+    # Perform repository updates. Ingredient quantity/density determine totals.
+    try:
+        updated_meal = await meal_repo.update(meal, payload)
+    except InvalidMealIngredients as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
-    # When user confirms calories, learn from the correction for future repeat logs
-    if payload.confirmed_calories is not None:
+    # When confirmed, learn the ingredient-derived total for future repeat logs.
+    if payload.is_confirmed is True:
         try:
             food_memory_repo = FoodMemoryRepository(db)
-            await food_memory_repo.upsert_from_meal(updated_meal, payload.confirmed_calories)
+            await food_memory_repo.upsert_from_meal(
+                updated_meal,
+                updated_meal.estimated_calories,
+            )
         except Exception as e:
             logger.error(f"Failed to update food memory on meal confirmation: {e}")
 

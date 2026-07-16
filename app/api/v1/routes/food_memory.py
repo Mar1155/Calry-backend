@@ -13,6 +13,7 @@ from app.models.user import User
 from app.repositories.food_memory import FoodMemoryRepository
 from app.schemas.food_memory import FoodMemoryResponse
 from app.schemas.meal import MealResponse
+from app.services.meal_invariants import normalize_meal_ingredients
 from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.food_memory")
@@ -46,9 +47,7 @@ async def get_meal_favorite(
     db: AsyncSession = Depends(get_db),
 ):
     meal = (
-        await db.execute(
-            select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items))
-        )
+        await db.execute(select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items)))
     ).scalar_one_or_none()
     if meal is None or meal.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found.")
@@ -65,9 +64,7 @@ async def toggle_meal_favorite(
     db: AsyncSession = Depends(get_db),
 ):
     meal = (
-        await db.execute(
-            select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items))
-        )
+        await db.execute(select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items)))
     ).scalar_one_or_none()
     if meal is None or meal.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found.")
@@ -124,13 +121,19 @@ async def log_from_memory(
 
     now = dt.datetime.now(dt.UTC)
 
+    normalized_items, derived_total = normalize_meal_ingredients(
+        memory.items_snapshot or [],
+        meal_name=memory.display_name,
+        target_calories=memory.learned_calories,
+    )
+
     meal = Meal(
         user_id=current_user.id,
         source_type="text",
         original_input=memory.display_name,
         meal_name=memory.display_name,
-        estimated_calories=memory.learned_calories,
-        confirmed_calories=memory.learned_calories,
+        estimated_calories=derived_total,
+        confirmed_calories=derived_total,
         total_protein_g=memory.protein_g,
         total_carbs_g=memory.carbs_g,
         total_fat_g=memory.fat_g,
@@ -143,19 +146,18 @@ async def log_from_memory(
     db.add(meal)
     await db.flush()
 
-    if memory.items_snapshot:
-        for item_data in memory.items_snapshot:
-            meal_item = MealItem(
-                meal_id=meal.id,
-                name=item_data["name"],
-                quantity_estimate=item_data.get("quantity_estimate"),
-                weight_grams=item_data.get("weight_grams"),
-                calories_per_100g=item_data.get("calories_per_100g"),
-                protein_g=item_data.get("protein_g"),
-                carbs_g=item_data.get("carbs_g"),
-                fat_g=item_data.get("fat_g"),
-            )
-            db.add(meal_item)
+    for item_data in normalized_items:
+        meal_item = MealItem(
+            meal_id=meal.id,
+            name=item_data["name"],
+            quantity_estimate=item_data.get("quantity_estimate"),
+            weight_grams=item_data["weight_grams"],
+            calories_per_100g=item_data["calories_per_100g"],
+            protein_g=item_data.get("protein_g"),
+            carbs_g=item_data.get("carbs_g"),
+            fat_g=item_data.get("fat_g"),
+        )
+        db.add(meal_item)
 
     await db.flush()
 

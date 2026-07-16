@@ -5,14 +5,21 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MealItemBase(BaseModel):
-    name: str
-    estimated_calories: int = Field(default=0, ge=0)
+    name: str = Field(..., min_length=1, max_length=255)
     quantity_estimate: str | None = Field(default=None, max_length=100)
-    weight_grams: int | None = Field(default=None)
-    calories_per_100g: float | None = Field(default=None, ge=0)
+    weight_grams: int = Field(..., gt=0, le=2_147_483_647)
+    calories_per_100g: float = Field(..., ge=0, le=900, allow_inf_nan=False)
     protein_g: float | None = Field(default=None)
     carbs_g: float | None = Field(default=None)
     fat_g: float | None = Field(default=None)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Ingredient name cannot be blank.")
+        return value
 
 
 class MealItemCreate(MealItemBase):
@@ -24,6 +31,7 @@ class MealItemResponse(MealItemBase):
 
     id: int
     meal_id: int
+    estimated_calories: int = Field(..., ge=0)
     created_at: dt.datetime
 
 
@@ -70,10 +78,11 @@ class MealRefineRequest(BaseModel):
 
 
 class MealUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
-    confirmed_calories: int | None = Field(default=None, ge=0)
+    is_confirmed: bool | None = None
     meal_name: str | None = Field(default=None, max_length=255)
-    estimated_calories: int | None = Field(default=None, ge=0)
     estimated_min_calories: int | None = Field(default=None, ge=0)
     estimated_max_calories: int | None = Field(default=None, ge=0)
     total_protein_g: float | None = Field(default=None, ge=0)
@@ -84,7 +93,7 @@ class MealUpdate(BaseModel):
     confidence_score: float | None = Field(default=None, ge=0, le=1)
     needs_clarification: bool | None = None
     clarifying_question: str | None = Field(default=None)
-    items: list[MealItemCreate] | None = Field(default=None)
+    items: list[MealItemCreate] | None = Field(default=None, min_length=1)
 
 
 class MealResponse(BaseModel):
@@ -114,7 +123,7 @@ class MealResponse(BaseModel):
     clarifying_question: str | None = None
     created_at: dt.datetime
     confirmed_at: dt.datetime | None = None
-    items: list[MealItemResponse] = []
+    items: list[MealItemResponse] = Field(..., min_length=1)
     ai_summary: str | None = None
     refinement_changes: list[str] = []
 

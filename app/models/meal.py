@@ -1,6 +1,7 @@
 import datetime as dt
+import math
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -66,13 +67,20 @@ class Meal(Base):
 
 class MealItem(Base):
     __tablename__ = "meal_items"
+    __table_args__ = (
+        CheckConstraint("length(trim(name)) > 0", name="ck_meal_item_name_not_blank"),
+        CheckConstraint("weight_grams > 0", name="ck_meal_item_positive_weight"),
+        CheckConstraint("weight_grams <= 2147483647", name="ck_meal_item_weight_upper_bound"),
+        CheckConstraint("calories_per_100g >= 0", name="ck_meal_item_nonnegative_density"),
+        CheckConstraint("calories_per_100g <= 900", name="ck_meal_item_density_upper_bound"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meal_id: Mapped[int] = mapped_column(ForeignKey("meals.id", ondelete="CASCADE"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity_estimate: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    weight_grams: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    calories_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weight_grams: Mapped[int] = mapped_column(Integer, nullable=False)
+    calories_per_100g: Mapped[float] = mapped_column(Float, nullable=False)
     protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -87,9 +95,7 @@ class MealItem(Base):
 
     @property
     def estimated_calories(self) -> int:
-        if self.weight_grams is None or self.calories_per_100g is None:
-            return 0
-        return max(0, int(round(self.weight_grams * self.calories_per_100g / 100)))
+        return max(0, int(math.floor(self.weight_grams * self.calories_per_100g / 100 + 0.5)))
 
 
 class MealRevision(Base):

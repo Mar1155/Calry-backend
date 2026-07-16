@@ -2,6 +2,7 @@ import logging
 
 from app.ai.density_table import lookup_food
 from app.ai.schemas.meal_estimate import MealEstimateResult
+from app.services.meal_invariants import enforce_estimate_ingredient_invariants
 
 logger = logging.getLogger("app.ai.validation")
 
@@ -33,12 +34,14 @@ class AIValidationService:
             result.estimated_calories = 0
             result.estimated_min_calories = None
             result.estimated_max_calories = None
+            # A clarification record is still a meal record and therefore must
+            # contain a calculable ingredient placeholder until it is refined.
             result.items = []
             result.confidence = "low"
             result.total_protein_g = 0.0
             result.total_carbs_g = 0.0
             result.total_fat_g = 0.0
-            return result
+            return enforce_estimate_ingredient_invariants(result)
 
         # 4. Check / normalize items and derive item calories from per-100g density.
         sum_item_calories = 0
@@ -167,11 +170,10 @@ class AIValidationService:
                         item.estimated_calories = int(round(avg_density * w / 100))
                         sum_item_calories += item.estimated_calories
 
-        # 6. Align total calories to the sum of items when they meaningfully disagree.
-        #    Relative tolerance (max of 50 kcal / 10%) avoids realigning on rounding noise.
+        # 6. Ingredient calories are the source of truth. There is no tolerance:
+        #    even a small mismatch is realigned to the exact ingredient sum.
         if result.items:
-            tolerance = max(50, int(round(0.10 * max(result.estimated_calories, sum_item_calories))))
-            if abs(result.estimated_calories - sum_item_calories) > tolerance:
+            if result.estimated_calories != sum_item_calories:
                 logger.info(
                     f"Calorie discrepancy: total={result.estimated_calories}, "
                     f"sum of items={sum_item_calories}. Aligning to sum of items."
@@ -182,11 +184,9 @@ class AIValidationService:
             if result.estimated_calories < 0:
                 result.estimated_calories = 0
 
-        # 7. Clamp final total calories
+        # 7. Flag extreme totals without overriding their ingredient-derived sum.
         if result.estimated_calories > MAX_TOTAL_CALORIES:
-            logger.warning(f"Unusually high calorie estimate: {result.estimated_calories}. Clamping to {MAX_TOTAL_CALORIES}.")
-            result.estimated_calories = MAX_TOTAL_CALORIES
-            result.assumptions.append(f"Clamped estimate to {MAX_TOTAL_CALORIES} kcal max.")
+            logger.warning(f"Unusually high ingredient-derived calorie estimate: {result.estimated_calories}.")
             result.density_clamped = True
             # An estimate this extreme is inherently untrustworthy; floor the label
             # (the deterministic confidence score downstream also reflects the clamp).
@@ -198,4 +198,4 @@ class AIValidationService:
         if result.estimated_max_calories is not None:
             result.estimated_max_calories = max(result.estimated_calories, result.estimated_max_calories)
 
-        return result
+        return enforce_estimate_ingredient_invariants(result)

@@ -60,7 +60,7 @@ def test_ai_validation_service_rules():
     # than appended as a user-visible assumption on every meal (C10 noise cut).
     assert validated.total_realigned is True
 
-    # Test clamping high calories
+    # Extreme totals remain ingredient-derived instead of being independently clamped.
     data_high = MealEstimateResult(
         meal_name="Huge Feast",
         estimated_calories=6000,
@@ -73,7 +73,7 @@ def test_ai_validation_service_rules():
         prompt_version="test-v1",
     )
     validated_high = AIValidationService.validate_and_normalize_estimate(data_high)
-    assert validated_high.estimated_calories == 5000  # Clamped to 5000 max
+    assert validated_high.estimated_calories == 6000
     assert validated_high.confidence == "low"
 
     # Test clarification structure normalization
@@ -92,6 +92,8 @@ def test_ai_validation_service_rules():
     validated_clarify = AIValidationService.validate_and_normalize_estimate(data_clarify)
     assert validated_clarify.clarifying_question == "Could you tell me more about what you ate?"
     assert validated_clarify.estimated_calories == 0
+    assert len(validated_clarify.items) == 1
+    assert validated_clarify.items[0].weight_grams == 100
 
 
 @pytest.mark.asyncio
@@ -406,11 +408,18 @@ async def test_meal_correction_tracking(client: AsyncClient, mock_estimation_res
         create_res = await client.post("/api/v1/meals/text", json=payload, headers=headers)
         meal_id = create_res.json()["id"]
 
-    # 2. Update confirmed_calories
+    # 2. Confirm by updating ingredient quantity/density; total is derived.
     update_payload = {
-        "confirmed_calories": 950,
+        "is_confirmed": True,
         "meal_name": "Spaghetti Bolognese",
-        "items": [{"name": "Spaghetti al pomodoro", "quantity_estimate": "2 plates", "estimated_calories": 950}],
+        "items": [
+            {
+                "name": "Spaghetti al pomodoro",
+                "quantity_estimate": "500 g",
+                "weight_grams": 500,
+                "calories_per_100g": 190,
+            }
+        ],
     }
 
     response = await client.patch(f"/api/v1/meals/{meal_id}", json=update_payload, headers=headers)

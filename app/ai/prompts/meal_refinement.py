@@ -36,8 +36,8 @@ Emit every key. Keep enum values in lowercase English; localize other strings.
   "items": [{
     "name": string,
     "quantity_estimate": string | null,
-    "weight_grams": integer | null,
-    "calories_per_100g": number | null,
+    "weight_grams": integer,
+    "calories_per_100g": number,
     "protein_g": number | null,
     "carbs_g": number | null,
     "fat_g": number | null

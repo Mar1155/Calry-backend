@@ -7,6 +7,7 @@ from sqlalchemy.future import select
 
 from app.models.meal import Meal, MealItem
 from app.repositories.base import BaseRepository
+from app.services.meal_invariants import InvalidMealIngredients, normalize_meal_ingredients
 
 
 class MealRepository(BaseRepository[Meal]):
@@ -54,15 +55,27 @@ class MealRepository(BaseRepository[Meal]):
         return list(result.scalars().all())
 
     async def update(self, db_obj: Meal, obj_in: dict[str, Any] | Any) -> Meal:
-        """Updates meal details, handles nested items, and calculates correction delta/percent."""
+        """Update a meal while keeping ingredients as the calorie source of truth."""
         if isinstance(obj_in, dict):
             update_data = obj_in.copy()
         else:
             update_data = obj_in.model_dump(exclude_unset=True)
 
-        # 1. Update nested food items if provided
+        previous_estimate = db_obj.estimated_calories
+        is_confirmed = update_data.pop("is_confirmed", None)
+
+        # 1. Replace nested ingredients only with a complete, valid set.
         if "items" in update_data:
             items_in = update_data.pop("items")
+            if not items_in:
+                raise InvalidMealIngredients("A meal must contain at least one ingredient.")
+            normalized_items, _ = normalize_meal_ingredients(
+                items_in,
+                meal_name=update_data.get("meal_name") or db_obj.meal_name or db_obj.original_input,
+                target_calories=None,
+            )
+            if not normalized_items:
+                raise InvalidMealIngredients("A meal must contain at least one ingredient.")
             # Clear existing items
             for item in list(db_obj.items):
                 await self.db.delete(item)
@@ -70,38 +83,20 @@ class MealRepository(BaseRepository[Meal]):
             await self.db.flush()
 
             # Add new items
-            if items_in:
-                for item_data in items_in:
-                    if not isinstance(item_data, dict):
-                        item_data = item_data.model_dump()
-                    new_item = MealItem(
+            for item_data in normalized_items:
+                self.db.add(
+                    MealItem(
                         meal_id=db_obj.id,
                         name=item_data["name"],
                         quantity_estimate=item_data.get("quantity_estimate"),
-                        weight_grams=item_data.get("weight_grams"),
-                        calories_per_100g=self._resolve_calories_per_100g(item_data),
+                        weight_grams=item_data["weight_grams"],
+                        calories_per_100g=item_data["calories_per_100g"],
                         protein_g=item_data.get("protein_g"),
                         carbs_g=item_data.get("carbs_g"),
                         fat_g=item_data.get("fat_g"),
                     )
-                    self.db.add(new_item)
-                await self.db.flush()
-
-        if "estimated_calories" in update_data and update_data["estimated_calories"] is not None:
-            db_obj.estimated_calories = update_data.pop("estimated_calories")
-
-        # 2. Update confirmed calories and calculate correction tracking metrics
-        if "confirmed_calories" in update_data and update_data["confirmed_calories"] is not None:
-            confirmed_cal = update_data.pop("confirmed_calories")
-            db_obj.confirmed_calories = confirmed_cal
-            db_obj.confirmed_at = dt.datetime.now(dt.UTC)
-            db_obj.correction_delta = confirmed_cal - db_obj.estimated_calories
-            if db_obj.estimated_calories > 0:
-                db_obj.correction_percent = float(
-                    (confirmed_cal - db_obj.estimated_calories) / db_obj.estimated_calories * 100
                 )
-            else:
-                db_obj.correction_percent = 0.0
+            await self.db.flush()
 
         # 3. Standard update loop for other attributes
         for field, value in update_data.items():
@@ -114,6 +109,35 @@ class MealRepository(BaseRepository[Meal]):
         # Refresh relation to avoid stale session cache
         from sqlalchemy.future import select
         from sqlalchemy.orm import selectinload
-        stmt = select(Meal).where(Meal.id == db_obj.id).options(selectinload(Meal.items))
+
+        stmt = (
+            select(Meal)
+            .where(Meal.id == db_obj.id)
+            .options(selectinload(Meal.items))
+            .execution_options(populate_existing=True)
+        )
         result = await self.db.execute(stmt)
-        return result.scalar_one()
+        refreshed = result.scalar_one()
+        if not refreshed.items:
+            raise InvalidMealIngredients("A meal must contain at least one ingredient.")
+
+        derived_total = sum(item.estimated_calories for item in refreshed.items)
+        refreshed.estimated_calories = derived_total
+        if refreshed.estimated_min_calories is not None:
+            refreshed.estimated_min_calories = min(refreshed.estimated_min_calories, derived_total)
+        if refreshed.estimated_max_calories is not None:
+            refreshed.estimated_max_calories = max(refreshed.estimated_max_calories, derived_total)
+
+        # Confirmation is a status, never an independently entered calorie value.
+        if is_confirmed is True or refreshed.confirmed_calories is not None:
+            refreshed.confirmed_calories = derived_total
+            if is_confirmed is True:
+                refreshed.confirmed_at = dt.datetime.now(dt.UTC)
+            refreshed.correction_delta = derived_total - previous_estimate
+            refreshed.correction_percent = (
+                float((derived_total - previous_estimate) / previous_estimate * 100) if previous_estimate > 0 else 0.0
+            )
+
+        self.db.add(refreshed)
+        await self.db.flush()
+        return refreshed

@@ -27,8 +27,8 @@ write all other strings in the requested output language.
   "items": [{
     "name": string,
     "quantity_estimate": string | null,
-    "weight_grams": integer | null,
-    "calories_per_100g": number | null,
+    "weight_grams": integer,
+    "calories_per_100g": number,
     "protein_g": number | null,
     "carbs_g": number | null,
     "fat_g": number | null
@@ -63,6 +63,8 @@ ESTIMATION_RULES = """<estimation_rules>
   and use an energy density for the same state.
 - Represent every calorie-bearing component once. For a composite dish, use
   either one realistic composite item or its components, never both.
+- Always return at least one item. A single-food meal is one item, never an
+  itemless meal.
 - Include calorically material drinks, sauces, dressings, toppings, and cooking
   fat. Add an unseen standard ingredient only when strongly typical; make it a
   separate item and disclose it. Never add generic oil on top of a density that
@@ -97,11 +99,11 @@ Use these only as sanity checks, never to override stronger evidence:
 
 CONFIDENCE_AND_CLARIFICATION = """<uncertainty_policy>
 Prefer a useful low-confidence estimate and honest range over a question. Set
-needs_clarification=true, estimated_calories=0, range fields
-to null, and items=[] only when no food can be identified or the input contains
-too little information for any defensible estimate. Then ask exactly one concise,
-high-information question. Otherwise set needs_clarification=false and
-clarifying_question=null.
+needs_clarification=true, estimated_calories=0, and range fields to null only
+when no food can be identified or the input contains too little information for
+any defensible estimate. Still return one 100 g item named "Unidentified food"
+with calories_per_100g=0, then ask exactly one concise, high-information
+question. Otherwise set needs_clarification=false and clarifying_question=null.
 </uncertainty_policy>"""
 
 

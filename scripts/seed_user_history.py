@@ -28,6 +28,7 @@ from app.models.burned_calories import BurnedCalories  # noqa: E402
 from app.models.daily_summary import DailySummary  # noqa: E402
 from app.models.meal import Meal, MealItem  # noqa: E402
 from app.models.user import User  # noqa: E402
+from app.services.meal_invariants import normalize_meal_ingredients  # noqa: E402
 from app.services.summary import SummaryService  # noqa: E402
 
 
@@ -229,8 +230,26 @@ def vary_calories(calories: int, rng: random.Random, spread: float = 0.08) -> in
 
 
 def build_meal(user_id: int, day: dt.date, template: MealTemplate, rng: random.Random) -> Meal:
-    items = [MealItem(name=item.name, estimated_calories=vary_calories(item.calories, rng)) for item in template.items]
-    total = sum(item.estimated_calories for item in items)
+    normalized_items, total = normalize_meal_ingredients(
+        [
+            {
+                "name": item.name,
+                "estimated_calories": vary_calories(item.calories, rng),
+            }
+            for item in template.items
+        ],
+        meal_name=template.original_input,
+        target_calories=None,
+    )
+    items = [
+        MealItem(
+            name=item["name"],
+            quantity_estimate=item["quantity_estimate"],
+            weight_grams=item["weight_grams"],
+            calories_per_100g=item["calories_per_100g"],
+        )
+        for item in normalized_items
+    ]
     confirmed_calories = total if rng.random() < 0.35 else None
     meal = Meal(
         user_id=user_id,

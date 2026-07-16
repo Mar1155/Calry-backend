@@ -114,22 +114,31 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
         },
         "items": {
             "type": "array",
+            "minItems": 1,
             "description": "Each calorie-bearing component exactly once; no composite/component overlap.",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "name": {"type": "string", "description": "Specific but non-invented food component."},
+                    "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Specific but non-invented food component.",
+                    },
                     "quantity_estimate": {
                         "type": ["string", "null"],
                         "description": "Human-readable amount actually consumed, such as '1 medium bowl'.",
                     },
                     "weight_grams": {
-                        "type": ["integer", "null"],
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2147483647,
                         "description": "Estimated edible grams consumed, in the same cooked/dry state as density.",
                     },
                     "calories_per_100g": {
-                        "type": ["number", "null"],
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 900,
                         "description": "Energy density in kcal per 100 g, not calories for the whole item.",
                     },
                     "protein_g": {

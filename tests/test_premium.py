@@ -5,7 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.models.meal import Meal
+from app.models.meal import Meal, MealItem
 from app.models.daily_summary import DailySummary
 from app.repositories.user import UserRepository
 
@@ -94,6 +94,14 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
         created_at=dt.datetime.combine(old_date, dt.time(12, 0)).replace(tzinfo=dt.UTC),
     )
     db_session.add(old_meal)
+    old_meal.items.append(
+        MealItem(
+            name="Pasta",
+            quantity_estimate="250 g",
+            weight_grams=250,
+            calories_per_100g=200,
+        )
+    )
     recent_date = today - dt.timedelta(days=3)
     recent_meal = Meal(
         user_id=user_id,
@@ -104,6 +112,14 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
         created_at=dt.datetime.combine(recent_date, dt.time(12, 0)).replace(tzinfo=dt.UTC),
     )
     db_session.add(recent_meal)
+    recent_meal.items.append(
+        MealItem(
+            name="Recent Pasta",
+            quantity_estimate="250 g",
+            weight_grams=250,
+            calories_per_100g=180,
+        )
+    )
     await db_session.commit()
 
     # 2. Fetch as FREE user (user is not premium yet)
@@ -116,7 +132,17 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
     recent_update = await client.patch(
         f"/api/v1/meals/{recent_meal.id}",
         headers=headers,
-        json={"confirmed_calories": 475},
+        json={
+            "is_confirmed": True,
+            "items": [
+                {
+                    "name": "Recent Pasta",
+                    "quantity_estimate": "250 g",
+                    "weight_grams": 250,
+                    "calories_per_100g": 190,
+                }
+            ],
+        },
     )
     assert recent_update.status_code == 200
     assert recent_update.json()["confirmed_calories"] == 475
@@ -125,7 +151,7 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
     old_update = await client.patch(
         f"/api/v1/meals/{old_meal.id}",
         headers=headers,
-        json={"confirmed_calories": 525},
+        json={"is_confirmed": True},
     )
     assert old_update.status_code == 403
 
@@ -156,7 +182,17 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
     old_update_premium = await client.patch(
         f"/api/v1/meals/{old_meal.id}",
         headers=headers,
-        json={"confirmed_calories": 525},
+        json={
+            "is_confirmed": True,
+            "items": [
+                {
+                    "name": "Pasta",
+                    "quantity_estimate": "250 g",
+                    "weight_grams": 250,
+                    "calories_per_100g": 210,
+                }
+            ],
+        },
     )
     assert old_update_premium.status_code == 200
 

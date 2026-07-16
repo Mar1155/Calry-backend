@@ -47,10 +47,8 @@ class SummaryService:
         meals = await self.meal_repo.get_user_meals_on_date(user_id, date_val)
         consumed_calories = 0
         for meal in meals:
-            # Prefer manually confirmed calorie estimates if provided
-            consumed_calories += (
-                meal.confirmed_calories if meal.confirmed_calories is not None else meal.estimated_calories
-            )
+            # Cached meal totals are derived from ingredient quantity × density.
+            consumed_calories += meal.estimated_calories
 
         # 3. Gather calories burned on this date
         burned_logs = await self.burned_repo.get_user_burned_on_date(user_id, date_val)
