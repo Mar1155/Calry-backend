@@ -22,6 +22,15 @@ def _load_migration():
     return migration
 
 
+def _load_trigger_fix_migration():
+    migration_path = Path(__file__).parents[1] / "alembic/versions/2026_07_16_0002_fix_meal_ingredient_trigger.py"
+    spec = importlib.util.spec_from_file_location("meal_invariant_trigger_fix", migration_path)
+    assert spec and spec.loader
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
 def _estimate() -> MealEstimateResult:
     return MealEstimateResult(
         meal_name="Rice bowl",
@@ -109,6 +118,31 @@ def test_postgres_guards_execute_one_command_per_statement() -> None:
     statements = [call.args[0].strip() for call in execute.call_args_list]
     assert len(statements) == 7
     assert all(statement.upper().startswith("CREATE") for statement in statements)
+
+
+def test_trigger_fix_uses_table_specific_record_fields() -> None:
+    migration = _load_trigger_fix_migration()
+    postgresql_bind = type("Bind", (), {"dialect": type("Dialect", (), {"name": "postgresql"})()})()
+
+    with (
+        patch.object(migration.op, "get_bind", return_value=postgresql_bind),
+        patch.object(migration.op, "execute") as execute,
+    ):
+        migration.upgrade()
+
+    statements = [call.args[0].strip() for call in execute.call_args_list]
+    meal_function = next(
+        statement for statement in statements if "FUNCTION calry_require_meal_ingredient_for_meal" in statement
+    )
+    item_function = next(
+        statement for statement in statements if "FUNCTION calry_require_meal_ingredient_for_item" in statement
+    )
+
+    assert "OLD.meal_id" not in meal_function
+    assert "NEW.meal_id" not in meal_function
+    assert "NEW.id" in meal_function
+    assert "OLD.meal_id" in item_function
+    assert "NEW.meal_id" in item_function
 
 
 @pytest.mark.asyncio
@@ -199,7 +233,7 @@ def test_historical_backfill_repairs_empty_and_partial_meals() -> None:
             )
         )
         connection.execute(
-            sa.text("INSERT INTO meals VALUES (1, 'Apple', 'apple', 95, NULL), " "(2, 'Lunch', 'lunch', 300, 350)")
+            sa.text("INSERT INTO meals VALUES (1, 'Apple', 'apple', 95, NULL), (2, 'Lunch', 'lunch', 300, 350)")
         )
         connection.execute(
             sa.text(
