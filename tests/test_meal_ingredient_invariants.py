@@ -40,6 +40,15 @@ def _load_cascade_delete_migration():
     return migration
 
 
+def _load_deleted_meal_guard_migration():
+    migration_path = Path(__file__).parents[1] / "alembic/versions/2026_07_16_0004_ignore_deleted_meal_invariant.py"
+    spec = importlib.util.spec_from_file_location("deleted_meal_invariant_guard", migration_path)
+    assert spec and spec.loader
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
 def _estimate() -> MealEstimateResult:
     return MealEstimateResult(
         meal_name="Rice bowl",
@@ -175,6 +184,21 @@ def test_cascade_delete_marks_parent_and_preserves_item_constraint() -> None:
     assert "current_setting" in item_function
     assert "NOT parent_is_deleting" in item_function
     assert "must contain at least one ingredient" in item_function
+
+
+def test_deleted_meal_no_longer_fails_deferred_meal_constraint() -> None:
+    migration = _load_deleted_meal_guard_migration()
+    postgresql_bind = type("Bind", (), {"dialect": type("Dialect", (), {"name": "postgresql"})()})()
+
+    with (
+        patch.object(migration.op, "get_bind", return_value=postgresql_bind),
+        patch.object(migration.op, "execute") as execute,
+    ):
+        migration.upgrade()
+
+    statement = execute.call_args.args[0]
+    assert "EXISTS (SELECT 1 FROM meals WHERE id = NEW.id)" in statement
+    assert "NOT EXISTS (SELECT 1 FROM meal_items WHERE meal_id = NEW.id)" in statement
 
 
 @pytest.mark.asyncio
