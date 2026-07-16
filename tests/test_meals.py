@@ -1,12 +1,16 @@
+import datetime as dt
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult
 from app.ai.services.validation_service import AIValidationService
+from app.api.v1.routes.meals import delete_meal
 from app.models.meal import Meal, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 
@@ -94,6 +98,37 @@ def test_ai_validation_service_rules():
     assert validated_clarify.estimated_calories == 0
     assert len(validated_clarify.items) == 1
     assert validated_clarify.items[0].weight_grams == 100
+
+
+@pytest.mark.asyncio
+async def test_delete_meal_does_not_report_success_when_commit_fails() -> None:
+    meal = SimpleNamespace(
+        id=42,
+        user_id=7,
+        created_at=dt.datetime(2026, 7, 16, tzinfo=dt.UTC),
+    )
+    user = SimpleNamespace(id=7)
+    db = AsyncMock(spec=AsyncSession)
+    db.commit.side_effect = RuntimeError("commit failed")
+    meal_repo = SimpleNamespace(
+        get=AsyncMock(return_value=meal),
+        remove=AsyncMock(return_value=meal),
+    )
+    summary_service = SimpleNamespace(sync_daily_summary=AsyncMock())
+
+    with (
+        patch("app.api.v1.routes.meals.MealRepository", return_value=meal_repo),
+        patch("app.api.v1.routes.meals.SummaryService", return_value=summary_service),
+        patch(
+            "app.api.v1.routes.meals.ensure_history_date_access",
+            new_callable=AsyncMock,
+        ),
+        pytest.raises(RuntimeError, match="commit failed"),
+    ):
+        await delete_meal(42, user, db)
+
+    meal_repo.remove.assert_awaited_once_with(42)
+    db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

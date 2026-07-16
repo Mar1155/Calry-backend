@@ -1292,4 +1292,14 @@ async def delete_meal(
     except Exception as e:
         logger.error(f"Failed to re-sync daily summary after meal deletion: {e}")
 
+    # Commit here so a successful HTTP response means the deletion is durable.
+    # Request dependency teardown may otherwise discover a commit failure only
+    # after the client has already received a success response.
+    try:
+        await db.commit()
+    except Exception:
+        logger.exception("Failed to commit meal deletion: meal_id=%s user_id=%s", id, current_user.id)
+        raise
+
+    logger.info("Meal deletion committed: meal_id=%s user_id=%s", id, current_user.id)
     return {"message": "Meal entry successfully removed."}
