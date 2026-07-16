@@ -31,6 +31,15 @@ def _load_trigger_fix_migration():
     return migration
 
 
+def _load_cascade_delete_migration():
+    migration_path = Path(__file__).parents[1] / "alembic/versions/2026_07_16_0003_allow_meal_cascade_delete.py"
+    spec = importlib.util.spec_from_file_location("meal_invariant_cascade_delete", migration_path)
+    assert spec and spec.loader
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
 def _estimate() -> MealEstimateResult:
     return MealEstimateResult(
         meal_name="Rice bowl",
@@ -143,6 +152,29 @@ def test_trigger_fix_uses_table_specific_record_fields() -> None:
     assert "NEW.id" in meal_function
     assert "OLD.meal_id" in item_function
     assert "NEW.meal_id" in item_function
+
+
+def test_cascade_delete_marks_parent_and_preserves_item_constraint() -> None:
+    migration = _load_cascade_delete_migration()
+    postgresql_bind = type("Bind", (), {"dialect": type("Dialect", (), {"name": "postgresql"})()})()
+
+    with (
+        patch.object(migration.op, "get_bind", return_value=postgresql_bind),
+        patch.object(migration.op, "execute") as execute,
+    ):
+        migration.upgrade()
+
+    statements = [call.args[0].strip() for call in execute.call_args_list]
+    marker_function = next(statement for statement in statements if "FUNCTION calry_mark_meal_deleting" in statement)
+    item_function = next(
+        statement for statement in statements if "FUNCTION calry_require_meal_ingredient_for_item" in statement
+    )
+
+    assert "set_config" in marker_function
+    assert "true" in marker_function
+    assert "current_setting" in item_function
+    assert "NOT parent_is_deleting" in item_function
+    assert "must contain at least one ingredient" in item_function
 
 
 @pytest.mark.asyncio
