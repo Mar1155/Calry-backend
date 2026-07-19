@@ -1,11 +1,25 @@
 import datetime as dt
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.schemas.meal_completion import MealCompletionResult, MealSuggestionItem
+from app.api.v1.routes.meal_completion import _macro_targets
 from app.models.meal import Meal
+from app.models.user import User
+
+
+def test_macro_targets_fall_back_to_dashboard_defaults() -> None:
+    user = User(
+        firebase_uid="macro-target-test",
+        email="macro-target-test@example.com",
+        daily_calorie_goal=2000,
+        goal_type="maintain",
+    )
+
+    assert _macro_targets(user) == (100, 250, 67)
 
 
 @pytest.fixture
@@ -57,6 +71,11 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
     # 1. Register user
     profile_res = await client.get("/api/v1/users/me", headers=headers)
     user_id = profile_res.json()["id"]
+    user = await db_session.get(User, user_id)
+    assert user is not None
+    user.daily_protein_goal = 130
+    user.daily_carbs_goal = 220
+    user.daily_fat_goal = 65
     await client.post(
         "/api/v1/premium/sync",
         headers=headers,
@@ -101,6 +120,10 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
         assert data["remaining_calories"] == 800  # 2000 - 1200 = 800
         assert data["consumed_calories"] == 1200
         assert data["daily_goal"] == 2000
+        completion_req = mock_complete.await_args.kwargs["completion_req"]
+        assert completion_req.target_protein_g == 130
+        assert completion_req.target_carbs_g == 220
+        assert completion_req.target_fat_g == 65
 
 
 @pytest.mark.asyncio
@@ -154,5 +177,81 @@ async def test_meal_completion_guardrail(client: AsyncClient, db_session: AsyncS
 
         data = response.json()
         assert len(data["suggestions"]) == 0
-        assert "Hai quasi raggiunto il tuo obiettivo" in data["daily_context_summary"]
+        assert "Hai registrato" in data["daily_context_summary"]
         assert data["remaining_calories"] == 150  # 2000 - 1850 = 150
+
+
+@pytest.mark.asyncio
+async def test_meal_completion_clamps_negative_remaining_calories(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    headers = {
+        "Authorization": "Bearer mock_token_completion_over_reference_test",
+        "Accept-Language": "it",
+    }
+    profile_res = await client.get("/api/v1/users/me", headers=headers)
+    user_id = profile_res.json()["id"]
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "Calry Pro",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "completion_over_reference_uid",
+        },
+    )
+    db_session.add(
+        Meal(
+            user_id=user_id,
+            source_type="text",
+            original_input="Dinner",
+            meal_name="Dinner",
+            estimated_calories=2150,
+            created_at=dt.datetime.combine(dt.date.today(), dt.time(20, 0)).replace(tzinfo=dt.UTC),
+        )
+    )
+    await db_session.commit()
+
+    with patch(
+        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion",
+        new_callable=AsyncMock,
+    ) as mock_complete:
+        response = await client.post("/api/v1/meals/complete-day", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["remaining_calories"] == 0
+    assert "0 kcal" in response.json()["daily_context_summary"]
+    mock_complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_meal_completion_rejects_unusable_ai_output(client: AsyncClient, db_session: AsyncSession) -> None:
+    headers = {"Authorization": "Bearer mock_token_completion_invalid_ai_test"}
+    await client.get("/api/v1/users/me", headers=headers)
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "Calry Pro",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "completion_invalid_ai_uid",
+        },
+    )
+    invalid_result = MealCompletionResult(
+        suggestions=[],
+        daily_context_summary="",
+        macro_balance_note="",
+        model_name="test-model",
+        prompt_version="meal_completion_v2",
+    )
+
+    with patch(
+        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion",
+        new_callable=AsyncMock,
+        return_value=invalid_result,
+    ):
+        response = await client.post("/api/v1/meals/complete-day", headers=headers)
+
+    assert response.status_code == 502

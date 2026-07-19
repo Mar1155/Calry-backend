@@ -36,4 +36,7 @@ class MealCompletionRequest(BaseModel):
     consumed_protein_g: float
     consumed_carbs_g: float
     consumed_fat_g: float
+    target_protein_g: float | None = None
+    target_carbs_g: float | None = None
+    target_fat_g: float | None = None
     meals_eaten_today: list[str]

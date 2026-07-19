@@ -1,7 +1,7 @@
 import datetime as dt
 import logging
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.schemas.meal_completion import MealCompletionRequest
@@ -19,30 +19,52 @@ router = APIRouter()
 
 GUARDRAIL_MSG = {
     "en": {
-        "summary": "You consumed {consumed} kcal out of a {goal} kcal goal. You have {remaining} kcal remaining. You have almost reached your goal for today!",
-        "note": "No further meal suggestions are needed for today.",
+        "summary": "You logged {consumed} kcal against today's {goal} kcal reference. You have {remaining} kcal remaining.",
+        "note": "No additional meal suggestion is needed right now.",
     },
     "it": {
-        "summary": "Hai consumato {consumed} kcal su un obiettivo di {goal} kcal. Ti rimangono {remaining} kcal. Hai quasi raggiunto il tuo obiettivo per oggi!",
-        "note": "Non sono necessari ulteriori suggerimenti di pasti per oggi.",
+        "summary": "Hai registrato {consumed} kcal sul riferimento di {goal} kcal di oggi. Ti rimangono {remaining} kcal.",
+        "note": "Per ora non serve un altro suggerimento di pasto.",
     },
     "es": {
-        "summary": "Has consumido {consumed} kcal de un objetivo de {goal} kcal. Te quedan {remaining} kcal. ¡Casi has alcanzado tu objetivo hoy!",
-        "note": "No se necesitan más sugerencias de comidas para hoy.",
+        "summary": "Has registrado {consumed} kcal respecto a la referencia de {goal} kcal de hoy. Te quedan {remaining} kcal.",
+        "note": "Por ahora no necesitas otra sugerencia de comida.",
     },
     "zh": {
-        "summary": "您已摄入 {consumed} 千卡（目标为 {goal} 千卡）。您还剩 {remaining} 千卡。今天您已几乎达到目标！",
-        "note": "今天不需要更多的膳食建议。",
+        "summary": "您今天已记录 {consumed} 千卡，参考值为 {goal} 千卡，还剩 {remaining} 千卡。",
+        "note": "目前不需要额外的餐食建议。",
     },
     "ja": {
-        "summary": "目標 {goal} kcal のうち {consumed} kcal を摂取しました。残り {remaining} kcal です。今日の目標をほぼ達成しました！",
-        "note": "今日の食事の提案はもう必要ありません。",
+        "summary": "今日の基準 {goal} kcal に対して {consumed} kcal を記録しました。残りは {remaining} kcal です。",
+        "note": "今のところ追加の食事提案は必要ありません。",
     },
     "ar": {
-        "summary": "لقد استهلكت {consumed} سعرة حرارية من هدفك البالغ {goal} سعرة حرارية. يتبقى لديك {remaining} سعرة حرارية. لقد اقتربت من تحقيق هدفك اليوم!",
-        "note": "لا حاجة لمزيد من اقتراحات الوجبات اليوم.",
+        "summary": "سجلت {consumed} سعرة من مرجع اليوم البالغ {goal} سعرة. يتبقى لديك {remaining} سعرة.",
+        "note": "لا تحتاج إلى اقتراح وجبة إضافية الآن.",
     },
 }
+
+
+def _macro_targets(user: User) -> tuple[int, int, int]:
+    """Return explicit macro goals or the same defaults shown by the app."""
+    calories = user.daily_calorie_goal if user.daily_calorie_goal > 0 else 2000
+    if user.weight_kg is not None and user.weight_kg > 0:
+        protein_per_kg = 1.2 if user.goal_type == "maintain" else 1.6
+        protein_g = min(user.weight_kg * protein_per_kg, calories * 0.35 / 4)
+    else:
+        protein_g = calories * 0.20 / 4
+
+    fat_g = calories * 0.30 / 9
+    carbs_g = max((calories - protein_g * 4 - fat_g * 9) / 4, 0)
+    return (
+        (
+            user.daily_protein_goal
+            if user.daily_protein_goal is not None and user.daily_protein_goal > 0
+            else round(protein_g)
+        ),
+        user.daily_carbs_goal if user.daily_carbs_goal is not None and user.daily_carbs_goal > 0 else round(carbs_g),
+        user.daily_fat_goal if user.daily_fat_goal is not None and user.daily_fat_goal > 0 else round(fat_g),
+    )
 
 
 async def _build_user_context(db: AsyncSession, user: User, locale: str | None = None) -> UserContext:
@@ -98,16 +120,17 @@ async def suggest_daily_completion(
 
     # Guardrail: remaining calories < 200
     if summary.remaining_calories < 200:
+        remaining = max(summary.remaining_calories, 0)
         g_msg = GUARDRAIL_MSG.get(lang, GUARDRAIL_MSG["en"])
         return MealCompletionResponse(
             suggestions=[],
             daily_context_summary=g_msg["summary"].format(
                 consumed=summary.consumed_calories,
                 goal=current_user.daily_calorie_goal,
-                remaining=summary.remaining_calories,
+                remaining=remaining,
             ),
             macro_balance_note=g_msg["note"],
-            remaining_calories=summary.remaining_calories,
+            remaining_calories=remaining,
             consumed_calories=summary.consumed_calories,
             daily_goal=current_user.daily_calorie_goal,
         )
@@ -122,6 +145,7 @@ async def suggest_daily_completion(
     user_context = await _build_user_context(db, current_user, lang)
 
     # 4. Construct request for AI Service
+    target_protein, target_carbs, target_fat = _macro_targets(current_user)
     completion_req = MealCompletionRequest(
         remaining_calories=summary.remaining_calories,
         consumed_calories=summary.consumed_calories,
@@ -129,6 +153,9 @@ async def suggest_daily_completion(
         consumed_protein_g=consumed_protein,
         consumed_carbs_g=consumed_carbs,
         consumed_fat_g=consumed_fat,
+        target_protein_g=target_protein,
+        target_carbs_g=target_carbs,
+        target_fat_g=target_fat,
         meals_eaten_today=meals_eaten_today,
     )
 
@@ -140,7 +167,25 @@ async def suggest_daily_completion(
         user_id=current_user.id,
     )
 
-    # 6. Map to Response Schema
+    valid_suggestions = [
+        suggestion
+        for suggestion in ai_result.suggestions
+        if suggestion.meal_name.strip()
+        and suggestion.ingredients
+        and 0 < suggestion.estimated_calories <= summary.remaining_calories
+    ]
+    if not valid_suggestions:
+        logger.warning(
+            "Meal completion returned no usable suggestions for user_id=%s remaining=%s",
+            current_user.id,
+            summary.remaining_calories,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Meal suggestions could not be prepared. Please try again.",
+        )
+
+    # 6. Map validated alternatives to the response.
     return MealCompletionResponse(
         suggestions=[
             MealSuggestionResponse(
@@ -157,7 +202,7 @@ async def suggest_daily_completion(
                 difficulty=s.difficulty,
                 prep_time_minutes=s.prep_time_minutes,
             )
-            for s in ai_result.suggestions
+            for s in valid_suggestions
         ],
         daily_context_summary=ai_result.daily_context_summary,
         macro_balance_note=ai_result.macro_balance_note,

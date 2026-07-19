@@ -1032,6 +1032,9 @@ class OpenRouterProvider(BaseAIProvider):
             f"Consumed Protein: {completion_req.consumed_protein_g}g\n"
             f"Consumed Carbs: {completion_req.consumed_carbs_g}g\n"
             f"Consumed Fat: {completion_req.consumed_fat_g}g\n"
+            f"Target Protein: {f'{completion_req.target_protein_g}g' if completion_req.target_protein_g is not None else 'not set'}\n"
+            f"Target Carbs: {f'{completion_req.target_carbs_g}g' if completion_req.target_carbs_g is not None else 'not set'}\n"
+            f"Target Fat: {f'{completion_req.target_fat_g}g' if completion_req.target_fat_g is not None else 'not set'}\n"
             f"Meals Eaten Today: {', '.join(completion_req.meals_eaten_today) if completion_req.meals_eaten_today else 'None'}"
         )
 
@@ -1044,7 +1047,7 @@ class OpenRouterProvider(BaseAIProvider):
             {
                 "role": "user",
                 "content": (
-                    f"Suggest 3 meals/recipes to complete my day based on this info:\n{req_info}{context_str}\n\n"
+                    f"Suggest 3 standalone meal alternatives based on this info:\n{req_info}{context_str}\n\n"
                     f"Write all free-text fields (meal_name, description, ingredients, preparation_hint, reasoning, "
                     f"daily_context_summary, macro_balance_note) in this language: {output_lang}. "
                     f"But keep meal_type and difficulty as the exact lowercase English enum values "
