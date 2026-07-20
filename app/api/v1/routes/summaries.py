@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.dependencies.premium import free_history_cutoff, has_premium_access
+from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.daily_summary import DailySummary
 from app.models.user import User
 from app.repositories.daily_summary import DailySummaryRepository
@@ -30,8 +31,15 @@ async def log_water(
     summary_service = SummaryService(db)
 
     summary = await summary_service.sync_daily_summary(current_user.id, today)
+    previous_water = summary.water_glasses
     summary.water_glasses = max(0, summary.water_glasses + payload.delta)
     await db.flush()
+    if summary.water_glasses != previous_water:
+        await InsightVersionService(db).record(
+            current_user.id,
+            DomainEvent.WATER_LOGGED if summary.water_glasses > previous_water else DomainEvent.WATER_REMOVED,
+            affected_date=today,
+        )
     return summary
 
 

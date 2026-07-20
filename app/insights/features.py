@@ -33,6 +33,7 @@ class DayFeatures:
 class CorrectionFeatures:
     date: dt.date
     source_type: str
+    meal_category: str
     correction_percent: float
 
 
@@ -44,6 +45,9 @@ class FeatureSnapshot:
     days: tuple[DayFeatures, ...]
     corrections: tuple[CorrectionFeatures, ...]
     current_weight_kg: float | None = None
+    protein_goal_g: int | None = None
+    carbs_goal_g: int | None = None
+    fat_goal_g: int | None = None
 
     @property
     def logged_days(self) -> tuple[DayFeatures, ...]:
@@ -93,6 +97,9 @@ class FeatureExtractor:
         summaries: Iterable[Any],
         meals: Iterable[Any],
         current_weight_kg: float | None = None,
+        protein_goal_g: int | None = None,
+        carbs_goal_g: int | None = None,
+        fat_goal_g: int | None = None,
     ) -> FeatureSnapshot:
         start_date = end_date - dt.timedelta(days=period_days - 1)
         summary_by_date = {summary.date: summary for summary in summaries}
@@ -110,6 +117,7 @@ class FeatureExtractor:
                     CorrectionFeatures(
                         date=meal_date,
                         source_type=getattr(meal, "source_type", "unknown") or "unknown",
+                        meal_category=getattr(meal, "meal_category", "unknown") or "unknown",
                         correction_percent=float(correction_percent),
                     )
                 )
@@ -161,4 +169,7 @@ class FeatureExtractor:
             days=tuple(days),
             corrections=tuple(sorted(corrections, key=lambda item: item.date)),
             current_weight_kg=current_weight_kg,
+            protein_goal_g=protein_goal_g,
+            carbs_goal_g=carbs_goal_g,
+            fat_goal_g=fat_goal_g,
         )

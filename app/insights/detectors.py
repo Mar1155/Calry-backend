@@ -19,6 +19,9 @@ def _split_logged_days(snapshot: FeatureSnapshot) -> tuple[list[DayFeatures], li
 
 class PatternDetector(ABC):
     registry: list[type["PatternDetector"]] = []
+    detector_id = "base"
+    detector_version = "1.0"
+    dependencies: frozenset[str] = frozenset()
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -30,6 +33,9 @@ class PatternDetector(ABC):
 
 
 class GoalConsistencyDetector(PatternDetector):
+    detector_id = "goal_consistency"
+    dependencies = frozenset({"meal_data_version", "target_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         days = snapshot.logged_days
         if len(days) < 3:
@@ -44,6 +50,7 @@ class GoalConsistencyDetector(PatternDetector):
                 confidence=_confidence(len(days), strength=abs(rate - 0.5) * 2),
                 priority=84,
                 novelty=0.72,
+                effect_size=max(0.25, abs(rate - 0.5) * 2),
                 concept="goal_adherence",
                 payload={
                     "days_logged": len(days),
@@ -58,6 +65,9 @@ class GoalConsistencyDetector(PatternDetector):
 
 
 class WeekendDetector(PatternDetector):
+    detector_id = "weekend"
+    dependencies = frozenset({"meal_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         weekend = [day.calories for day in snapshot.logged_days if day.date.weekday() >= 5]
         weekdays = [day.calories for day in snapshot.logged_days if day.date.weekday() < 5]
@@ -77,6 +87,7 @@ class WeekendDetector(PatternDetector):
                 confidence=_confidence(len(weekend) + len(weekdays), strength=abs(difference_pct)),
                 priority=82,
                 novelty=0.90,
+                effect_size=min(1.0, abs(difference_pct) * 2.5),
                 concept="weekend_calories",
                 payload={
                     "weekend_days": len(weekend),
@@ -91,6 +102,9 @@ class WeekendDetector(PatternDetector):
 
 
 class MealDistributionDetector(PatternDetector):
+    detector_id = "meal_distribution"
+    dependencies = frozenset({"meal_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         days = snapshot.logged_days
         if len(days) < 3 or snapshot.total_meals < 4:
@@ -104,6 +118,7 @@ class MealDistributionDetector(PatternDetector):
                 if day.meal_categories.get(category, 0) == 0:
                     skipped[category] += 1
         most_common_category = max(totals, key=totals.get) if totals else "unknown"
+        dominant_share = totals.get(most_common_category, 0) / snapshot.total_meals if snapshot.total_meals else 0
         return [
             VerifiedPattern(
                 id="meal_distribution",
@@ -111,13 +126,16 @@ class MealDistributionDetector(PatternDetector):
                 confidence=_confidence(len(days), strength=min(1.0, snapshot.total_meals / (len(days) * 3))),
                 priority=69,
                 novelty=0.62,
+                effect_size=max(0.25, dominant_share),
                 concept="meal_frequency",
                 payload={
                     "days_logged": len(days),
-                    "total_meals": snapshot.total_meals,
-                    "average_meals_per_logged_day": round(snapshot.total_meals / len(days), 2),
-                    "meal_category_counts": totals,
+                    "total_entries": snapshot.total_meals,
+                    "active_logging_days": len(days),
+                    "average_entries_per_active_day": round(snapshot.total_meals / len(days), 2),
+                    "entry_category_counts": totals,
                     "most_logged_category": most_common_category,
+                    "dominant_category_share": round(dominant_share, 3),
                     "days_without_breakfast_log": skipped["breakfast"],
                     "days_without_lunch_log": skipped["lunch"],
                     "days_without_dinner_log": skipped["dinner"],
@@ -127,16 +145,30 @@ class MealDistributionDetector(PatternDetector):
 
 
 class MacroBalanceDetector(PatternDetector):
+    detector_id = "macro_balance"
+    dependencies = frozenset({"meal_data_version", "target_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         days = [day for day in snapshot.logged_days if day.macro_meal_count > 0]
         macro_meals = sum(day.macro_meal_count for day in days)
-        if len(days) < 3 or macro_meals < 5:
+        goals = {
+            "protein": snapshot.protein_goal_g,
+            "carbs": snapshot.carbs_goal_g,
+            "fat": snapshot.fat_goal_g,
+        }
+        if len(days) < 3 or macro_meals < 5 or not all(goals.values()):
             return []
         protein = sum(day.protein_g for day in days) / len(days)
         carbs = sum(day.carbs_g for day in days) / len(days)
         fat = sum(day.fat_g for day in days) / len(days)
         macro_calories = protein * 4 + carbs * 4 + fat * 9
         if macro_calories <= 0:
+            return []
+        averages = {"protein": protein, "carbs": carbs, "fat": fat}
+        target_ratios = {key: averages[key] / float(goals[key]) for key in goals}
+        largest_gap = max(target_ratios, key=lambda key: abs(target_ratios[key] - 1))
+        largest_gap_size = abs(target_ratios[largest_gap] - 1)
+        if largest_gap_size < 0.10:
             return []
         return [
             VerifiedPattern(
@@ -145,6 +177,7 @@ class MacroBalanceDetector(PatternDetector):
                 confidence=_confidence(macro_meals, strength=min(1.0, macro_meals / max(1, snapshot.total_meals))),
                 priority=73,
                 novelty=0.74,
+                effect_size=min(1.0, largest_gap_size),
                 concept="macro_balance",
                 payload={
                     "days_with_macro_data": len(days),
@@ -155,12 +188,19 @@ class MacroBalanceDetector(PatternDetector):
                     "protein_calorie_share": round(protein * 4 / macro_calories, 3),
                     "carbs_calorie_share": round(carbs * 4 / macro_calories, 3),
                     "fat_calorie_share": round(fat * 9 / macro_calories, 3),
+                    "protein_target_ratio": round(target_ratios["protein"], 3),
+                    "carbs_target_ratio": round(target_ratios["carbs"], 3),
+                    "fat_target_ratio": round(target_ratios["fat"], 3),
+                    "largest_target_gap": largest_gap,
                 },
             )
         ]
 
 
 class WaterDetector(PatternDetector):
+    detector_id = "hydration"
+    dependencies = frozenset({"hydration_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         days = [day for day in snapshot.days if day.water_glasses > 0]
         if len(days) < 4:
@@ -176,6 +216,7 @@ class WaterDetector(PatternDetector):
                 confidence=_confidence(len(days), strength=1 / (1 + statistics.pvariance(values))),
                 priority=61,
                 novelty=0.68,
+                effect_size=min(1.0, max(0.2, abs(sum(recent) / len(recent) - sum(earlier) / len(earlier)) / 3)),
                 concept="hydration",
                 payload={
                     "days_with_water_logs": len(days),
@@ -195,6 +236,9 @@ class WaterDetector(PatternDetector):
 
 
 class ActivityDetector(PatternDetector):
+    detector_id = "activity"
+    dependencies = frozenset({"activity_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         observed = [day for day in snapshot.days if day.logged or day.burned_calories > 0]
         active = [day for day in observed if day.burned_calories > 0]
@@ -212,6 +256,7 @@ class ActivityDetector(PatternDetector):
                 confidence=_confidence(len(observed), strength=len(active) / len(observed)),
                 priority=64,
                 novelty=0.70,
+                effect_size=max(0.25, abs(recent_rate - earlier_rate)),
                 concept="activity",
                 payload={
                     "days_observed": len(observed),
@@ -230,6 +275,9 @@ class ActivityDetector(PatternDetector):
 
 
 class LoggingHabitDetector(PatternDetector):
+    detector_id = "logging_habit"
+    dependencies = frozenset({"meal_data_version", "logging_behavior_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         if snapshot.days_logged < 3:
             return []
@@ -240,6 +288,7 @@ class LoggingHabitDetector(PatternDetector):
                 confidence=_confidence(snapshot.days_logged, strength=snapshot.days_logged / snapshot.period_days),
                 priority=78,
                 novelty=0.55,
+                effect_size=max(0.25, snapshot.days_logged / snapshot.period_days),
                 concept="logging_consistency",
                 payload={
                     "period_days": snapshot.period_days,
@@ -253,15 +302,36 @@ class LoggingHabitDetector(PatternDetector):
 
 
 class AIAccuracyDetector(PatternDetector):
+    detector_id = "ai_accuracy"
+    dependencies = frozenset({"meal_data_version", "ai_accuracy_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         corrections = list(snapshot.corrections)
         if len(corrections) < 5:
             return []
         absolute = [abs(item.correction_percent) for item in corrections]
         within_ten = sum(value <= 10 for value in absolute)
+        accepted_unchanged = sum(value == 0 for value in absolute)
         source_counts: dict[str, int] = {}
+        source_accuracy: dict[str, dict[str, float | int]] = {}
+        category_accuracy: dict[str, dict[str, float | int]] = {}
         for item in corrections:
             source_counts[item.source_type] = source_counts.get(item.source_type, 0) + 1
+        for label, groups in (("source", source_accuracy), ("category", category_accuracy)):
+            names = {getattr(item, "source_type" if label == "source" else "meal_category") for item in corrections}
+            for name in names:
+                values = [
+                    abs(item.correction_percent)
+                    for item in corrections
+                    if getattr(item, "source_type" if label == "source" else "meal_category") == name
+                ]
+                groups[name] = {
+                    "count": len(values),
+                    "within_ten_rate": round(sum(value <= 10 for value in values) / len(values), 3),
+                    "median_absolute_correction_percent": round(statistics.median(values), 1),
+                }
+        accepted_rate = accepted_unchanged / len(corrections)
+        accepted_band = "high" if accepted_rate >= 0.5 else "medium" if accepted_rate >= 0.25 else "low"
         return [
             VerifiedPattern(
                 id="ai_estimation_accuracy",
@@ -269,6 +339,7 @@ class AIAccuracyDetector(PatternDetector):
                 confidence=_confidence(len(corrections), strength=within_ten / len(corrections)),
                 priority=80,
                 novelty=0.94,
+                effect_size=max(0.25, within_ten / len(corrections)),
                 concept="ai_accuracy",
                 payload={
                     "confirmed_meals": len(corrections),
@@ -280,13 +351,21 @@ class AIAccuracyDetector(PatternDetector):
                     ),
                     "estimates_within_ten_percent": within_ten,
                     "accuracy_rate_within_ten_percent": round(within_ten / len(corrections), 3),
+                    "accepted_without_changes": accepted_unchanged,
+                    "accepted_without_changes_rate": round(accepted_rate, 3),
+                    "accepted_without_changes_rate_band": accepted_band,
                     "correction_source_counts": source_counts,
+                    "accuracy_by_input_method": source_accuracy,
+                    "accuracy_by_meal_category": category_accuracy,
                 },
             )
         ]
 
 
 class LearningProgressDetector(PatternDetector):
+    detector_id = "learning_progress"
+    dependencies = frozenset({"meal_data_version", "ai_accuracy_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         corrections = list(snapshot.corrections)
         if len(corrections) < 6:
@@ -303,11 +382,12 @@ class LearningProgressDetector(PatternDetector):
             return []
         return [
             VerifiedPattern(
-                id="learning_progress",
+                id="ai_accuracy_trend",
                 category="learning",
                 confidence=_confidence(len(corrections), strength=abs(change)),
                 priority=86,
                 novelty=0.98,
+                effect_size=min(1.0, abs(recent_avg - older_avg) / 10),
                 concept="ai_learning",
                 payload={
                     "older_confirmed_meals": len(older),
@@ -315,12 +395,17 @@ class LearningProgressDetector(PatternDetector):
                     "older_average_absolute_correction_percent": round(older_avg, 1),
                     "recent_average_absolute_correction_percent": round(recent_avg, 1),
                     "relative_error_change": round(change, 3),
+                    "absolute_percentage_point_change": round(recent_avg - older_avg, 1),
+                    "direction": "improved" if recent_avg < older_avg else "worsened",
                 },
             )
         ]
 
 
 class WeightTrendDetector(PatternDetector):
+    detector_id = "weight_trend"
+    dependencies = frozenset({"weight_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         # User currently stores one weight value, not timestamped weight history.
         # A single measurement cannot verify a trend.
@@ -328,6 +413,9 @@ class WeightTrendDetector(PatternDetector):
 
 
 class CaloriesTrendDetector(PatternDetector):
+    detector_id = "calories_trend"
+    dependencies = frozenset({"meal_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         earlier, recent = _split_logged_days(snapshot)
         if len(earlier) < 3 or len(recent) < 3:
@@ -346,6 +434,7 @@ class CaloriesTrendDetector(PatternDetector):
                 confidence=_confidence(len(earlier) + len(recent), strength=abs(change)),
                 priority=76,
                 novelty=0.82,
+                effect_size=min(1.0, abs(change) * 2),
                 concept="calorie_trend",
                 payload={
                     "earlier_days": len(earlier),
@@ -354,12 +443,16 @@ class CaloriesTrendDetector(PatternDetector):
                     "recent_average_calories": round(recent_avg),
                     "change_calories": round(recent_avg - earlier_avg),
                     "change_percent": round(change, 3),
+                    "direction": "increased" if change > 0 else "decreased",
                 },
             )
         ]
 
 
 class ImprovementDetector(PatternDetector):
+    detector_id = "improvement"
+    dependencies = frozenset({"meal_data_version", "target_data_version"})
+
     def detect(self, snapshot: FeatureSnapshot) -> list[VerifiedPattern]:
         earlier, recent = _split_logged_days(snapshot)
         if len(earlier) < 3 or len(recent) < 3:
@@ -376,6 +469,7 @@ class ImprovementDetector(PatternDetector):
                 confidence=_confidence(len(earlier) + len(recent), strength=abs(change)),
                 priority=88,
                 novelty=0.96,
+                effect_size=min(1.0, abs(change)),
                 concept="goal_adherence",
                 payload={
                     "earlier_days": len(earlier),

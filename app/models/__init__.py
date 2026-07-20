@@ -4,6 +4,7 @@ from app.models.burned_calories import BurnedCalories
 from app.models.daily_summary import DailySummary
 from app.models.food_memory import UserFoodMemory
 from app.models.inference import AIInferenceLog
+from app.models.insight import DetectedPattern, InsightSnapshot, UserInsightVersion
 from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.promo_code import PromoCode, PromoCodeAttempt, PromoCodeRedemption
@@ -24,6 +25,9 @@ __all__ = [
     "BurnedCalories",
     "DailySummary",
     "AIInferenceLog",
+    "UserInsightVersion",
+    "DetectedPattern",
+    "InsightSnapshot",
     "UserFoodMemory",
     "RevenueCatEvent",
     "RevenueCatSubscriberSnapshot",

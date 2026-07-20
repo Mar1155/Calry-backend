@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.user import UserResponse, UserUpdate
@@ -37,6 +38,10 @@ async def update_user_profile(
     """
     user_repo = UserRepository(db)
     original_goal = current_user.daily_calorie_goal
+    original_values = {
+        field: getattr(current_user, field)
+        for field in UserUpdate.model_fields
+    }
 
     # Check if we should automatically estimate/update the calorie target
     sex = profile_update.sex if profile_update.sex is not None else current_user.sex
@@ -70,6 +75,28 @@ async def update_user_profile(
             logger.info(f"Recalculated summary for user_id={updated_user.id} following calorie goal update.")
         except Exception as e:
             logger.error(f"Failed to sync today's summary after user target modification: {e}")
+
+    changed_fields = {
+        field
+        for field, old_value in original_values.items()
+        if getattr(updated_user, field) != old_value
+    }
+    target_fields = {
+        "daily_calorie_goal",
+        "goal_type",
+        "daily_protein_goal",
+        "daily_carbs_goal",
+        "daily_fat_goal",
+    }
+    events: list[DomainEvent] = []
+    if changed_fields.intersection(target_fields):
+        events.append(DomainEvent.TARGET_CHANGED)
+    if "weight_kg" in changed_fields:
+        events.append(DomainEvent.WEIGHT_UPDATED)
+    if changed_fields - target_fields - {"weight_kg"}:
+        events.append(DomainEvent.PROFILE_CHANGED)
+    if events:
+        await InsightVersionService(db).record(updated_user.id, *events, affected_date=dt.date.today())
 
     return updated_user
 

@@ -99,7 +99,7 @@ def test_ranker_uses_confidence_priority_novelty_and_deduplicates() -> None:
         ],
         limit=4,
     )
-    assert [item.id for item in ranked] == ["novel", "same_a", "low"]
+    assert [item.id for item in ranked] == ["same_b", "low", "novel"]
 
 
 @pytest.mark.asyncio
@@ -172,7 +172,7 @@ def test_evidence_is_human_readable_and_localized() -> None:
     insight = OpenRouterProvider._fallback_insight(pattern, locale="it-IT")
 
     assert insight.title == "Precisione delle stime"
-    assert insight.metric == "0,0% correzione mediana"
+    assert insight.metric == "92% entro ±10%"
     assert "91 pasti confermati analizzati" in insight.evidence
     assert "Fonte più confermata: foto" in insight.evidence
     assert all("_" not in item for item in insight.evidence)

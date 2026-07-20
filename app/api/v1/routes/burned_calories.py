@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.burned_calories import BurnedCalories
 from app.models.user import User
 from app.repositories.burned_calories import BurnedCaloriesRepository
@@ -49,6 +50,12 @@ async def log_energy_expenditure(
         await summary_service.sync_daily_summary(current_user.id, entry.created_at.date())
     except Exception as e:
         logger.error(f"Failed to synchronize daily summary following calorie burn log: {e}")
+
+    await InsightVersionService(db).record(
+        current_user.id,
+        DomainEvent.ACTIVITY_LOGGED,
+        affected_date=entry.created_at.date(),
+    )
 
     return entry
 

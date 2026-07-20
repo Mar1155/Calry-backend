@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.user import User
 from app.schemas.onboarding import CalculateTargetRequest, CompleteOnboardingRequest, OnboardingStatusResponse
 from app.services.calorie_target_service import CalorieTargetService
@@ -71,4 +72,11 @@ async def complete_onboarding(payload: CompleteOnboardingRequest, current_user: 
     db.add(current_user)
     await db.flush()
     await SummaryService(db).sync_daily_summary(current_user.id, dt.date.today())
+    await InsightVersionService(db).record(
+        current_user.id,
+        DomainEvent.PROFILE_CHANGED,
+        DomainEvent.TARGET_CHANGED,
+        DomainEvent.WEIGHT_UPDATED,
+        affected_date=dt.date.today(),
+    )
     return {"status": "completed", "daily_calorie_goal": current_user.daily_calorie_goal, "goal_type": current_user.goal_type, "activity_level": current_user.activity_level, "target_pace": current_user.target_pace, "calorie_target_source": current_user.calorie_target_source, "onboarding_completed_at": current_user.onboarding_completed_at}

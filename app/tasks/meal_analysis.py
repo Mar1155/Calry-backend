@@ -282,9 +282,15 @@ async def _run_photo_analysis(job_id: str) -> int | None:
             meal_date = meal.created_at.date()
             await db.delete(meal)
             await db.flush()
+            from app.insights.versioning import DomainEvent, InsightVersionService
             from app.services.summary import SummaryService
 
             await SummaryService(db).sync_daily_summary(user.id, meal_date)
+            await InsightVersionService(db).record(
+                user.id,
+                DomainEvent.MEAL_DELETED,
+                affected_date=meal_date,
+            )
             await db.commit()
             logger.info("event=meal_analysis_worker_cancelled job_id=%s phase=after_persistence", job.id)
             return None

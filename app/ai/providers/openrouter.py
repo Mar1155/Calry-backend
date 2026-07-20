@@ -1210,6 +1210,174 @@ class OpenRouterProvider(BaseAIProvider):
         except Exception:
             return [self._fallback_insight(pattern, locale=locale) for pattern in patterns[:4]]
 
+    async def verbalize_insight_stories(self, pattern_inputs: list[dict], *, locale: str = "en"):
+        """Strict narrator boundary. Raises after one malformed-output repair attempt."""
+        from app.ai.prompts.insights import STORY_VERBALIZATION_SYSTEM_PROMPT
+        from app.schemas.insights import InsightStory
+
+        if not pattern_inputs:
+            return []
+        verified_inputs = pattern_inputs[:4]
+        messages = [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "output_language": self._insight_language(locale),
+                        "verified_patterns": verified_inputs,
+                    },
+                    separators=(",", ":"),
+                ),
+            }
+        ]
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "calry_insight_stories",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["insights"],
+                    "properties": {
+                        "insights": {
+                            "type": "array",
+                            "maxItems": 4,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": [
+                                    "story_id",
+                                    "detector_id",
+                                    "pattern_key",
+                                    "title",
+                                    "message",
+                                    "confidence_label",
+                                    "metric",
+                                    "explanation",
+                                    "evidence",
+                                    "category",
+                                ],
+                                "properties": {
+                                    "story_id": {"type": "string"},
+                                    "detector_id": {"type": "string"},
+                                    "pattern_key": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "message": {"type": "string"},
+                                    "confidence_label": {
+                                        "type": "string",
+                                        "enum": ["low", "medium", "high"],
+                                    },
+                                    "metric": {"type": "string"},
+                                    "explanation": {"type": "string"},
+                                    "evidence": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "required": ["label", "value"],
+                                            "properties": {
+                                                "label": {"type": "string"},
+                                                "value": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                    "category": {
+                                        "type": "string",
+                                        "enum": [
+                                            "accuracy",
+                                            "consistency",
+                                            "macros",
+                                            "meals",
+                                            "activity",
+                                            "water",
+                                            "progress",
+                                        ],
+                                    },
+                                },
+                            },
+                        }
+                    },
+                },
+            },
+        }
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                text, latency_ms, usage = await self._post_openrouter(
+                    model=settings.OPENROUTER_TEXT_MODEL,
+                    system_prompt=STORY_VERBALIZATION_SYSTEM_PROMPT,
+                    messages=messages,
+                    response_format=response_format,
+                )
+                parsed = json.loads(self._extract_json(text))
+                raw_insights = parsed.get("insights")
+                if not isinstance(raw_insights, list) or len(raw_insights) != len(verified_inputs):
+                    raise ValueError("Insight count does not match verified input.")
+                output = []
+                for index, raw in enumerate(raw_insights):
+                    source = verified_inputs[index]
+                    immutable_fields = (
+                        "story_id",
+                        "detector_id",
+                        "pattern_key",
+                        "confidence_label",
+                        "metric",
+                        "category",
+                    )
+                    if any(raw.get(key) != source[key] for key in immutable_fields):
+                        raise ValueError("An immutable verified field changed.")
+                    raw_evidence = raw.get("evidence")
+                    source_evidence = source["evidence"]
+                    if (
+                        not isinstance(raw_evidence, list)
+                        or len(raw_evidence) != len(source_evidence)
+                        or any(
+                            not isinstance(item, dict) or item.get("value") != source_evidence[evidence_index]["value"]
+                            for evidence_index, item in enumerate(raw_evidence)
+                        )
+                    ):
+                        raise ValueError("Verified evidence values or order changed.")
+                    repaired = {
+                        **raw,
+                        "story_id": source["story_id"],
+                        "detector_id": source["detector_id"],
+                        "pattern_key": source["pattern_key"],
+                        "confidence_label": source["confidence_label"],
+                        "metric": source["metric"],
+                        "evidence": [
+                            {"label": item["label"], "value": source_evidence[evidence_index]["value"]}
+                            for evidence_index, item in enumerate(raw_evidence)
+                        ],
+                        "category": source["category"],
+                        "direction": source["direction"],
+                    }
+                    output.append(InsightStory.model_validate(repaired))
+                normalized_usage = self._normalize_usage(usage) or {}
+                logger.info(
+                    "event=llm_verbalization_completed model=%s story_count=%s attempt=%s "
+                    "latency_ms=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s cost=%s",
+                    settings.OPENROUTER_TEXT_MODEL,
+                    len(output),
+                    attempt + 1,
+                    latency_ms,
+                    normalized_usage.get("prompt_tokens"),
+                    normalized_usage.get("completion_tokens"),
+                    normalized_usage.get("total_tokens"),
+                    usage.get("cost") if isinstance(usage, dict) else None,
+                )
+                return output
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "Previous output was invalid. Return schema-valid JSON preserving every identifier, metric, category, evidence value, and input order exactly. Respect the input direction but do not output it.",
+                        }
+                    )
+        raise ValueError("Invalid story verbalization output after repair.") from last_error
+
     @staticmethod
     def _insight_confidence(confidence: float) -> str:
         if confidence < 0.65:
@@ -1272,9 +1440,9 @@ class OpenRouterProvider(BaseAIProvider):
         if pattern.id == "meal_distribution":
             return [
                 (
-                    f"{payload['total_meals']} pasti registrati in {payload['days_logged']} giorni"
+                    f"{payload['total_entries']} voci registrate in {payload['active_logging_days']} giorni attivi"
                     if italian
-                    else f"{payload['total_meals']} meals logged across {payload['days_logged']} days"
+                    else f"{payload['total_entries']} entries logged across {payload['active_logging_days']} active days"
                 ),
                 (
                     f"Categoria registrata più spesso: {payload['most_logged_category']}"
@@ -1282,13 +1450,25 @@ class OpenRouterProvider(BaseAIProvider):
                     else f"Most logged category: {payload['most_logged_category']}"
                 ),
                 (
-                    f"Media: {payload['average_meals_per_logged_day']:.1f} pasti al giorno"
+                    f"Media: {payload['average_entries_per_active_day']:.1f} voci per giorno attivo"
                     if italian
-                    else f"Average: {payload['average_meals_per_logged_day']:.1f} meals per logged day"
+                    else f"Average: {payload['average_entries_per_active_day']:.1f} entries per active day"
                 ),
             ]
         if pattern.id == "macro_balance":
+            largest_gap = payload["largest_target_gap"]
+            target_ratio = payload[f"{largest_gap}_target_ratio"]
+            macro_label = (
+                {"protein": "Proteine", "carbs": "Carboidrati", "fat": "Grassi"}.get(largest_gap, largest_gap)
+                if italian
+                else {"protein": "Protein", "carbs": "Carbohydrates", "fat": "Fat"}.get(largest_gap, largest_gap)
+            )
             return [
+                (
+                    f"{macro_label} rispetto all’obiettivo: {cls._percent(target_ratio)}%"
+                    if italian
+                    else f"{macro_label} relative to target: {cls._percent(target_ratio)}%"
+                ),
                 (
                     f"Proteine medie: {payload['average_protein_g']:.1f} g"
                     if italian
@@ -1390,7 +1570,7 @@ class OpenRouterProvider(BaseAIProvider):
                     f"Fonte più confermata: {source_label}" if italian else f"Most confirmed source: {main_source}"
                 )
             return evidence
-        if pattern.id == "learning_progress":
+        if pattern.id == "ai_accuracy_trend":
             return [
                 (
                     f"Correzione media precedente: {payload['older_average_absolute_correction_percent']:.1f}%"
@@ -1456,20 +1636,50 @@ class OpenRouterProvider(BaseAIProvider):
         return rendered.replace(".", ",") if cls._insight_locale(locale) == "it" else rendered
 
     @classmethod
+    def _signed_decimal(cls, value: float, *, locale: str) -> str:
+        rendered = f"{value:+.1f}"
+        return rendered.replace(".", ",") if cls._insight_locale(locale) == "it" else rendered
+
+    @classmethod
     def _insight_metric(cls, pattern, *, locale: str = "en") -> str:
         payload = pattern.payload
         italian = cls._insight_locale(locale) == "it"
+        accepted_rate = float(payload.get("accepted_without_changes_rate", 0))
+        largest_macro_gap = payload.get("largest_target_gap", "protein")
+        macro_labels = (
+            {"protein": "Proteine", "carbs": "Carboidrati", "fat": "Grassi"}
+            if italian
+            else {"protein": "Protein", "carbs": "Carbohydrates", "fat": "Fat"}
+        )
+        macro_target_metric = (
+            f"{macro_labels.get(largest_macro_gap, largest_macro_gap)}: "
+            f"{cls._percent(payload.get(f'{largest_macro_gap}_target_ratio', 0))}% "
+            f"{'dell’obiettivo' if italian else 'of target'}"
+        )
+        if accepted_rate >= 0.5:
+            accuracy_metric = (
+                f"{cls._percent(accepted_rate)}% confermate senza modifiche"
+                if italian
+                else f"{cls._percent(accepted_rate)}% accepted unchanged"
+            )
+        else:
+            within_ten_rate = float(payload.get("accuracy_rate_within_ten_percent", 0))
+            accuracy_metric = (
+                f"{cls._percent(within_ten_rate)}% entro ±10%"
+                if italian
+                else f"{cls._percent(within_ten_rate)}% within ±10%"
+            )
         metrics = (
             {
                 "goal_consistency": lambda: f"{cls._percent(payload['adherence_rate'])}% dei giorni nell’obiettivo",
                 "weekend_difference": lambda: f"{payload['difference_calories']:+d} kcal nel weekend",
-                "meal_distribution": lambda: f"{payload['average_meals_per_logged_day']:.1f} pasti per giorno registrato",
-                "macro_balance": lambda: f"{cls._percent(payload['protein_calorie_share'])}% quota proteica",
+                "meal_distribution": lambda: f"{payload['total_entries']} voci in {payload['active_logging_days']} giorni attivi",
+                "macro_balance": lambda: macro_target_metric,
                 "hydration_consistency": lambda: f"{payload['average_glasses']:.1f} bicchieri al giorno",
                 "activity_frequency": lambda: f"{payload['active_days']} giorni attivi",
                 "logging_consistency": lambda: f"{payload['longest_streak']} giorni consecutivi",
-                "ai_estimation_accuracy": lambda: f"{cls._decimal(payload['median_absolute_correction_percent'], locale=locale)}% correzione mediana",
-                "learning_progress": lambda: f"{cls._percent(payload['relative_error_change']):+d}% variazione dell’errore",
+                "ai_estimation_accuracy": lambda: accuracy_metric,
+                "ai_accuracy_trend": lambda: f"{cls._signed_decimal(payload['absolute_percentage_point_change'], locale=locale)} punti percentuali",
                 "calories_trend": lambda: f"{payload['change_calories']:+d} kcal",
                 "goal_adherence_change": lambda: f"{cls._percent(payload['adherence_rate_change']):+d} punti percentuali",
             }
@@ -1477,13 +1687,13 @@ class OpenRouterProvider(BaseAIProvider):
             else {
                 "goal_consistency": lambda: f"{cls._percent(payload['adherence_rate'])}% within target",
                 "weekend_difference": lambda: f"{payload['difference_calories']:+d} kcal on weekends",
-                "meal_distribution": lambda: f"{payload['average_meals_per_logged_day']:.1f} meals per logged day",
-                "macro_balance": lambda: f"{cls._percent(payload['protein_calorie_share'])}% protein share",
+                "meal_distribution": lambda: f"{payload['total_entries']} entries across {payload['active_logging_days']} active days",
+                "macro_balance": lambda: macro_target_metric,
                 "hydration_consistency": lambda: f"{payload['average_glasses']:.1f} glasses per logged day",
                 "activity_frequency": lambda: f"{payload['active_days']} active days",
                 "logging_consistency": lambda: f"{payload['longest_streak']}-day logging streak",
-                "ai_estimation_accuracy": lambda: f"{payload['median_absolute_correction_percent']:.1f}% median correction",
-                "learning_progress": lambda: f"{cls._percent(payload['relative_error_change']):+d}% error change",
+                "ai_estimation_accuracy": lambda: accuracy_metric,
+                "ai_accuracy_trend": lambda: f"{payload['absolute_percentage_point_change']:+.1f} percentage points",
                 "calories_trend": lambda: f"{payload['change_calories']:+d} kcal",
                 "goal_adherence_change": lambda: f"{cls._percent(payload['adherence_rate_change']):+d} percentage points",
             }
@@ -1519,9 +1729,9 @@ class OpenRouterProvider(BaseAIProvider):
             title, message = (
                 ("Ritmo dei pasti registrati" if italian else "Meal logging pattern"),
                 (
-                    f"Hai registrato {payload['total_meals']} pasti in {payload['days_logged']} giorni."
+                    f"Hai registrato {payload['total_entries']} voci in {payload['active_logging_days']} giorni attivi."
                     if italian
-                    else f"You logged {payload['total_meals']} meals across {payload['days_logged']} days."
+                    else f"You logged {payload['total_entries']} entries across {payload['active_logging_days']} active days."
                 ),
             )
         elif pattern.id == "macro_balance":
@@ -1564,14 +1774,23 @@ class OpenRouterProvider(BaseAIProvider):
             title, message = (
                 ("Precisione delle stime" if italian else "Estimation accuracy"),
                 (
-                    f"La correzione mediana è stata dello {cls._decimal(payload['median_absolute_correction_percent'], locale=locale)}% su {payload['confirmed_meals']} pasti confermati."
+                    f"Il {cls._percent(payload['accuracy_rate_within_ten_percent'])}% delle stime era entro ±10% su {payload['confirmed_meals']} pasti confermati."
                     if italian
-                    else f"Median correction was {payload['median_absolute_correction_percent']:.1f}% across {payload['confirmed_meals']} confirmed meals."
+                    else f"{cls._percent(payload['accuracy_rate_within_ten_percent'])}% of estimates were within ±10% across {payload['confirmed_meals']} confirmed meals."
                 ),
             )
-        elif pattern.id == "learning_progress":
+        elif pattern.id == "ai_accuracy_trend":
+            worsened = payload.get("direction") == "worsened"
             title, message = (
-                ("Calry sta imparando" if italian else "Estimation learning"),
+                (
+                    "Le stime recenti richiedono più correzioni"
+                    if italian and worsened
+                    else "Le stime recenti sono migliorate"
+                    if italian
+                    else "Recent estimates needed more correction"
+                    if worsened
+                    else "Recent estimates improved"
+                ),
                 (
                     f"La correzione media è passata dal {payload['older_average_absolute_correction_percent']:.1f}% al {payload['recent_average_absolute_correction_percent']:.1f}%."
                     if italian

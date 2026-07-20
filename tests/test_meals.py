@@ -115,10 +115,12 @@ async def test_delete_meal_does_not_report_success_when_commit_fails() -> None:
         remove=AsyncMock(return_value=meal),
     )
     summary_service = SimpleNamespace(sync_daily_summary=AsyncMock())
+    version_service = SimpleNamespace(record=AsyncMock())
 
     with (
         patch("app.api.v1.routes.meals.MealRepository", return_value=meal_repo),
         patch("app.api.v1.routes.meals.SummaryService", return_value=summary_service),
+        patch("app.api.v1.routes.meals.InsightVersionService", return_value=version_service),
         patch(
             "app.api.v1.routes.meals.ensure_history_date_access",
             new_callable=AsyncMock,

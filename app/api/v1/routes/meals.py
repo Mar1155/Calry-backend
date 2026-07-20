@@ -21,6 +21,7 @@ from app.dependencies.premium import (
     free_history_cutoff,
     has_premium_access,
 )
+from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.user import User
@@ -140,6 +141,12 @@ async def _process_and_save_meal(
             await summary_service.sync_daily_summary(user.id, meal_date)
     except Exception:
         logger.exception("Failed to synchronize daily summary on meal log")
+
+    await InsightVersionService(db).record(
+        user.id,
+        DomainEvent.MEAL_CREATED,
+        affected_date=meal.created_at.date(),
+    )
 
     # 4. Asynchronously retrieve the completed Meal with preloaded items to prevent lazyloading issues
     from sqlalchemy.future import select
@@ -551,6 +558,11 @@ async def cancel_photo_analysis(
             await db.delete(meal)
             await db.flush()
             await SummaryService(db).sync_daily_summary(current_user.id, meal_date)
+            await InsightVersionService(db).record(
+                current_user.id,
+                DomainEvent.MEAL_DELETED,
+                affected_date=meal_date,
+            )
         job.status = "cancelled"
         job.meal_id = None
         job.completed_at = dt.datetime.now(dt.UTC)
@@ -1229,6 +1241,8 @@ async def update_meal(
 
     await ensure_history_date_access(meal.created_at.date(), current_user, db)
 
+    previous_category = meal.meal_category
+
     # Perform repository updates. Ingredient quantity/density determine totals.
     try:
         updated_meal = await meal_repo.update(meal, payload)
@@ -1255,6 +1269,29 @@ async def update_meal(
         await summary_service.sync_daily_summary(current_user.id, updated_meal.created_at.date())
     except Exception as e:
         logger.error(f"Failed to synchronize daily summary during meal adjustment: {e}")
+
+    events: list[DomainEvent] = []
+    if payload.meal_category is not None and payload.meal_category != previous_category:
+        events.append(DomainEvent.MEAL_CATEGORY_CHANGED)
+    correction_fields = {
+        "is_confirmed",
+        "meal_name",
+        "estimated_min_calories",
+        "estimated_max_calories",
+        "total_protein_g",
+        "total_carbs_g",
+        "total_fat_g",
+        "items",
+    }
+    if correction_fields.intersection(payload.model_fields_set):
+        events.append(DomainEvent.MEAL_CORRECTED)
+    if not events:
+        events.append(DomainEvent.MEAL_UPDATED)
+    await InsightVersionService(db).record(
+        current_user.id,
+        *events,
+        affected_date=updated_meal.created_at.date(),
+    )
 
     return updated_meal
 
@@ -1291,6 +1328,12 @@ async def delete_meal(
         await summary_service.sync_daily_summary(current_user.id, meal_date)
     except Exception as e:
         logger.error(f"Failed to re-sync daily summary after meal deletion: {e}")
+
+    await InsightVersionService(db).record(
+        current_user.id,
+        DomainEvent.MEAL_DELETED,
+        affected_date=meal_date,
+    )
 
     # Commit here so a successful HTTP response means the deletion is durable.
     # Request dependency teardown may otherwise discover a commit failure only

@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     # False on the real production deployment.
     PREMIUM_BYPASS: bool = False
 
+    # Rollout guard for persisted, event-driven insight snapshots. Disable to
+    # fall back to legacy endpoints while preserving stored snapshot data.
+    ENABLE_VERSIONED_INSIGHT_SNAPSHOTS: bool = True
+    INSIGHT_RECOMPUTE_DEBOUNCE_SECONDS: int = 600
+
     # AI API keys
     OPENROUTER_API_KEY: str | None = None
     DEFAULT_AI_PROVIDER: str = "openrouter"

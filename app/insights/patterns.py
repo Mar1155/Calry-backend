@@ -18,6 +18,10 @@ class VerifiedPattern(BaseModel):
     # the LLM and from API responses.
     novelty: float = Field(default=0.5, ge=0, le=1, exclude=True)
     concept: str | None = Field(default=None, exclude=True)
+    effect_size: float = Field(default=0.5, ge=0, le=1, exclude=True)
+    user_relevance: float = Field(default=0.8, ge=0, le=1, exclude=True)
+    actionability: float = Field(default=0.7, ge=0, le=1, exclude=True)
+    freshness_weight: float = Field(default=1.0, ge=0, le=1, exclude=True)
 
     def verified_dict(self) -> dict[str, Any]:
         return {

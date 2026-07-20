@@ -3,18 +3,20 @@ import logging
 from collections import Counter
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.ai.providers.openrouter import OpenRouterProvider
+from app.core.config import settings
 from app.dependencies.db import get_db
 from app.dependencies.premium import require_premium_user
 from app.insights import FeatureExtractor, FeatureSnapshot, InsightEngine
+from app.insights.snapshot_service import InsightSnapshotService
 from app.models.daily_summary import DailySummary
 from app.models.meal import Meal
 from app.models.user import User
-from app.schemas.insights import PatternInsightsResponse, WeeklyReportResponse
+from app.schemas.insights import InsightStoriesResponse, PatternInsightsResponse, StoryEvidence, WeeklyReportResponse
 
 logger = logging.getLogger("app.api.insights")
 router = APIRouter()
@@ -54,6 +56,9 @@ async def _load_features(
         summaries=summaries,
         meals=meals,
         current_weight_kg=user.weight_kg,
+        protein_goal_g=user.daily_protein_goal,
+        carbs_goal_g=user.daily_carbs_goal,
+        fat_goal_g=user.daily_fat_goal,
     )
     return snapshot, meals
 
@@ -109,3 +114,68 @@ async def get_pattern_insights(
         days_logged=snapshot.days_logged,
         period_days=snapshot.period_days,
     )
+
+
+@router.get("/insights/stories", response_model=InsightStoriesResponse)
+async def get_insight_stories(
+    scope: str = Query(default="rolling_30d", pattern="^(rolling_30d|weekly_current)$"),
+    current_user: User = Depends(require_premium_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: Annotated[str | None, Header()] = None,
+) -> InsightStoriesResponse:
+    if not settings.ENABLE_VERSIONED_INSIGHT_SNAPSHOTS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Versioned insights are disabled.")
+    return await InsightSnapshotService(db).get_stories(
+        current_user,
+        scope=scope,
+        locale=accept_language or "en",
+    )
+
+
+@router.get("/insights/stories/{story_id}/evidence", response_model=list[StoryEvidence])
+async def get_story_evidence(
+    story_id: str,
+    current_user: User = Depends(require_premium_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[StoryEvidence]:
+    if not settings.ENABLE_VERSIONED_INSIGHT_SNAPSHOTS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Versioned insights are disabled.")
+    evidence = await InsightSnapshotService(db).story_evidence(current_user.id, story_id)
+    if evidence is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insight story not found.")
+    return [StoryEvidence.model_validate(item) for item in evidence]
+
+
+@router.get("/reports/weekly/current", response_model=InsightStoriesResponse)
+async def get_current_weekly_stories(
+    current_user: User = Depends(require_premium_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: Annotated[str | None, Header()] = None,
+) -> InsightStoriesResponse:
+    if not settings.ENABLE_VERSIONED_INSIGHT_SNAPSHOTS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Versioned insights are disabled.")
+    return await InsightSnapshotService(db).get_stories(
+        current_user,
+        scope="weekly_current",
+        locale=accept_language or "en",
+    )
+
+
+@router.get("/reports/weekly/{period_start}", response_model=InsightStoriesResponse)
+async def get_closed_weekly_stories(
+    period_start: dt.date,
+    current_user: User = Depends(require_premium_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: Annotated[str | None, Header()] = None,
+) -> InsightStoriesResponse:
+    if not settings.ENABLE_VERSIONED_INSIGHT_SNAPSHOTS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Versioned insights are disabled.")
+    try:
+        return await InsightSnapshotService(db).get_stories(
+            current_user,
+            scope="weekly_closed",
+            locale=accept_language or "en",
+            period_start=period_start,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
