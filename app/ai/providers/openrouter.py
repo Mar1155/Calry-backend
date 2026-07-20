@@ -1110,57 +1110,62 @@ class OpenRouterProvider(BaseAIProvider):
 
     async def generate_weekly_observation(
         self,
-        avg_calories: int,
-        days_in_target: int,
-        total_days: int,
-        highest: int,
-        lowest: int,
-        most_frequent_meal: str | None,
-        goal: int,
-    ) -> str:
+        pattern,
+        *,
+        days_analyzed: int = 7,
+    ):
         from app.ai.prompts.insights import WEEKLY_OBSERVATION_SYSTEM_PROMPT
+        from app.schemas.insights import WeeklyObservation
 
-        data_summary = (
-            f"Weekly stats:\n"
-            f"- Average calories: {avg_calories} kcal (goal: {goal} kcal)\n"
-            f"- Days within target: {days_in_target}/{total_days}\n"
-            f"- Highest day: {highest} kcal, Lowest day: {lowest} kcal\n"
-            f"- Most logged meal: {most_frequent_meal or 'unknown'}\n"
-            f"- Variance: {highest - lowest} kcal between best and worst day"
-        )
-        messages = [{"role": "user", "content": data_summary}]
+        if pattern is None:
+            return None
+        if settings.is_testing:
+            return self._fallback_weekly_observation(pattern, days_analyzed=days_analyzed)
+        verified = pattern.verified_dict()
+        messages = [
+            {
+                "role": "user",
+                "content": json.dumps({"verified_patterns": [verified]}, separators=(",", ":")),
+            }
+        ]
         try:
             text, _, _ = await self._post_openrouter(
                 model=settings.OPENROUTER_TEXT_MODEL,
                 system_prompt=WEEKLY_OBSERVATION_SYSTEM_PROMPT,
                 messages=messages,
+                response_format={"type": "json_object"},
             )
-            return text.strip()
+            parsed = WeeklyObservation.model_validate(json.loads(self._extract_json(text)))
+            return parsed.model_copy(
+                update={
+                    "confidence": self._insight_confidence(pattern.confidence),
+                    "category": pattern.category,
+                    "metric": self._insight_metric(pattern),
+                    "days_analyzed": days_analyzed,
+                    "evidence": self._insight_evidence(pattern),
+                }
+            )
         except Exception:
-            return "Keep logging consistently to unlock personalized AI observations."
+            return self._fallback_weekly_observation(pattern, days_analyzed=days_analyzed)
 
     async def generate_pattern_insights(
         self,
-        correction_summary: str | None,
-        avg_correction_pct: float | None,
-        days_logged: int,
-        days_in_target: int,
-        avg_calories: int,
-        goal: int,
-    ) -> list[str]:
+        patterns,
+    ):
         from app.ai.prompts.insights import PATTERN_INSIGHTS_SYSTEM_PROMPT
+        from app.schemas.insights import InsightCard
 
-        data_summary = (
-            f"User data:\n"
-            f"- Days logged in past 30 days: {days_logged}\n"
-            f"- Days within calorie target: {days_in_target}\n"
-            f"- Average daily calories: {avg_calories} kcal (goal: {goal} kcal)\n"
-        )
-        if correction_summary:
-            data_summary += f"- AI correction history: {correction_summary}\n"
-        if avg_correction_pct is not None:
-            data_summary += f"- Average correction %: {avg_correction_pct:.1f}%\n"
-        messages = [{"role": "user", "content": data_summary}]
+        if not patterns:
+            return []
+        if settings.is_testing:
+            return [self._fallback_insight(pattern) for pattern in patterns[:4]]
+        verified = [pattern.verified_dict() for pattern in patterns[:4]]
+        messages = [
+            {
+                "role": "user",
+                "content": json.dumps({"verified_patterns": verified}, separators=(",", ":")),
+            }
+        ]
         try:
             text, _, _ = await self._post_openrouter(
                 model=settings.OPENROUTER_TEXT_MODEL,
@@ -1169,6 +1174,145 @@ class OpenRouterProvider(BaseAIProvider):
                 response_format={"type": "json_object"},
             )
             parsed = json.loads(self._extract_json(text))
-            return parsed.get("patterns", [])
+            raw_insights = parsed.get("patterns", [])
+            if not isinstance(raw_insights, list):
+                return []
+            insights = []
+            for index, raw in enumerate(raw_insights[: len(patterns[:4])]):
+                source = patterns[index]
+                card = InsightCard.model_validate(raw)
+                insights.append(
+                    card.model_copy(
+                        update={
+                            "confidence": self._insight_confidence(source.confidence),
+                            "category": source.category,
+                            "metric": self._insight_metric(source),
+                            "evidence": self._insight_evidence(source),
+                        }
+                    )
+                )
+            return insights
         except Exception:
-            return ["Log more meals to unlock AI pattern insights."]
+            return [self._fallback_insight(pattern) for pattern in patterns[:4]]
+
+    @staticmethod
+    def _insight_confidence(confidence: float) -> str:
+        if confidence < 0.65:
+            return "low"
+        if confidence < 0.85:
+            return "medium"
+        return "high"
+
+    @staticmethod
+    def _insight_evidence(pattern) -> list[str]:
+        evidence = []
+        for key, value in pattern.payload.items():
+            if isinstance(value, dict):
+                value = json.dumps(value, sort_keys=True, separators=(",", ":"))
+            evidence.append(f"{key}: {value}")
+        return evidence[:8]
+
+    @staticmethod
+    def _percent(value: float) -> int:
+        return round(value * 100)
+
+    @classmethod
+    def _insight_metric(cls, pattern) -> str:
+        payload = pattern.payload
+        metrics = {
+            "goal_consistency": lambda: f"{cls._percent(payload['adherence_rate'])}% within target",
+            "weekend_difference": lambda: f"{payload['difference_calories']:+d} kcal on weekends",
+            "meal_distribution": lambda: f"{payload['average_meals_per_logged_day']:.1f} meals per logged day",
+            "macro_balance": lambda: f"{cls._percent(payload['protein_calorie_share'])}% protein share",
+            "hydration_consistency": lambda: f"{payload['average_glasses']:.1f} glasses per logged day",
+            "activity_frequency": lambda: f"{payload['active_days']} active days",
+            "logging_consistency": lambda: f"{payload['longest_streak']}-day logging streak",
+            "ai_estimation_accuracy": lambda: f"{payload['median_absolute_correction_percent']:.1f}% median correction",
+            "learning_progress": lambda: f"{cls._percent(payload['relative_error_change']):+d}% error change",
+            "calories_trend": lambda: f"{payload['change_calories']:+d} kcal",
+            "goal_adherence_change": lambda: f"{cls._percent(payload['adherence_rate_change']):+d} percentage points",
+        }
+        builder = metrics.get(pattern.id)
+        return builder() if builder else pattern.id.replace("_", " ")
+
+    @classmethod
+    def _fallback_insight(cls, pattern):
+        from app.schemas.insights import InsightCard
+
+        payload = pattern.payload
+        if pattern.id == "goal_consistency":
+            title, message = (
+                "Goal consistency",
+                f"You logged {payload['days_within_target']} of {payload['days_logged']} days within your target.",
+            )
+        elif pattern.id == "weekend_difference":
+            title, message = (
+                "Weekend difference",
+                f"Weekend intake averaged {payload['weekend_average_calories']} kcal versus {payload['weekday_average_calories']} kcal on weekdays.",
+            )
+        elif pattern.id == "meal_distribution":
+            title, message = (
+                "Meal logging pattern",
+                f"You logged {payload['total_meals']} meals across {payload['days_logged']} days.",
+            )
+        elif pattern.id == "macro_balance":
+            title, message = (
+                "Macro balance",
+                f"Logged days averaged {payload['average_protein_g']:.1f} g protein, {payload['average_carbs_g']:.1f} g carbs, and {payload['average_fat_g']:.1f} g fat.",
+            )
+        elif pattern.id == "hydration_consistency":
+            title, message = (
+                "Hydration pattern",
+                f"Water logs averaged {payload['average_glasses']:.1f} glasses across {payload['days_with_water_logs']} days.",
+            )
+        elif pattern.id == "activity_frequency":
+            title, message = (
+                "Activity pattern",
+                f"Activity was logged on {payload['active_days']} of {payload['days_observed']} observed days.",
+            )
+        elif pattern.id == "logging_consistency":
+            title, message = (
+                "Logging consistency",
+                f"You logged {payload['days_logged']} of {payload['period_days']} days, with a {payload['longest_streak']}-day longest streak.",
+            )
+        elif pattern.id == "ai_estimation_accuracy":
+            title, message = (
+                "Estimation accuracy",
+                f"Median correction was {payload['median_absolute_correction_percent']:.1f}% across {payload['confirmed_meals']} confirmed meals.",
+            )
+        elif pattern.id == "learning_progress":
+            title, message = (
+                "Estimation learning",
+                f"Average correction changed from {payload['older_average_absolute_correction_percent']:.1f}% to {payload['recent_average_absolute_correction_percent']:.1f}%.",
+            )
+        elif pattern.id == "calories_trend":
+            title, message = (
+                "Calorie trend",
+                f"Average intake changed from {payload['earlier_average_calories']} to {payload['recent_average_calories']} kcal.",
+            )
+        elif pattern.id == "goal_adherence_change":
+            title, message = (
+                "Goal adherence changed",
+                f"Goal adherence changed from {cls._percent(payload['earlier_adherence_rate'])}% to {cls._percent(payload['recent_adherence_rate'])}%.",
+            )
+        else:
+            title, message = "Verified pattern", cls._insight_metric(pattern)
+        return InsightCard(
+            title=title,
+            message=message,
+            confidence=cls._insight_confidence(pattern.confidence),
+            category=pattern.category,
+            metric=cls._insight_metric(pattern),
+            evidence=cls._insight_evidence(pattern),
+        )
+
+    @classmethod
+    def _fallback_weekly_observation(cls, pattern, *, days_analyzed: int):
+        from app.schemas.insights import WeeklyObservation
+
+        card = cls._fallback_insight(pattern)
+        return WeeklyObservation(
+            **card.model_dump(),
+            days_analyzed=days_analyzed,
+            explanation="Based only on the verified metrics shown in the evidence.",
+        )
