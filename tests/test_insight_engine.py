@@ -140,9 +140,39 @@ async def test_llm_receives_verified_patterns_only(monkeypatch) -> None:
     monkeypatch.setattr(provider, "_post_openrouter", fake_post)
     insights = await provider.generate_pattern_insights([pattern])
 
-    assert captured["body"] == {"verified_patterns": [pattern.verified_dict()]}
+    assert captured["body"] == {
+        "output_language": "English",
+        "verified_patterns": [pattern.verified_dict()],
+    }
     assert "raw meals" not in json.dumps(captured["body"]).lower()
     assert insights[0].category == "consistency"
     assert insights[0].confidence == "high"
     assert insights[0].metric == "86% within target"
     assert insights[0].evidence != ["invented"]
+    assert all("_" not in item for item in insights[0].evidence)
+
+
+def test_evidence_is_human_readable_and_localized() -> None:
+    pattern = VerifiedPattern(
+        id="ai_estimation_accuracy",
+        category="ai_accuracy",
+        confidence=0.94,
+        priority=80,
+        payload={
+            "confirmed_meals": 91,
+            "average_absolute_correction_percent": 2.6,
+            "median_absolute_correction_percent": 0.0,
+            "average_signed_correction_percent": -1.8,
+            "estimates_within_ten_percent": 84,
+            "accuracy_rate_within_ten_percent": 0.923,
+            "correction_source_counts": {"photo": 60, "text": 31},
+        },
+    )
+
+    insight = OpenRouterProvider._fallback_insight(pattern, locale="it-IT")
+
+    assert insight.title == "Precisione delle stime"
+    assert insight.metric == "0,0% correzione mediana"
+    assert "91 pasti confermati analizzati" in insight.evidence
+    assert "Fonte più confermata: foto" in insight.evidence
+    assert all("_" not in item for item in insight.evidence)

@@ -1,8 +1,9 @@
 import datetime as dt
 import logging
 from collections import Counter
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -61,6 +62,7 @@ async def _load_features(
 async def get_weekly_report(
     current_user: User = Depends(require_premium_user),
     db: AsyncSession = Depends(get_db),
+    accept_language: Annotated[str | None, Header()] = None,
 ) -> WeeklyReportResponse:
     """Returns deterministic weekly metrics plus one voiced verified pattern."""
     snapshot, meals = await _load_features(db, current_user, period_days=7, end_date=dt.date.today())
@@ -75,6 +77,7 @@ async def get_weekly_report(
     observation = await OpenRouterProvider().generate_weekly_observation(
         patterns[0] if patterns else None,
         days_analyzed=7,
+        locale=accept_language or "en",
     )
 
     return WeeklyReportResponse(
@@ -92,11 +95,15 @@ async def get_weekly_report(
 async def get_pattern_insights(
     current_user: User = Depends(require_premium_user),
     db: AsyncSession = Depends(get_db),
+    accept_language: Annotated[str | None, Header()] = None,
 ) -> PatternInsightsResponse:
     """Voices at most four patterns already verified by deterministic detectors."""
     snapshot, _ = await _load_features(db, current_user, period_days=30, end_date=dt.date.today())
     verified_patterns = InsightEngine().generate(snapshot, limit=4)
-    insights = await OpenRouterProvider().generate_pattern_insights(verified_patterns)
+    insights = await OpenRouterProvider().generate_pattern_insights(
+        verified_patterns,
+        locale=accept_language or "en",
+    )
     return PatternInsightsResponse(
         patterns=insights,
         days_logged=snapshot.days_logged,

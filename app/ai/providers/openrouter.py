@@ -1113,6 +1113,7 @@ class OpenRouterProvider(BaseAIProvider):
         pattern,
         *,
         days_analyzed: int = 7,
+        locale: str = "en",
     ):
         from app.ai.prompts.insights import WEEKLY_OBSERVATION_SYSTEM_PROMPT
         from app.schemas.insights import WeeklyObservation
@@ -1120,12 +1121,18 @@ class OpenRouterProvider(BaseAIProvider):
         if pattern is None:
             return None
         if settings.is_testing:
-            return self._fallback_weekly_observation(pattern, days_analyzed=days_analyzed)
+            return self._fallback_weekly_observation(pattern, days_analyzed=days_analyzed, locale=locale)
         verified = pattern.verified_dict()
         messages = [
             {
                 "role": "user",
-                "content": json.dumps({"verified_patterns": [verified]}, separators=(",", ":")),
+                "content": json.dumps(
+                    {
+                        "output_language": self._insight_language(locale),
+                        "verified_patterns": [verified],
+                    },
+                    separators=(",", ":"),
+                ),
             }
         ]
         try:
@@ -1140,17 +1147,19 @@ class OpenRouterProvider(BaseAIProvider):
                 update={
                     "confidence": self._insight_confidence(pattern.confidence),
                     "category": pattern.category,
-                    "metric": self._insight_metric(pattern),
+                    "metric": self._insight_metric(pattern, locale=locale),
                     "days_analyzed": days_analyzed,
-                    "evidence": self._insight_evidence(pattern),
+                    "evidence": self._insight_evidence(pattern, locale=locale),
                 }
             )
         except Exception:
-            return self._fallback_weekly_observation(pattern, days_analyzed=days_analyzed)
+            return self._fallback_weekly_observation(pattern, days_analyzed=days_analyzed, locale=locale)
 
     async def generate_pattern_insights(
         self,
         patterns,
+        *,
+        locale: str = "en",
     ):
         from app.ai.prompts.insights import PATTERN_INSIGHTS_SYSTEM_PROMPT
         from app.schemas.insights import InsightCard
@@ -1158,12 +1167,18 @@ class OpenRouterProvider(BaseAIProvider):
         if not patterns:
             return []
         if settings.is_testing:
-            return [self._fallback_insight(pattern) for pattern in patterns[:4]]
+            return [self._fallback_insight(pattern, locale=locale) for pattern in patterns[:4]]
         verified = [pattern.verified_dict() for pattern in patterns[:4]]
         messages = [
             {
                 "role": "user",
-                "content": json.dumps({"verified_patterns": verified}, separators=(",", ":")),
+                "content": json.dumps(
+                    {
+                        "output_language": self._insight_language(locale),
+                        "verified_patterns": verified,
+                    },
+                    separators=(",", ":"),
+                ),
             }
         ]
         try:
@@ -1186,14 +1201,14 @@ class OpenRouterProvider(BaseAIProvider):
                         update={
                             "confidence": self._insight_confidence(source.confidence),
                             "category": source.category,
-                            "metric": self._insight_metric(source),
-                            "evidence": self._insight_evidence(source),
+                            "metric": self._insight_metric(source, locale=locale),
+                            "evidence": self._insight_evidence(source, locale=locale),
                         }
                     )
                 )
             return insights
         except Exception:
-            return [self._fallback_insight(pattern) for pattern in patterns[:4]]
+            return [self._fallback_insight(pattern, locale=locale) for pattern in patterns[:4]]
 
     @staticmethod
     def _insight_confidence(confidence: float) -> str:
@@ -1204,115 +1219,409 @@ class OpenRouterProvider(BaseAIProvider):
         return "high"
 
     @staticmethod
-    def _insight_evidence(pattern) -> list[str]:
-        evidence = []
-        for key, value in pattern.payload.items():
-            if isinstance(value, dict):
-                value = json.dumps(value, sort_keys=True, separators=(",", ":"))
-            evidence.append(f"{key}: {value}")
-        return evidence[:8]
+    def _insight_locale(locale: str) -> str:
+        return (locale or "en").split(",", 1)[0].split("-", 1)[0].split("_", 1)[0].strip().lower() or "en"
+
+    @classmethod
+    def _insight_language(cls, locale: str) -> str:
+        return _LANGUAGE_NAMES.get(cls._insight_locale(locale), "English")
+
+    @classmethod
+    def _insight_evidence(cls, pattern, *, locale: str = "en") -> list[str]:
+        payload = pattern.payload
+        italian = cls._insight_locale(locale) == "it"
+        if pattern.id == "goal_consistency":
+            evidence = [
+                (
+                    f"{payload['days_within_target']} giorni su {payload['days_logged']} erano nell’obiettivo"
+                    if italian
+                    else f"{payload['days_within_target']} of {payload['days_logged']} days were within target"
+                )
+            ]
+            if "average_calories" in payload:
+                evidence.append(
+                    f"Media giornaliera: {payload['average_calories']} kcal"
+                    if italian
+                    else f"Daily average: {payload['average_calories']} kcal"
+                )
+            if "average_absolute_goal_difference" in payload:
+                evidence.append(
+                    f"Distanza media dall’obiettivo: {payload['average_absolute_goal_difference']} kcal"
+                    if italian
+                    else f"Average distance from goal: {payload['average_absolute_goal_difference']} kcal"
+                )
+            return evidence
+        if pattern.id == "weekend_difference":
+            return [
+                (
+                    f"Media weekend: {payload['weekend_average_calories']} kcal"
+                    if italian
+                    else f"Weekend average: {payload['weekend_average_calories']} kcal"
+                ),
+                (
+                    f"Media feriale: {payload['weekday_average_calories']} kcal"
+                    if italian
+                    else f"Weekday average: {payload['weekday_average_calories']} kcal"
+                ),
+                (
+                    f"Confronto basato su {payload['weekend_days']} giorni del weekend e {payload['weekday_days']} feriali"
+                    if italian
+                    else f"Based on {payload['weekend_days']} weekend and {payload['weekday_days']} weekday logs"
+                ),
+            ]
+        if pattern.id == "meal_distribution":
+            return [
+                (
+                    f"{payload['total_meals']} pasti registrati in {payload['days_logged']} giorni"
+                    if italian
+                    else f"{payload['total_meals']} meals logged across {payload['days_logged']} days"
+                ),
+                (
+                    f"Categoria registrata più spesso: {payload['most_logged_category']}"
+                    if italian
+                    else f"Most logged category: {payload['most_logged_category']}"
+                ),
+                (
+                    f"Media: {payload['average_meals_per_logged_day']:.1f} pasti al giorno"
+                    if italian
+                    else f"Average: {payload['average_meals_per_logged_day']:.1f} meals per logged day"
+                ),
+            ]
+        if pattern.id == "macro_balance":
+            return [
+                (
+                    f"Proteine medie: {payload['average_protein_g']:.1f} g"
+                    if italian
+                    else f"Average protein: {payload['average_protein_g']:.1f} g"
+                ),
+                (
+                    f"Carboidrati medi: {payload['average_carbs_g']:.1f} g"
+                    if italian
+                    else f"Average carbohydrates: {payload['average_carbs_g']:.1f} g"
+                ),
+                (
+                    f"Grassi medi: {payload['average_fat_g']:.1f} g"
+                    if italian
+                    else f"Average fat: {payload['average_fat_g']:.1f} g"
+                ),
+                (
+                    f"{payload['meals_with_macro_data']} pasti con dati sui macronutrienti"
+                    if italian
+                    else f"{payload['meals_with_macro_data']} meals included macro data"
+                ),
+            ]
+        if pattern.id == "hydration_consistency":
+            return [
+                (
+                    f"Acqua registrata per {payload['days_with_water_logs']} giorni"
+                    if italian
+                    else f"Water was logged on {payload['days_with_water_logs']} days"
+                ),
+                (
+                    f"Intervallo: {payload['minimum_glasses']}–{payload['maximum_glasses']} bicchieri"
+                    if italian
+                    else f"Range: {payload['minimum_glasses']}–{payload['maximum_glasses']} glasses"
+                ),
+                (
+                    f"Media recente: {payload['recent_average_glasses']:.1f} bicchieri"
+                    if italian
+                    else f"Recent average: {payload['recent_average_glasses']:.1f} glasses"
+                ),
+            ]
+        if pattern.id == "activity_frequency":
+            return [
+                (
+                    f"Attività registrata in {payload['active_days']} giorni su {payload['days_observed']}"
+                    if italian
+                    else f"Activity logged on {payload['active_days']} of {payload['days_observed']} days"
+                ),
+                (
+                    f"Media nei giorni attivi: {payload['average_burned_calories_on_active_days']} kcal"
+                    if italian
+                    else f"Active-day average: {payload['average_burned_calories_on_active_days']} kcal"
+                ),
+                (
+                    f"Totale attività: {payload['total_burned_calories']} kcal"
+                    if italian
+                    else f"Total activity: {payload['total_burned_calories']} kcal"
+                ),
+            ]
+        if pattern.id == "logging_consistency":
+            return [
+                (
+                    f"Registrazioni in {payload['days_logged']} giorni su {payload['period_days']}"
+                    if italian
+                    else f"Logged on {payload['days_logged']} of {payload['period_days']} days"
+                ),
+                (
+                    f"Serie più lunga: {payload['longest_streak']} giorni"
+                    if italian
+                    else f"Longest streak: {payload['longest_streak']} days"
+                ),
+                (
+                    f"{payload['total_meals']} pasti registrati"
+                    if italian
+                    else f"{payload['total_meals']} meals logged"
+                ),
+            ]
+        if pattern.id == "ai_estimation_accuracy":
+            sources = payload.get("correction_source_counts", {})
+            main_source = max(sources, key=sources.get) if sources else None
+            source_label = {"photo": "foto", "text": "testo", "voice": "voce"}.get(main_source, main_source)
+            evidence = [
+                (
+                    f"{payload['confirmed_meals']} pasti confermati analizzati"
+                    if italian
+                    else f"{payload['confirmed_meals']} confirmed meals reviewed"
+                ),
+                (
+                    f"{payload['estimates_within_ten_percent']} stime entro il 10%"
+                    if italian
+                    else f"{payload['estimates_within_ten_percent']} estimates were within 10%"
+                ),
+                (
+                    f"Correzione media assoluta: {cls._decimal(payload['average_absolute_correction_percent'], locale=locale)}%"
+                    if italian
+                    else f"Average absolute correction: {payload['average_absolute_correction_percent']:.1f}%"
+                ),
+            ]
+            if source_label:
+                evidence.append(
+                    f"Fonte più confermata: {source_label}" if italian else f"Most confirmed source: {main_source}"
+                )
+            return evidence
+        if pattern.id == "learning_progress":
+            return [
+                (
+                    f"Correzione media precedente: {payload['older_average_absolute_correction_percent']:.1f}%"
+                    if italian
+                    else f"Earlier average correction: {payload['older_average_absolute_correction_percent']:.1f}%"
+                ),
+                (
+                    f"Correzione media recente: {payload['recent_average_absolute_correction_percent']:.1f}%"
+                    if italian
+                    else f"Recent average correction: {payload['recent_average_absolute_correction_percent']:.1f}%"
+                ),
+                (
+                    f"Confronto tra {payload['older_confirmed_meals']} e {payload['recent_confirmed_meals']} pasti confermati"
+                    if italian
+                    else f"Compared {payload['older_confirmed_meals']} earlier with {payload['recent_confirmed_meals']} recent confirmations"
+                ),
+            ]
+        if pattern.id == "calories_trend":
+            return [
+                (
+                    f"Media precedente: {payload['earlier_average_calories']} kcal"
+                    if italian
+                    else f"Earlier average: {payload['earlier_average_calories']} kcal"
+                ),
+                (
+                    f"Media recente: {payload['recent_average_calories']} kcal"
+                    if italian
+                    else f"Recent average: {payload['recent_average_calories']} kcal"
+                ),
+                (
+                    f"Confronto basato su {payload['earlier_days'] + payload['recent_days']} giorni"
+                    if italian
+                    else f"Based on {payload['earlier_days'] + payload['recent_days']} logged days"
+                ),
+            ]
+        if pattern.id == "goal_adherence_change":
+            return [
+                (
+                    f"Aderenza precedente: {cls._percent(payload['earlier_adherence_rate'])}%"
+                    if italian
+                    else f"Earlier adherence: {cls._percent(payload['earlier_adherence_rate'])}%"
+                ),
+                (
+                    f"Aderenza recente: {cls._percent(payload['recent_adherence_rate'])}%"
+                    if italian
+                    else f"Recent adherence: {cls._percent(payload['recent_adherence_rate'])}%"
+                ),
+                (
+                    f"Confronto basato su {payload['earlier_days'] + payload['recent_days']} giorni"
+                    if italian
+                    else f"Based on {payload['earlier_days'] + payload['recent_days']} logged days"
+                ),
+            ]
+        return []
 
     @staticmethod
     def _percent(value: float) -> int:
         return round(value * 100)
 
     @classmethod
-    def _insight_metric(cls, pattern) -> str:
+    def _decimal(cls, value: float, *, locale: str) -> str:
+        rendered = f"{value:.1f}"
+        return rendered.replace(".", ",") if cls._insight_locale(locale) == "it" else rendered
+
+    @classmethod
+    def _insight_metric(cls, pattern, *, locale: str = "en") -> str:
         payload = pattern.payload
-        metrics = {
-            "goal_consistency": lambda: f"{cls._percent(payload['adherence_rate'])}% within target",
-            "weekend_difference": lambda: f"{payload['difference_calories']:+d} kcal on weekends",
-            "meal_distribution": lambda: f"{payload['average_meals_per_logged_day']:.1f} meals per logged day",
-            "macro_balance": lambda: f"{cls._percent(payload['protein_calorie_share'])}% protein share",
-            "hydration_consistency": lambda: f"{payload['average_glasses']:.1f} glasses per logged day",
-            "activity_frequency": lambda: f"{payload['active_days']} active days",
-            "logging_consistency": lambda: f"{payload['longest_streak']}-day logging streak",
-            "ai_estimation_accuracy": lambda: f"{payload['median_absolute_correction_percent']:.1f}% median correction",
-            "learning_progress": lambda: f"{cls._percent(payload['relative_error_change']):+d}% error change",
-            "calories_trend": lambda: f"{payload['change_calories']:+d} kcal",
-            "goal_adherence_change": lambda: f"{cls._percent(payload['adherence_rate_change']):+d} percentage points",
-        }
+        italian = cls._insight_locale(locale) == "it"
+        metrics = (
+            {
+                "goal_consistency": lambda: f"{cls._percent(payload['adherence_rate'])}% dei giorni nell’obiettivo",
+                "weekend_difference": lambda: f"{payload['difference_calories']:+d} kcal nel weekend",
+                "meal_distribution": lambda: f"{payload['average_meals_per_logged_day']:.1f} pasti per giorno registrato",
+                "macro_balance": lambda: f"{cls._percent(payload['protein_calorie_share'])}% quota proteica",
+                "hydration_consistency": lambda: f"{payload['average_glasses']:.1f} bicchieri al giorno",
+                "activity_frequency": lambda: f"{payload['active_days']} giorni attivi",
+                "logging_consistency": lambda: f"{payload['longest_streak']} giorni consecutivi",
+                "ai_estimation_accuracy": lambda: f"{cls._decimal(payload['median_absolute_correction_percent'], locale=locale)}% correzione mediana",
+                "learning_progress": lambda: f"{cls._percent(payload['relative_error_change']):+d}% variazione dell’errore",
+                "calories_trend": lambda: f"{payload['change_calories']:+d} kcal",
+                "goal_adherence_change": lambda: f"{cls._percent(payload['adherence_rate_change']):+d} punti percentuali",
+            }
+            if italian
+            else {
+                "goal_consistency": lambda: f"{cls._percent(payload['adherence_rate'])}% within target",
+                "weekend_difference": lambda: f"{payload['difference_calories']:+d} kcal on weekends",
+                "meal_distribution": lambda: f"{payload['average_meals_per_logged_day']:.1f} meals per logged day",
+                "macro_balance": lambda: f"{cls._percent(payload['protein_calorie_share'])}% protein share",
+                "hydration_consistency": lambda: f"{payload['average_glasses']:.1f} glasses per logged day",
+                "activity_frequency": lambda: f"{payload['active_days']} active days",
+                "logging_consistency": lambda: f"{payload['longest_streak']}-day logging streak",
+                "ai_estimation_accuracy": lambda: f"{payload['median_absolute_correction_percent']:.1f}% median correction",
+                "learning_progress": lambda: f"{cls._percent(payload['relative_error_change']):+d}% error change",
+                "calories_trend": lambda: f"{payload['change_calories']:+d} kcal",
+                "goal_adherence_change": lambda: f"{cls._percent(payload['adherence_rate_change']):+d} percentage points",
+            }
+        )
         builder = metrics.get(pattern.id)
         return builder() if builder else pattern.id.replace("_", " ")
 
     @classmethod
-    def _fallback_insight(cls, pattern):
+    def _fallback_insight(cls, pattern, *, locale: str = "en"):
         from app.schemas.insights import InsightCard
 
         payload = pattern.payload
+        italian = cls._insight_locale(locale) == "it"
         if pattern.id == "goal_consistency":
             title, message = (
-                "Goal consistency",
-                f"You logged {payload['days_within_target']} of {payload['days_logged']} days within your target.",
+                ("Costanza rispetto all’obiettivo" if italian else "Goal consistency"),
+                (
+                    f"Hai registrato {payload['days_within_target']} giorni su {payload['days_logged']} entro il tuo obiettivo."
+                    if italian
+                    else f"You logged {payload['days_within_target']} of {payload['days_logged']} days within your target."
+                ),
             )
         elif pattern.id == "weekend_difference":
             title, message = (
-                "Weekend difference",
-                f"Weekend intake averaged {payload['weekend_average_calories']} kcal versus {payload['weekday_average_calories']} kcal on weekdays.",
+                ("La differenza del weekend" if italian else "Weekend difference"),
+                (
+                    f"Nel weekend la media è stata {payload['weekend_average_calories']} kcal, contro {payload['weekday_average_calories']} kcal nei giorni feriali."
+                    if italian
+                    else f"Weekend intake averaged {payload['weekend_average_calories']} kcal versus {payload['weekday_average_calories']} kcal on weekdays."
+                ),
             )
         elif pattern.id == "meal_distribution":
             title, message = (
-                "Meal logging pattern",
-                f"You logged {payload['total_meals']} meals across {payload['days_logged']} days.",
+                ("Ritmo dei pasti registrati" if italian else "Meal logging pattern"),
+                (
+                    f"Hai registrato {payload['total_meals']} pasti in {payload['days_logged']} giorni."
+                    if italian
+                    else f"You logged {payload['total_meals']} meals across {payload['days_logged']} days."
+                ),
             )
         elif pattern.id == "macro_balance":
             title, message = (
-                "Macro balance",
-                f"Logged days averaged {payload['average_protein_g']:.1f} g protein, {payload['average_carbs_g']:.1f} g carbs, and {payload['average_fat_g']:.1f} g fat.",
+                ("Equilibrio dei macronutrienti" if italian else "Macro balance"),
+                (
+                    f"Nei giorni registrati hai avuto in media {payload['average_protein_g']:.1f} g di proteine, {payload['average_carbs_g']:.1f} g di carboidrati e {payload['average_fat_g']:.1f} g di grassi."
+                    if italian
+                    else f"Logged days averaged {payload['average_protein_g']:.1f} g protein, {payload['average_carbs_g']:.1f} g carbs, and {payload['average_fat_g']:.1f} g fat."
+                ),
             )
         elif pattern.id == "hydration_consistency":
             title, message = (
-                "Hydration pattern",
-                f"Water logs averaged {payload['average_glasses']:.1f} glasses across {payload['days_with_water_logs']} days.",
+                ("Ritmo dell’idratazione" if italian else "Hydration pattern"),
+                (
+                    f"Hai registrato in media {payload['average_glasses']:.1f} bicchieri in {payload['days_with_water_logs']} giorni."
+                    if italian
+                    else f"Water logs averaged {payload['average_glasses']:.1f} glasses across {payload['days_with_water_logs']} days."
+                ),
             )
         elif pattern.id == "activity_frequency":
             title, message = (
-                "Activity pattern",
-                f"Activity was logged on {payload['active_days']} of {payload['days_observed']} observed days.",
+                ("Ritmo dell’attività" if italian else "Activity pattern"),
+                (
+                    f"Hai registrato attività in {payload['active_days']} giorni su {payload['days_observed']}."
+                    if italian
+                    else f"Activity was logged on {payload['active_days']} of {payload['days_observed']} observed days."
+                ),
             )
         elif pattern.id == "logging_consistency":
             title, message = (
-                "Logging consistency",
-                f"You logged {payload['days_logged']} of {payload['period_days']} days, with a {payload['longest_streak']}-day longest streak.",
+                ("Costanza nella registrazione" if italian else "Logging consistency"),
+                (
+                    f"Hai registrato {payload['days_logged']} giorni su {payload['period_days']}, con una serie massima di {payload['longest_streak']} giorni."
+                    if italian
+                    else f"You logged {payload['days_logged']} of {payload['period_days']} days, with a {payload['longest_streak']}-day longest streak."
+                ),
             )
         elif pattern.id == "ai_estimation_accuracy":
             title, message = (
-                "Estimation accuracy",
-                f"Median correction was {payload['median_absolute_correction_percent']:.1f}% across {payload['confirmed_meals']} confirmed meals.",
+                ("Precisione delle stime" if italian else "Estimation accuracy"),
+                (
+                    f"La correzione mediana è stata dello {cls._decimal(payload['median_absolute_correction_percent'], locale=locale)}% su {payload['confirmed_meals']} pasti confermati."
+                    if italian
+                    else f"Median correction was {payload['median_absolute_correction_percent']:.1f}% across {payload['confirmed_meals']} confirmed meals."
+                ),
             )
         elif pattern.id == "learning_progress":
             title, message = (
-                "Estimation learning",
-                f"Average correction changed from {payload['older_average_absolute_correction_percent']:.1f}% to {payload['recent_average_absolute_correction_percent']:.1f}%.",
+                ("Calry sta imparando" if italian else "Estimation learning"),
+                (
+                    f"La correzione media è passata dal {payload['older_average_absolute_correction_percent']:.1f}% al {payload['recent_average_absolute_correction_percent']:.1f}%."
+                    if italian
+                    else f"Average correction changed from {payload['older_average_absolute_correction_percent']:.1f}% to {payload['recent_average_absolute_correction_percent']:.1f}%."
+                ),
             )
         elif pattern.id == "calories_trend":
             title, message = (
-                "Calorie trend",
-                f"Average intake changed from {payload['earlier_average_calories']} to {payload['recent_average_calories']} kcal.",
+                ("Andamento delle calorie" if italian else "Calorie trend"),
+                (
+                    f"La media è passata da {payload['earlier_average_calories']} a {payload['recent_average_calories']} kcal."
+                    if italian
+                    else f"Average intake changed from {payload['earlier_average_calories']} to {payload['recent_average_calories']} kcal."
+                ),
             )
         elif pattern.id == "goal_adherence_change":
             title, message = (
-                "Goal adherence changed",
-                f"Goal adherence changed from {cls._percent(payload['earlier_adherence_rate'])}% to {cls._percent(payload['recent_adherence_rate'])}%.",
+                ("Aderenza all’obiettivo" if italian else "Goal adherence changed"),
+                (
+                    f"L’aderenza all’obiettivo è passata dal {cls._percent(payload['earlier_adherence_rate'])}% al {cls._percent(payload['recent_adherence_rate'])}%."
+                    if italian
+                    else f"Goal adherence changed from {cls._percent(payload['earlier_adherence_rate'])}% to {cls._percent(payload['recent_adherence_rate'])}%."
+                ),
             )
         else:
-            title, message = "Verified pattern", cls._insight_metric(pattern)
+            title, message = (
+                ("Pattern verificato", cls._insight_metric(pattern, locale=locale))
+                if italian
+                else ("Verified pattern", cls._insight_metric(pattern, locale=locale))
+            )
         return InsightCard(
             title=title,
             message=message,
             confidence=cls._insight_confidence(pattern.confidence),
             category=pattern.category,
-            metric=cls._insight_metric(pattern),
-            evidence=cls._insight_evidence(pattern),
+            metric=cls._insight_metric(pattern, locale=locale),
+            evidence=cls._insight_evidence(pattern, locale=locale),
         )
 
     @classmethod
-    def _fallback_weekly_observation(cls, pattern, *, days_analyzed: int):
+    def _fallback_weekly_observation(cls, pattern, *, days_analyzed: int, locale: str = "en"):
         from app.schemas.insights import WeeklyObservation
 
-        card = cls._fallback_insight(pattern)
+        card = cls._fallback_insight(pattern, locale=locale)
         return WeeklyObservation(
             **card.model_dump(),
             days_analyzed=days_analyzed,
-            explanation="Based only on the verified metrics shown in the evidence.",
+            explanation=(
+                "Basato solo sulle metriche verificate mostrate qui."
+                if cls._insight_locale(locale) == "it"
+                else "Based only on the verified metrics shown here."
+            ),
         )
