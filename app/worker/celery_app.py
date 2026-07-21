@@ -5,8 +5,10 @@ from celery import Celery
 from celery.signals import worker_ready, worker_shutdown
 
 from app.core.config import settings
+from app.worker.health import WorkerHealthServer
 
 logger = logging.getLogger("app.worker.celery")
+health_server: WorkerHealthServer | None = None
 
 celery_app = Celery(
     "calry",
@@ -37,6 +39,11 @@ celery_app.conf.update(
 
 @worker_ready.connect
 def log_worker_ready(**_: object) -> None:
+    global health_server
+    if health_server is None:
+        health_server = WorkerHealthServer("0.0.0.0", settings.PORT)
+        health_server.start()
+
     broker = urlsplit(settings.REDIS_URL)
     logger.info(
         "event=meal_analysis_worker_ready broker_scheme=%s broker_host=%s concurrency=%s max_retries=%s",
@@ -49,4 +56,8 @@ def log_worker_ready(**_: object) -> None:
 
 @worker_shutdown.connect
 def log_worker_shutdown(**_: object) -> None:
+    global health_server
+    if health_server is not None:
+        health_server.stop()
+        health_server = None
     logger.warning("event=meal_analysis_worker_shutdown")
