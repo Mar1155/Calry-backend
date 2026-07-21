@@ -121,16 +121,38 @@ async def test_delete_meal_does_not_report_success_when_commit_fails() -> None:
         patch("app.api.v1.routes.meals.MealRepository", return_value=meal_repo),
         patch("app.api.v1.routes.meals.SummaryService", return_value=summary_service),
         patch("app.api.v1.routes.meals.InsightVersionService", return_value=version_service),
-        patch(
-            "app.api.v1.routes.meals.ensure_history_date_access",
-            new_callable=AsyncMock,
-        ),
         pytest.raises(RuntimeError, match="commit failed"),
     ):
         await delete_meal(42, user, db)
 
     meal_repo.remove.assert_awaited_once_with(42)
     db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_meal_older_than_seven_days_allowed_for_free_user(client: AsyncClient, db_session) -> None:
+    """Free users can delete their own meals regardless of age (no premium gate on deletion)."""
+    headers = {"Authorization": "Bearer mock_token_delete_old_meal"}
+    user_response = await client.get("/api/v1/users/me", headers=headers)
+    user_id = user_response.json()["id"]
+
+    old_meal = Meal(
+        user_id=user_id,
+        source_type="text",
+        original_input="Old pasta",
+        meal_name="Old pasta",
+        estimated_calories=400,
+        created_at=dt.datetime.now(dt.UTC) - dt.timedelta(days=30),
+    )
+    db_session.add(old_meal)
+    await db_session.commit()
+    await db_session.refresh(old_meal)
+
+    response = await client.delete(f"/api/v1/meals/{old_meal.id}", headers=headers)
+    assert response.status_code == 200
+
+    get_response = await client.get(f"/api/v1/meals/{old_meal.id}", headers=headers)
+    assert get_response.status_code == 404
 
 
 @pytest.mark.asyncio

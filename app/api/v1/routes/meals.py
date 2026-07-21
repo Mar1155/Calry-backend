@@ -1330,8 +1330,6 @@ async def delete_meal(
             detail="Meal record not found or access forbidden.",
         )
 
-    await ensure_history_date_access(meal.created_at.date(), current_user, db)
-
     meal_date = meal.created_at.date()
 
     # Perform the deletion
