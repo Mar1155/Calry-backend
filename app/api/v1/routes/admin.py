@@ -1,23 +1,33 @@
+import asyncio
 import datetime as dt
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from firebase_admin import auth as firebase_auth
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import CalryException, NotFoundException, ValidationException
+from app.core.security import init_firebase
 from app.dependencies.admin import AdminIdentity, enforce_admin_rate_limit, get_current_admin, new_audit
 from app.dependencies.db import get_db
 from app.models.admin import AdminAuditLog, UserDeletionJob
 from app.models.user import User
+from app.repositories.user import UserRepository
 from app.schemas.admin import (
+    AccessRestrictionRequest,
+    AccessRestrictionResponse,
     AdminMeResponse,
     AuditLogListResponse,
     CreateDeletionJobRequest,
     DeletionJobCreatedResponse,
     DeletionJobResponse,
     DeletionPreviewResponse,
+    LiftAccessRestrictionRequest,
+    RevokePromotionalEntitlementRequest,
+    RevokePromotionalEntitlementResponse,
     SubscriptionResponse,
     UserDetailResponse,
     UserSearchItemResponse,
@@ -31,8 +41,10 @@ from app.services.admin_deletion import (
     preview_version,
     process_deletion_job,
 )
+from app.services.revenuecat_service import RevenueCatAPIError, RevenueCatClient, derive_entitlement_state
 
 router = APIRouter()
+logger = logging.getLogger("app.api.admin")
 
 
 def _abbreviate(value: str) -> str:
@@ -51,6 +63,10 @@ async def _summary(db: AsyncSession, user: User, *, abbreviate_uid: bool = False
         onboarding_status=user.onboarding_status,
         is_premium=user.is_premium,
         deletion_status=await deletion_status_for(db, user.id),
+        access_status=user.access_status,
+        access_restriction_reason=user.access_restriction_reason,
+        access_restriction_legal_basis=user.access_restriction_legal_basis,
+        access_restriction_expires_at=user.access_restriction_expires_at,
     )
 
 
@@ -138,6 +154,8 @@ async def search_users(
                 onboarding_status=user.onboarding_status,
                 is_premium=user.is_premium,
                 deletion_status=await deletion_status_for(db, user.id),
+                access_status=user.access_status,
+                access_restriction_expires_at=user.access_restriction_expires_at,
             )
             for user in users
         ],
@@ -162,6 +180,176 @@ async def get_user_detail(
         inventory=snapshot["inventory"],
         storage_objects=snapshot["storage_objects"],
         subscription=SubscriptionResponse(**snapshot["subscription"]),
+    )
+
+
+async def _revoke_firebase_sessions(firebase_uid: str) -> bool:
+    if settings.is_testing:
+        return True
+    try:
+        init_firebase()
+        await asyncio.to_thread(firebase_auth.revoke_refresh_tokens, firebase_uid)
+        return True
+    except Exception as exc:
+        logger.exception("admin firebase session revocation failed error_type=%s", type(exc).__name__)
+        return False
+
+
+@router.post("/users/{user_id}/access-restriction", response_model=AccessRestrictionResponse)
+async def restrict_user_access(
+    user_id: int,
+    payload: AccessRestrictionRequest,
+    request: Request,
+    admin: AdminIdentity = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AccessRestrictionResponse:
+    enforce_admin_rate_limit(request, "access_restriction", settings.ADMIN_DELETION_RATE_LIMIT_PER_MINUTE)
+    user = await _get_user(db, user_id)
+    if user.firebase_uid == admin.uid:
+        raise ValidationException("Administrators cannot restrict their own account.", "ADMIN_SELF_RESTRICTION")
+    if payload.confirmation_value not in {user.email, str(user.id)}:
+        raise ValidationException("Confirmation value does not match target user.", "RESTRICTION_CONFIRMATION_MISMATCH")
+
+    expires_at = payload.expires_at
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=dt.UTC)
+    if payload.status == "suspended" and (expires_at is None or expires_at <= dt.datetime.now(dt.UTC)):
+        raise ValidationException("A suspension requires a future expiration.", "INVALID_RESTRICTION_EXPIRATION")
+    if payload.status == "banned" and expires_at is not None:
+        raise ValidationException("A ban cannot have an expiration.", "INVALID_RESTRICTION_EXPIRATION")
+
+    now = dt.datetime.now(dt.UTC)
+    user.access_status = payload.status
+    user.access_restriction_reason = payload.reason
+    user.access_restriction_legal_basis = payload.legal_basis
+    user.access_restricted_at = now
+    user.access_restriction_expires_at = expires_at
+    user.access_restricted_by_admin_uid = admin.uid
+    db.add(
+        new_audit(
+            request,
+            admin,
+            "user_access_restricted",
+            "success",
+            target_user_id=user.id,
+            target_identifier=user.email,
+            metadata={
+                "status": payload.status,
+                "reason": payload.reason,
+                "legal_basis": payload.legal_basis,
+                "expires_at": expires_at.isoformat() if expires_at else None,
+            },
+        )
+    )
+    await db.commit()
+    tokens_revoked = await _revoke_firebase_sessions(user.firebase_uid)
+    return AccessRestrictionResponse(
+        status=user.access_status,
+        reason=user.access_restriction_reason,
+        legal_basis=user.access_restriction_legal_basis,
+        restricted_at=user.access_restricted_at,
+        expires_at=user.access_restriction_expires_at,
+        firebase_tokens_revoked=tokens_revoked,
+    )
+
+
+@router.post("/users/{user_id}/access-restriction/lift", response_model=AccessRestrictionResponse)
+async def lift_user_access_restriction(
+    user_id: int,
+    payload: LiftAccessRestrictionRequest,
+    request: Request,
+    admin: AdminIdentity = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AccessRestrictionResponse:
+    user = await _get_user(db, user_id)
+    previous_status = user.access_status
+    user.access_status = "active"
+    user.access_restriction_reason = None
+    user.access_restriction_legal_basis = None
+    user.access_restricted_at = None
+    user.access_restriction_expires_at = None
+    user.access_restricted_by_admin_uid = None
+    db.add(
+        new_audit(
+            request,
+            admin,
+            "user_access_restored",
+            "success",
+            target_user_id=user.id,
+            target_identifier=user.email,
+            metadata={"previous_status": previous_status, "reason": payload.reason},
+        )
+    )
+    await db.commit()
+    return AccessRestrictionResponse(
+        status="active",
+        reason=None,
+        legal_basis=None,
+        restricted_at=None,
+        expires_at=None,
+        firebase_tokens_revoked=False,
+    )
+
+
+@router.post(
+    "/users/{user_id}/premium/revoke-promotional",
+    response_model=RevokePromotionalEntitlementResponse,
+)
+async def revoke_user_promotional_entitlement(
+    user_id: int,
+    payload: RevokePromotionalEntitlementRequest,
+    request: Request,
+    admin: AdminIdentity = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> RevokePromotionalEntitlementResponse:
+    enforce_admin_rate_limit(request, "premium_revoke", settings.ADMIN_DELETION_RATE_LIMIT_PER_MINUTE)
+    user = await _get_user(db, user_id)
+    if payload.confirmation_value not in {user.email, str(user.id)}:
+        raise ValidationException("Confirmation value does not match target user.", "PREMIUM_CONFIRMATION_MISMATCH")
+    app_user_id = user.revenuecat_app_user_id or user.firebase_uid
+    try:
+        subscriber = await RevenueCatClient().revoke_promotional_entitlements(
+            app_user_id,
+            settings.REVENUECAT_ENTITLEMENT_ID,
+        )
+    except RevenueCatAPIError as exc:
+        raise CalryException(
+            "RevenueCat promotional grants could not be revoked.",
+            502,
+            "REVENUECAT_PROMOTIONAL_REVOKE_FAILED",
+        ) from exc
+
+    state = derive_entitlement_state(subscriber, settings.REVENUECAT_ENTITLEMENT_ID)
+    await UserRepository(db).update_user_premium_status(
+        user=user,
+        is_premium=state.is_active,
+        premium_entitlement=settings.REVENUECAT_ENTITLEMENT_ID if state.is_active else None,
+        premium_expires_at=state.expires_at,
+        revenuecat_app_user_id=app_user_id,
+        premium_store=state.store,
+        premium_product_id=state.product_id,
+    )
+    db.add(
+        new_audit(
+            request,
+            admin,
+            "promotional_entitlement_revoked",
+            "success",
+            target_user_id=user.id,
+            target_identifier=user.email,
+            metadata={
+                "reason": payload.reason,
+                "store_entitlement_remains_active": state.is_active,
+                "resulting_store": state.store,
+            },
+        )
+    )
+    await db.commit()
+    return RevokePromotionalEntitlementResponse(
+        promotional_grants_revoked=True,
+        entitlement_active=state.is_active,
+        store=state.store,
+        expiration_date=state.expires_at,
     )
 
 
@@ -233,7 +421,7 @@ async def create_deletion_job(
         target_firebase_uid=user.firebase_uid,
         target_revenuecat_app_user_id=user.revenuecat_app_user_id,
         requested_by_admin_uid=admin.uid,
-        requested_by_admin_email=admin.email,
+        requested_by_admin_email=None,
         reason=payload.reason,
         idempotency_key=payload.idempotency_key,
         preview_snapshot_json=snapshot,

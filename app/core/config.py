@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # inbox before release; the store-listing fallback keeps local builds usable.
     LEGAL_OPERATOR_NAME: str = "Calry"
     LEGAL_CONTACT_EMAIL: str | None = None
-    LEGAL_EFFECTIVE_DATE: date = date(2026, 7, 13)
+    LEGAL_EFFECTIVE_DATE: date = date(2026, 7, 21)
 
     # Database URLs
     # Must use postgresql+asyncpg:// for SQLAlchemy async connections
@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     ADMIN_SEARCH_RATE_LIMIT_PER_MINUTE: int = 30
     ADMIN_DELETION_RATE_LIMIT_PER_MINUTE: int = 5
     ADMIN_DELETION_STALE_SECONDS: int = 300
+    # Stable server-only key used to pseudonymize identifiers in security audit
+    # records. Raw user emails and client IP addresses are never stored there.
+    ADMIN_AUDIT_HASH_KEY: str | None = None
+    ADMIN_AUDIT_RETENTION_DAYS: int = 365
 
     # RevenueCat webhook shared secret. Required in production so billing state
     # only changes via server-to-server events.

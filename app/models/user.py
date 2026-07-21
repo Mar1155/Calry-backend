@@ -47,6 +47,16 @@ class User(Base):
     # Push notification token (stored for future push support)
     fcm_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
     deletion_in_progress: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # Access restriction is distinct from erasure. It blocks API use while
+    # retaining the account only for the documented enforcement period.
+    access_status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default="active", index=True, nullable=False
+    )
+    access_restriction_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    access_restriction_legal_basis: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    access_restricted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    access_restriction_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    access_restricted_by_admin_uid: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),

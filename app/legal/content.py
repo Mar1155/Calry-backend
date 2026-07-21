@@ -77,7 +77,7 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
 </section>
 <section>
   <h2>6. Retention and deletion</h2>
-  <p>Account, profile, meal and progress data are generally kept while your account is active so Calry can provide history and personalized estimates. Subscription and transaction records may be kept for the period required for accounting, fraud prevention and legal compliance. Operational, security, backup and AI audit records may remain for a limited period after content or account deletion where necessary, and are deleted or de-identified when no longer required.</p>
+  <p>Account, profile, meal and progress data are generally kept while your account is active so Calry can provide history and personalized estimates. Subscription and transaction records may be kept for the period required for accounting, fraud prevention and legal compliance. Administrative security audit records are pseudonymized and normally retained for no more than {{AUDIT_RETENTION_DAYS}} days. Identifiers held only to complete a retryable deletion are erased when that deletion completes. Provider backups and other records may remain for a limited period where necessary and are deleted or de-identified when no longer required.</p>
   <p>You may request account and data deletion through the deletion control in Calry when available, or by contacting {{CONTACT}}. Deleting the app from your device does not by itself delete the account. Calry may ask you to verify ownership before acting on a request.</p>
 </section>
 <section>
@@ -171,7 +171,7 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
 </section>
 <section>
   <h2>6. Conservazione e cancellazione</h2>
-  <p>I dati di account, profilo, pasti e progressi sono generalmente conservati mentre l’account è attivo, per offrire cronologia e stime personalizzate. I dati relativi ad abbonamenti e transazioni possono essere conservati per i periodi necessari a contabilità, prevenzione frodi e obblighi legali. Registri operativi, di sicurezza, backup e audit AI possono permanere per un periodo limitato dopo la cancellazione di contenuti o account quando necessario, e vengono eliminati o de-identificati quando non più richiesti.</p>
+  <p>I dati di account, profilo, pasti e progressi sono generalmente conservati mentre l’account è attivo, per offrire cronologia e stime personalizzate. I dati relativi ad abbonamenti e transazioni possono essere conservati per i periodi necessari a contabilità, prevenzione frodi e obblighi legali. I registri amministrativi di sicurezza sono pseudonimizzati e normalmente conservati per non più di {{AUDIT_RETENTION_DAYS}} giorni. Gli identificativi necessari soltanto a completare una cancellazione ripetibile vengono eliminati al suo completamento. Backup dei fornitori e altri registri possono permanere per un periodo limitato quando necessario e vengono eliminati o de-identificati quando non più richiesti.</p>
   <p>È possibile richiedere la cancellazione dell’account e dei dati tramite il comando disponibile in Calry, quando presente, oppure contattando {{CONTACT}}. Disinstallare l’app non cancella automaticamente l’account. Prima di procedere Calry può chiedere di verificarne la titolarità.</p>
 </section>
 <section>
@@ -259,7 +259,8 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
 </section>
 <section>
   <h2>10. Suspension, termination and deletion</h2>
-  <p>You may stop using Calry at any time and request deletion as explained in the Privacy Policy. Calry may restrict or terminate access where reasonably necessary to protect users or infrastructure, comply with law, address non-payment or respond to a serious or repeated breach of these terms. Where appropriate, notice and an opportunity to remedy will be provided.</p>
+  <p>You may stop using Calry at any time and request deletion as explained in the Privacy Policy. Suspension or termination is separate from account deletion. Calry may proportionately restrict access where reasonably necessary to protect users or infrastructure, comply with law, address fraud or respond to a serious or repeated breach of these terms. Depending on urgency, restrictions may be immediate. Where required or reasonably possible, Calry will provide the reason, duration, subscription consequences and a way to request review through {{CONTACT}}.</p>
+  <p>Removing promotional access does not cancel an Apple App Store or Google Play subscription. If access to a paid service is restricted, billing, cancellation and any refund remain subject to the applicable store rules and mandatory consumer law.</p>
   <p>Terms that by their nature should survive termination—including ownership, disclaimers and accrued payment obligations—continue to apply.</p>
 </section>
 <section>
@@ -338,7 +339,8 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
 </section>
 <section>
   <h2>10. Sospensione, recesso e cancellazione</h2>
-  <p>L’utente può interrompere l’uso in qualsiasi momento e richiedere la cancellazione come indicato nell’Informativa privacy. Calry può limitare o interrompere l’accesso quando ragionevolmente necessario per proteggere utenti o infrastruttura, adempiere alla legge, gestire mancati pagamenti o rispondere a violazioni gravi o ripetute. Quando opportuno, saranno forniti preavviso e possibilità di rimedio.</p>
+  <p>L’utente può interrompere l’uso in qualsiasi momento e richiedere la cancellazione come indicato nell’Informativa privacy. La sospensione o cessazione dell’accesso è distinta dalla cancellazione dell’account. Calry può limitare proporzionalmente l’accesso quando ragionevolmente necessario per proteggere utenti o infrastruttura, adempiere alla legge, contrastare frodi o rispondere a violazioni gravi o ripetute. In base all’urgenza, la limitazione può essere immediata. Quando richiesto o ragionevolmente possibile, Calry comunica motivo, durata, conseguenze sull’abbonamento e modalità per chiedere riesame tramite {{CONTACT}}.</p>
+  <p>La rimozione di un accesso promozionale non annulla un abbonamento Apple App Store o Google Play. Se viene limitato l’accesso a un servizio a pagamento, fatturazione, cancellazione ed eventuale rimborso restano soggetti alle regole dello store e alle norme imperative a tutela del consumatore.</p>
   <p>Le clausole che per loro natura devono sopravvivere, incluse titolarità, limitazioni e obblighi di pagamento maturati, continuano ad applicarsi.</p>
 </section>
 <section>

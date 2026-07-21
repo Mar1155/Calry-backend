@@ -8,7 +8,8 @@ from app.models.admin import AdminAuditLog, UserDeletionJob
 from app.models.daily_summary import DailySummary
 from app.models.meal import Meal, MealItem
 from app.models.user import User
-from app.services.admin_deletion import _delete_database_records, initial_steps
+from app.services.admin_deletion import _delete_database_records, _erase_completed_job_personal_data, initial_steps
+from app.services.revenuecat_service import RevenueCatClient
 
 
 def admin_headers() -> dict[str, str]:
@@ -60,7 +61,8 @@ async def test_admin_search_and_preview_are_server_calculated(client, admin_targ
     assert body["inventory"]["meals"] == 1
     assert body["inventory"]["ingredients"] == 1
     assert len(body["preview_version"]) == 64
-    assert "may remain active" in body["warnings"][0]
+    assert "may continue billing" in body["warnings"][0]
+    assert body["target"]["access_status"] == "active"
 
 
 @pytest.mark.asyncio
@@ -123,6 +125,122 @@ async def test_job_creation_is_idempotent_and_audited(client, db_session, admin_
     assert second.status_code == 202
     assert first.json()["job_id"] == second.json()["job_id"]
     assert await db_session.scalar(select(AdminAuditLog).where(AdminAuditLog.action == "deletion_job_created"))
+
+
+@pytest.mark.asyncio
+async def test_admin_restricts_and_restores_access_with_pseudonymous_audit(client, db_session, admin_target):
+    response = await client.post(
+        f"/api/v1/admin/users/{admin_target.id}/access-restriction",
+        headers=admin_headers(),
+        json={
+            "status": "banned",
+            "reason": "fraud_prevention",
+            "legal_basis": "legitimate_interest",
+            "expires_at": None,
+            "confirmation_value": admin_target.email,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "banned"
+    assert response.json()["firebase_tokens_revoked"] is True
+    await db_session.refresh(admin_target)
+    assert admin_target.access_status == "banned"
+
+    audit = await db_session.scalar(
+        select(AdminAuditLog).where(AdminAuditLog.action == "user_access_restricted")
+    )
+    assert audit is not None
+    assert audit.safe_target_identifier.startswith("target:")
+    assert admin_target.email not in audit.safe_target_identifier
+    assert audit.admin_email is None
+
+    restored = await client.post(
+        f"/api/v1/admin/users/{admin_target.id}/access-restriction/lift",
+        headers=admin_headers(),
+        json={"reason": "appeal_accepted"},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_restricted_user_is_blocked_by_every_authenticated_api(client, db_session):
+    user = User(
+        firebase_uid="restricted_user",
+        email="restricted_user@example.com",
+        access_status="banned",
+        access_restriction_reason="terms_violation",
+        access_restriction_legal_basis="contract_enforcement",
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    response = await client.get(
+        "/api/v1/premium/status",
+        headers={"Authorization": "Bearer mock_token_restricted_user"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "ACCOUNT_ACCESS_RESTRICTED"
+
+
+@pytest.mark.asyncio
+async def test_promotional_revoke_preserves_store_entitlement(client, db_session, admin_target, monkeypatch):
+    admin_target.is_premium = True
+    admin_target.premium_entitlement = "Calry Pro"
+    admin_target.premium_store = "promotional"
+    await db_session.flush()
+
+    async def fake_revoke(self, app_user_id: str, entitlement_id: str) -> dict:
+        assert app_user_id == admin_target.revenuecat_app_user_id
+        assert entitlement_id == "Calry Pro"
+        return {
+            "subscriber": {
+                "entitlements": {
+                    "Calry Pro": {
+                        "expires_date": "2099-01-01T00:00:00Z",
+                        "product_identifier": "calry_monthly",
+                    }
+                },
+                "subscriptions": {"calry_monthly": {"store": "play_store"}},
+            }
+        }
+
+    monkeypatch.setattr(RevenueCatClient, "revoke_promotional_entitlements", fake_revoke)
+    response = await client.post(
+        f"/api/v1/admin/users/{admin_target.id}/premium/revoke-promotional",
+        headers=admin_headers(),
+        json={"confirmation_value": str(admin_target.id), "reason": "promotion_ended"},
+    )
+    assert response.status_code == 200
+    assert response.json()["promotional_grants_revoked"] is True
+    assert response.json()["entitlement_active"] is True
+    assert response.json()["store"] == "play_store"
+
+
+@pytest.mark.asyncio
+async def test_completed_deletion_erases_retry_identifiers(db_session, admin_target):
+    job = UserDeletionJob(
+        target_user_id=admin_target.id,
+        target_email=admin_target.email,
+        target_firebase_uid=admin_target.firebase_uid,
+        target_revenuecat_app_user_id=admin_target.revenuecat_app_user_id,
+        requested_by_admin_uid="admin_operator",
+        requested_by_admin_email="admin@example.com",
+        reason="admin_requested_deletion",
+        idempotency_key=uuid.uuid4().hex,
+        preview_snapshot_json={"private": admin_target.email},
+        steps_json=initial_steps(),
+    )
+    db_session.add(job)
+    await db_session.flush()
+
+    await _erase_completed_job_personal_data(db_session, job)
+
+    assert job.target_email == "[erased]"
+    assert job.target_firebase_uid == f"erased:{job.id}"
+    assert job.target_revenuecat_app_user_id is None
+    assert job.requested_by_admin_email is None
+    assert job.preview_snapshot_json == {"erased": True}
 
 
 @pytest.mark.asyncio

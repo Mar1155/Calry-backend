@@ -1,3 +1,5 @@
+import datetime as dt
+
 from fastapi import Depends, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -49,7 +51,12 @@ async def get_current_user(
     user = await user_repo.get_by_firebase_uid(firebase_uid)
 
     active_or_completed_deletion = await db.scalar(
-        select(UserDeletionJob.id).where(UserDeletionJob.target_firebase_uid == firebase_uid).limit(1)
+        select(UserDeletionJob.id)
+        .where(
+            UserDeletionJob.target_firebase_uid == firebase_uid,
+            UserDeletionJob.status.in_(["pending", "running", "partially_failed"]),
+        )
+        .limit(1)
     )
     if active_or_completed_deletion or (user and user.deletion_in_progress):
         raise CalryException(
@@ -78,5 +85,28 @@ async def get_current_user(
             )
             await user_repo.create(user)
             await db.flush()
+
+    if user.access_status != "active":
+        expires_at = user.access_restriction_expires_at
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=dt.UTC)
+        if user.access_status == "suspended" and expires_at and expires_at <= dt.datetime.now(dt.UTC):
+            user.access_status = "active"
+            user.access_restriction_reason = None
+            user.access_restriction_legal_basis = None
+            user.access_restricted_at = None
+            user.access_restriction_expires_at = None
+            user.access_restricted_by_admin_uid = None
+            await db.commit()
+        else:
+            raise CalryException(
+                message="Account access is restricted. Contact support to request review.",
+                status_code=403,
+                error_code="ACCOUNT_ACCESS_RESTRICTED",
+                details={
+                    "status": user.access_status,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                },
+            )
 
     return user

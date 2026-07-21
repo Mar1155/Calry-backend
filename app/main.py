@@ -36,7 +36,7 @@ if settings.SENTRY_DSN:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         environment=settings.ENVIRONMENT,
-        send_default_pii=True,
+        send_default_pii=False,
         enable_logs=True,
         traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
         profile_session_sample_rate=settings.SENTRY_PROFILE_SESSION_SAMPLE_RATE,
@@ -107,15 +107,12 @@ async def log_requests(request: Request, call_next):
         return response
     finally:
         duration_ms = (time.perf_counter() - start_time) * 1000
-        client_host = request.client.host if request.client else "unknown"
-
         logger.info(
-            "request method=%s path=%s status_code=%s duration_ms=%.2f client=%s",
+            "request method=%s path=%s status_code=%s duration_ms=%.2f",
             request.method,
             request.url.path,
             status_code,
             duration_ms,
-            client_host,
         )
 
 

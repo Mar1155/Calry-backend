@@ -284,6 +284,56 @@ class RevenueCatClient:
             f"RevenueCat customer deletion failed after {self.max_retries + 1} attempts ({last_error})"
         )
 
+    async def revoke_promotional_entitlements(
+        self,
+        app_user_id: str,
+        entitlement_id: str,
+    ) -> dict[str, Any]:
+        """Revoke promotional grants without touching store transactions."""
+        if not self.is_configured:
+            raise RevenueCatAPIError("REVENUECAT_API_KEY is not configured.")
+
+        user_id = quote(app_user_id, safe="")
+        entitlement = quote(entitlement_id, safe="")
+        url = (
+            f"{REVENUECAT_API_BASE_URL}/subscribers/{user_id}/entitlements/"
+            f"{entitlement}/revoke_promotionals"
+        )
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+        }
+        last_error = "unknown error"
+        for attempt in range(self.max_retries + 1):
+            response: httpx.Response | None = None
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    response = await client.post(url, headers=headers)
+            except httpx.HTTPError as exc:
+                last_error = f"network error: {type(exc).__name__}"
+            else:
+                if response.status_code == 200:
+                    return response.json()
+                last_error = f"HTTP {response.status_code}"
+                if response.status_code != 429 and response.status_code < 500:
+                    raise RevenueCatAPIError(f"RevenueCat API returned {last_error}")
+
+            logger.warning(
+                "revenuecat_promo_revoke_error attempt=%d app_user_id=%s error=%s",
+                attempt + 1,
+                app_user_id,
+                last_error,
+            )
+            if attempt < self.max_retries:
+                if response is not None:
+                    await asyncio.sleep(self._retry_delay(response, attempt))
+                else:
+                    await asyncio.sleep(0.5 * (2**attempt))
+
+        raise RevenueCatAPIError(
+            f"RevenueCat promotional revoke failed after {self.max_retries + 1} attempts ({last_error})"
+        )
+
     @staticmethod
     def _retry_delay(response: httpx.Response, attempt: int) -> float:
         retry_after = response.headers.get("Retry-After")

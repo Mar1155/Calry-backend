@@ -76,6 +76,7 @@ def _render(document: str, language: str, request: Request) -> HTMLResponse:
     content = LEGAL_DOCUMENTS[(document, language)]
     operator = escape(settings.LEGAL_OPERATOR_NAME)
     body = content["body"].replace("{{OPERATOR_NAME}}", operator).replace("{{CONTACT}}", _contact(language))
+    body = body.replace("{{AUDIT_RETENTION_DAYS}}", str(settings.ADMIN_AUDIT_RETENTION_DAYS))
     effective_label = "Effective" if language == "en" else "In vigore dal"
     other_language = "it" if language == "en" else "en"
     other_label = "Italiano" if other_language == "it" else "English"

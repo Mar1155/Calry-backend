@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from firebase_admin import auth as firebase_auth
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -25,6 +25,7 @@ from app.models.meal_analysis import MealAnalysisJob
 from app.models.promo_code import PromoCodeAttempt, PromoCodeRedemption
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.user import User
+from app.services.privacy import pseudonymize
 from app.services.revenuecat_service import RevenueCatClient
 from app.services.storage import delete_storage_object, storage_key_from_url
 
@@ -151,13 +152,19 @@ async def build_preview_snapshot(db: AsyncSession, user: User) -> dict[str, Any]
             "onboarding_status": user.onboarding_status,
             "is_premium": user.is_premium,
             "deletion_status": deletion_status,
+            "access_status": user.access_status,
+            "access_restriction_reason": user.access_restriction_reason,
+            "access_restriction_legal_basis": user.access_restriction_legal_basis,
+            "access_restriction_expires_at": (
+                user.access_restriction_expires_at.isoformat() if user.access_restriction_expires_at else None
+            ),
         },
         "inventory": inventory,
         "storage_objects": storage_objects,
         "subscription": subscription,
         "warnings": [
-            "RevenueCat customer data will be deleted. An active App Store or Google Play subscription may remain "
-            "active until the user cancels it through the store."
+            "RevenueCat customer data and promotional grants will be deleted. Any App Store or Google Play "
+            "subscription remains governed by the store and may continue billing until canceled there."
         ],
         "deletion_allowed": deletion_status not in {"pending", "running", "partially_failed"},
     }
@@ -247,6 +254,20 @@ async def _verify(db: AsyncSession, job: UserDeletionJob) -> bool:
     return True
 
 
+async def _erase_completed_job_personal_data(db: AsyncSession, job: UserDeletionJob) -> None:
+    """Remove identifiers needed only while the retryable saga is active."""
+    await db.execute(
+        update(AdminAuditLog)
+        .where(AdminAuditLog.target_user_id == job.target_user_id)
+        .values(safe_target_identifier=None, admin_email=None)
+    )
+    job.target_email = "[erased]"
+    job.target_firebase_uid = f"erased:{job.id}"
+    job.target_revenuecat_app_user_id = None
+    job.requested_by_admin_email = None
+    job.preview_snapshot_json = {"erased": True}
+
+
 async def process_deletion_job(job_id: str) -> None:
     """Run or resume failed saga steps from persisted state."""
     async with SessionLocal() as db:
@@ -280,10 +301,10 @@ async def process_deletion_job(job_id: str) -> None:
                 db.add(
                     AdminAuditLog(
                         admin_uid=job.requested_by_admin_uid,
-                        admin_email=job.requested_by_admin_email,
+                        admin_email=None,
                         action="deletion_step_completed",
                         target_user_id=job.target_user_id,
-                        safe_target_identifier=job.target_email,
+                        safe_target_identifier=pseudonymize(job.target_email, namespace="target"),
                         deletion_job_id=job.id,
                         result="success",
                         metadata_json={"step": key, "already_absent": not present},
@@ -300,10 +321,10 @@ async def process_deletion_job(job_id: str) -> None:
                 db.add(
                     AdminAuditLog(
                         admin_uid=job.requested_by_admin_uid,
-                        admin_email=job.requested_by_admin_email,
+                        admin_email=None,
                         action="deletion_step_failed",
                         target_user_id=job.target_user_id,
-                        safe_target_identifier=job.target_email,
+                        safe_target_identifier=pseudonymize(job.target_email, namespace="target"),
                         deletion_job_id=job.id,
                         result="failed",
                         metadata_json={"step": key, "error_type": type(exc).__name__},
@@ -327,13 +348,14 @@ async def process_deletion_job(job_id: str) -> None:
             job.last_error_code = None
             job.last_error_message = None
             result = "success"
+            await _erase_completed_job_personal_data(db, job)
         db.add(
             AdminAuditLog(
                 admin_uid=job.requested_by_admin_uid,
-                admin_email=job.requested_by_admin_email,
+                admin_email=None,
                 action="deletion_job_completed" if not failures else "deletion_job_partially_failed",
                 target_user_id=job.target_user_id,
-                safe_target_identifier=job.target_email,
+                safe_target_identifier=None if not failures else pseudonymize(job.target_email, namespace="target"),
                 deletion_job_id=job.id,
                 result=result,
                 metadata_json={"retry_count": job.retry_count},

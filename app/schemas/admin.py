@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 JobStatus = Literal["pending", "running", "partially_failed", "completed"]
+AccessStatus = Literal["active", "suspended", "banned"]
 
 
 class AdminMeResponse(BaseModel):
@@ -23,6 +24,10 @@ class UserSummaryResponse(BaseModel):
     onboarding_status: str
     is_premium: bool
     deletion_status: JobStatus | None
+    access_status: AccessStatus
+    access_restriction_reason: str | None
+    access_restriction_legal_basis: str | None
+    access_restriction_expires_at: dt.datetime | None
 
 
 class UserSearchItemResponse(BaseModel):
@@ -34,6 +39,8 @@ class UserSearchItemResponse(BaseModel):
     onboarding_status: str
     is_premium: bool
     deletion_status: JobStatus | None
+    access_status: AccessStatus
+    access_restriction_expires_at: dt.datetime | None
 
 
 class UserSearchResponse(BaseModel):
@@ -79,6 +86,39 @@ class CreateDeletionJobRequest(BaseModel):
 class DeletionJobCreatedResponse(BaseModel):
     job_id: str
     status: JobStatus
+
+
+class AccessRestrictionRequest(BaseModel):
+    status: Literal["suspended", "banned"]
+    reason: Literal["terms_violation", "fraud_prevention", "security_risk", "abuse", "legal_requirement"]
+    legal_basis: Literal["contract_enforcement", "legitimate_interest", "legal_obligation"]
+    expires_at: dt.datetime | None = None
+    confirmation_value: str = Field(min_length=1, max_length=255)
+
+
+class LiftAccessRestrictionRequest(BaseModel):
+    reason: Literal["appeal_accepted", "restriction_expired", "admin_correction"]
+
+
+class AccessRestrictionResponse(BaseModel):
+    status: AccessStatus
+    reason: str | None
+    legal_basis: str | None
+    restricted_at: dt.datetime | None
+    expires_at: dt.datetime | None
+    firebase_tokens_revoked: bool
+
+
+class RevokePromotionalEntitlementRequest(BaseModel):
+    confirmation_value: str = Field(min_length=1, max_length=255)
+    reason: Literal["promotion_ended", "terms_violation", "fraud_prevention", "admin_correction"]
+
+
+class RevokePromotionalEntitlementResponse(BaseModel):
+    promotional_grants_revoked: bool
+    entitlement_active: bool
+    store: str | None
+    expiration_date: dt.datetime | None
 
 
 class DeletionStepResponse(BaseModel):

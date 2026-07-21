@@ -133,7 +133,9 @@ Set these in the service's **Variables** tab:
 | `FIREBASE_CREDENTIALS` | full service account JSON | Firebase Admin credentials. Paste the complete JSON from Firebase Console → Project settings → Service accounts |
 | `LEGAL_OPERATOR_NAME` | legal person/company name | Data controller and contracting party shown on public legal pages |
 | `LEGAL_CONTACT_EMAIL` | monitored legal/support inbox | Public contact for privacy and terms requests |
-| `LEGAL_EFFECTIVE_DATE` | `2026-07-13` | Effective date shown on both documents (ISO format) |
+| `LEGAL_EFFECTIVE_DATE` | `2026-07-21` | Effective date shown on both documents (ISO format) |
+| `ADMIN_AUDIT_HASH_KEY` | stable random 32+ byte secret | HMAC-pseudonymizes target identifiers and source IPs in admin security logs |
+| `ADMIN_AUDIT_RETENTION_DAYS` | `365` | Automatically removes older admin audit records |
 | `REVENUECAT_WEBHOOK_SECRET` | long random secret | Authorization value required by `/api/v1/webhooks/revenuecat` |
 | `REVENUECAT_API_KEY` | RevenueCat secret `sk_…` key | Server-side subscriber verification and promotional grants; never ship this in Flutter |
 | `REVENUECAT_ENTITLEMENT_ID` | `Calry Pro` | Must exactly match the entitlement identifier in RevenueCat |
@@ -167,7 +169,7 @@ Push to the connected branch, or use the CLI:
 ```bash
 railway up
 ```
-Railway builds the image and runs `start.sh`. API services apply migrations and start Uvicorn; worker services with `CALRY_PROCESS=worker` start Celery and skip migrations. Do not configure an HTTP healthcheck on the worker.
+Railway builds the image and runs `start.sh`. API services apply migrations and start Uvicorn; worker services with `CALRY_PROCESS=worker` start Celery and skip migrations. The worker exposes the shared healthcheck path only after Celery is ready.
 
 ### Persistent uploads
 Use `STORAGE_BACKEND=s3` in production. `/static` local uploads remain for development only and are lost on redeploy/restart.
