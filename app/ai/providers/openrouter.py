@@ -139,6 +139,11 @@ class OpenRouterProvider(BaseAIProvider):
                 "closely equivalent meal. Do not apply the aggregate correction "
                 "percentage: systematic bias is handled deterministically after inference."
             )
+        if user_context.memory_summary:
+            context_parts.append(
+                "Learned User Memories (reference priors only):\n"
+                f"{user_context.memory_summary}"
+            )
         if not context_parts:
             return ""
 

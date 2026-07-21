@@ -20,6 +20,7 @@ from app.api.v1.routes.habits import router as habits_router
 from app.api.v1.routes.insights import router as insights_router
 from app.api.v1.routes.meal_completion import router as meal_completion_router
 from app.api.v1.routes.meals import router as meals_router
+from app.api.v1.routes.memory import router as memory_router
 from app.api.v1.routes.onboarding import router as onboarding_router
 from app.api.v1.routes.premium import router as premium_router
 from app.api.v1.routes.revenuecat_webhook import router as webhook_router
@@ -171,6 +172,7 @@ app.include_router(meal_completion_router, prefix="/api/v1/meals", tags=["Meal C
 app.include_router(burned_router, prefix="/api/v1/burned-calories", tags=["Burned Calories"])
 app.include_router(summaries_router, prefix="/api/v1/summary", tags=["Summaries"])
 app.include_router(insights_router, prefix="/api/v1", tags=["Insights"])
+app.include_router(memory_router, prefix="/api/v1/memory", tags=["Memory"])
 app.include_router(premium_router, prefix="/api/v1/premium", tags=["Premium"])
 app.include_router(webhook_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
 app.include_router(food_memory_router, prefix="/api/v1/food-memory", tags=["Food Memory"])

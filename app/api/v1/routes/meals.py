@@ -147,6 +147,9 @@ async def _process_and_save_meal(
         DomainEvent.MEAL_CREATED,
         affected_date=meal.created_at.date(),
     )
+    from app.tasks.memory import enqueue_memory_distillation
+
+    enqueue_memory_distillation(user.id)
 
     # 4. Asynchronously retrieve the completed Meal with preloaded items to prevent lazyloading issues
     from sqlalchemy.future import select
@@ -172,9 +175,17 @@ async def _build_user_context(
     """Builds UserContext from a SINGLE correction-history query (C5): the prose
     summary for the prompt and the deterministic per-source bias for C11."""
     from app.ai.services.correction_context_service import AICorrectionContextService
+    from app.memory.service import MemoryQueryService
 
     correction_service = AICorrectionContextService(db)
     context = await correction_service.get_correction_context(user.id)
+
+    # Learned-memory priors (deterministic, LLM-free). Failures never block estimation.
+    memory_summary = None
+    try:
+        memory_summary = (await MemoryQueryService(db).get_estimation_hints(user.id)).summary
+    except Exception as exc:
+        logger.warning("memory_hints_unavailable user_id=%s error=%s", user.id, exc)
 
     return UserContext(
         daily_calorie_goal=user.daily_calorie_goal,
@@ -187,6 +198,7 @@ async def _build_user_context(
         weight_kg=user.weight_kg,
         goal_type=user.goal_type,
         correction_bias_by_source=context.bias_by_source or None,
+        memory_summary=memory_summary,
     )
 
 
@@ -1292,6 +1304,9 @@ async def update_meal(
         *events,
         affected_date=updated_meal.created_at.date(),
     )
+    from app.tasks.memory import enqueue_memory_distillation
+
+    enqueue_memory_distillation(current_user.id)
 
     return updated_meal
 

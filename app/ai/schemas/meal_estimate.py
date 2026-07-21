@@ -79,6 +79,9 @@ class UserContext(BaseModel):
     # Deterministic per-source-type correction multiplier fractions (C11), applied
     # post-estimation by the orchestrator — NOT rendered into any prompt.
     correction_bias_by_source: dict[str, float] | None = None
+    # Deterministic learned-memory priors (typical portions / regular foods) from the
+    # AI Memory System. Rendered into the prompt context as reference only.
+    memory_summary: str | None = None
 
 
 # LLM-facing response schema (C16). Request-only subset — excludes derived fields

@@ -2,6 +2,7 @@ import logging
 from urllib.parse import urlsplit
 
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import worker_ready, worker_shutdown
 
 from app.core.config import settings
@@ -14,7 +15,7 @@ celery_app = Celery(
     "calry",
     broker=settings.REDIS_URL,
     backend=settings.CELERY_RESULT_BACKEND or settings.REDIS_URL,
-    include=["app.tasks.meal_analysis"],
+    include=["app.tasks.meal_analysis", "app.tasks.memory"],
 )
 
 celery_app.conf.update(
@@ -34,6 +35,14 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=settings.CELERY_WORKER_MAX_TASKS_PER_CHILD,
     worker_max_memory_per_child=settings.CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB,
+    # Nightly memory consolidation applies pure decay/status transitions for users
+    # with no recent meal events. Requires a `celery beat` process to fire.
+    beat_schedule={
+        "memory-nightly-consolidation": {
+            "task": "app.tasks.memory.consolidate_memory",
+            "schedule": crontab(hour=3, minute=0),
+        },
+    },
 )
 
 

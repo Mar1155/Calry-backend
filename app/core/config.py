@@ -150,6 +150,21 @@ class Settings(BaseSettings):
     FOOD_MEMORY_FUZZY_THRESHOLD: int = 92  # rapidfuzz token_set_ratio [0-100]
     FOOD_MEMORY_MIN_USE_COUNT: int = 2  # only serve a memory confirmed >= N times
 
+    # AI Memory System (Phase 1, deterministic MVP). Master switch for derivation
+    # and read endpoints. Distillation runs in a Celery worker; when the async flag
+    # is off (or no broker is reachable) the trigger degrades to a no-op so the meal
+    # path never fails. Confidence thresholds are calibration knobs (see RFC §6/§8).
+    MEMORY_ENABLED: bool = True
+    MEMORY_DISTILLATION_ASYNC_ENABLED: bool = True
+    MEMORY_ACTIVE_AT: float = 0.70  # provisional -> active confidence threshold
+    MEMORY_ARCHIVE_FLOOR: float = 0.50  # below this a belief archives on consolidation
+    MEMORY_PORTION_DIVERGENCE_PCT: float = 0.15  # value-change tolerance for portions
+    MEMORY_PREFERENCE_REGULAR_OCCURRENCES: int = 5  # confirmed logs across days to be "regular"
+    MEMORY_PREFERENCE_REGULAR_DAYS: int = 3
+    MEMORY_CALIBRATION_NO_EDIT_RATE: float = 0.70  # band that earns a "learning" moment
+    MEMORY_CALIBRATION_WITHIN5_RATE: float = 0.60  # band that earns a "within 5%" moment
+    MEMORY_MAX_TIMELINE_LIMIT: int = 100
+
     @property
     def cors_origins(self) -> list[str]:
         """Parsed list of allowed CORS origins."""

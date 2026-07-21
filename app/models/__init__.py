@@ -8,6 +8,14 @@ from app.models.inference import AIInferenceLog
 from app.models.insight import DetectedPattern, InsightSnapshot, UserInsightVersion
 from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
+from app.models.memory import (
+    MemoryBelief,
+    MemoryBeliefRevision,
+    MemoryEvidence,
+    MemoryMoment,
+    MemoryNarrative,
+    MemorySuppression,
+)
 from app.models.promo_code import PromoCode, PromoCodeAttempt, PromoCodeRedemption
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.user import User
@@ -32,6 +40,12 @@ __all__ = [
     "DetectedPattern",
     "InsightSnapshot",
     "UserFoodMemory",
+    "MemoryBelief",
+    "MemoryBeliefRevision",
+    "MemoryMoment",
+    "MemoryEvidence",
+    "MemoryNarrative",
+    "MemorySuppression",
     "RevenueCatEvent",
     "RevenueCatSubscriberSnapshot",
 ]
