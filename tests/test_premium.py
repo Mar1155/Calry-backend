@@ -1,13 +1,12 @@
 import datetime as dt
+
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
-from app.models.meal import Meal, MealItem
 from app.models.daily_summary import DailySummary
-from app.repositories.user import UserRepository
+from app.models.meal import Meal, MealItem
 
 
 @pytest.mark.asyncio
@@ -45,8 +44,8 @@ async def test_premium_sync_and_status(client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_premium_sync_is_disabled_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies client-driven premium sync cannot mutate billing state in production."""
-    from app.core.config import settings
     from app.api.v1.routes.premium import sync_premium_status
+    from app.core.config import settings
     from app.schemas.premium import PremiumSyncRequest
 
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")

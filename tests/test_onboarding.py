@@ -1,7 +1,6 @@
 import pytest
 from httpx import AsyncClient
 
-
 HEADERS = {"Authorization": "Bearer mock_token_user_abc_123"}
 
 

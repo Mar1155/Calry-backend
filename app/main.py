@@ -1,5 +1,6 @@
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.public.legal import router as legal_router
+from app.api.v1.routes.admin import router as admin_router
 from app.api.v1.routes.awareness import router as awareness_router
 from app.api.v1.routes.burned_calories import router as burned_router
 from app.api.v1.routes.food_memory import router as food_memory_router
@@ -94,11 +96,14 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.perf_counter()
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    request.state.request_id = request_id
     status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     try:
         response = await call_next(request)
         status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
         return response
     finally:
         duration_ms = (time.perf_counter() - start_time) * 1000
@@ -174,6 +179,7 @@ app.include_router(webhook_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
 app.include_router(food_memory_router, prefix="/api/v1/food-memory", tags=["Food Memory"])
 app.include_router(habits_router, prefix="/api/v1/habits", tags=["Habits"])
 app.include_router(awareness_router, prefix="/api/v1/awareness", tags=["Awareness"])
+app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
 
 # Public HTTPS pages used by store metadata and RevenueCat paywalls.
 app.include_router(legal_router, tags=["Legal"])

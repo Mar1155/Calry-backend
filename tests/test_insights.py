@@ -1,4 +1,5 @@
 import datetime as dt
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +46,7 @@ async def test_insights_success_for_premium_users(client: AsyncClient, db_sessio
 
     # 2. Populate daily summaries for the past few days to calculate stats
     today = dt.date.today()
-    
+
     # Add summaries for the last 3 days
     s1 = DailySummary(
         user_id=user_id,
@@ -102,7 +103,7 @@ async def test_insights_success_for_premium_users(client: AsyncClient, db_sessio
     weekly_res = await client.get("/api/v1/summary/weekly", headers=headers)
     assert weekly_res.status_code == 200
     data = weekly_res.json()
-    
+
     # Math check:
     # average_calories = (2000 + 1800 + 2500) / 3 = 2100
     # highest_calories = 2500

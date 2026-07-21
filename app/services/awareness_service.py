@@ -34,7 +34,7 @@ class AwarenessService:
             .order_by(desc(DailySummary.date))
         )
         result = await self.db.execute(stmt)
-        return sorted({d for d in result.scalars().all()}, reverse=True)
+        return sorted(set(result.scalars().all()), reverse=True)
 
     @staticmethod
     def _week_start(today: dt.date) -> dt.date:

@@ -1,10 +1,12 @@
 from fastapi import Depends, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AuthException
+from app.core.exceptions import AuthException, CalryException
 from app.core.security import verify_firebase_token
 from app.dependencies.db import get_db
+from app.models.admin import UserDeletionJob
 from app.models.user import User
 from app.repositories.user import UserRepository
 
@@ -45,6 +47,16 @@ async def get_current_user(
 
     user_repo = UserRepository(db)
     user = await user_repo.get_by_firebase_uid(firebase_uid)
+
+    active_or_completed_deletion = await db.scalar(
+        select(UserDeletionJob.id).where(UserDeletionJob.target_firebase_uid == firebase_uid).limit(1)
+    )
+    if active_or_completed_deletion or (user and user.deletion_in_progress):
+        raise CalryException(
+            message="Account deletion is in progress or completed.",
+            status_code=423,
+            error_code="ACCOUNT_DELETION_LOCKED",
+        )
 
     if not user:
         # Check if a user with the same email already exists (e.g. from previous mock runs)

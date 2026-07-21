@@ -1,3 +1,4 @@
+from app.models.admin import AdminAuditLog, UserDeletionJob
 from app.models.app_setting import AppSetting
 from app.models.base import Base
 from app.models.burned_calories import BurnedCalories
@@ -14,6 +15,8 @@ from app.models.user import User
 __all__ = [
     "Base",
     "AppSetting",
+    "AdminAuditLog",
+    "UserDeletionJob",
     "User",
     "Meal",
     "MealItem",

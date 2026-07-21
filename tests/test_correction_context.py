@@ -1,10 +1,10 @@
+
 import pytest
-import datetime as dt
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
-from app.models.meal import Meal
 from app.ai.services.correction_context_service import AICorrectionContextService
+from app.models.meal import Meal
+from app.models.user import User
 
 
 @pytest.mark.asyncio

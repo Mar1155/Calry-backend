@@ -1,13 +1,15 @@
 import pytest
-from app.services.calorie_target_service import CalorieTargetService
 from httpx import AsyncClient
+
+from app.services.calorie_target_service import CalorieTargetService
+
 
 def test_calorie_target_service_math():
     # Male test case: weight=75, height=180, age=28, sex=male
     # BMR = 10*75 + 6.25*180 - 5*28 + 5 = 750 + 1125 - 140 + 5 = 1740
     bmr_m = CalorieTargetService.calculate_bmr(75, 180, 28, "male")
     assert bmr_m == 1740.0
-    
+
     # Female test case: weight=60, height=165, age=30, sex=female
     # BMR = 10*60 + 6.25*165 - 5*30 - 161 = 600 + 1031.25 - 150 - 161 = 1320.25
     bmr_f = CalorieTargetService.calculate_bmr(60, 165, 30, "female")

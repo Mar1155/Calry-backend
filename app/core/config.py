@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     FIREBASE_PROJECT_ID: str = "calry-62362"
     FIREBASE_CREDENTIALS: str | None = None
 
+    # Internal admin dashboard. Authorization always happens after Firebase ID
+    # token verification. A custom ``admin: true`` claim is preferred; this
+    # allowlist is the safe MVP fallback.
+    ADMIN_FIREBASE_UIDS: str = ""
+    ADMIN_FRONTEND_ORIGIN: str | None = None
+    ADMIN_SEARCH_RATE_LIMIT_PER_MINUTE: int = 30
+    ADMIN_DELETION_RATE_LIMIT_PER_MINUTE: int = 5
+    ADMIN_DELETION_STALE_SECONDS: int = 300
+
     # RevenueCat webhook shared secret. Required in production so billing state
     # only changes via server-to-server events.
     REVENUECAT_WEBHOOK_SECRET: str | None = None
@@ -140,7 +149,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         """Parsed list of allowed CORS origins."""
-        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+        origins = [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+        if self.ADMIN_FRONTEND_ORIGIN and origins != ["*"] and self.ADMIN_FRONTEND_ORIGIN not in origins:
+            origins.append(self.ADMIN_FRONTEND_ORIGIN)
+        return origins
 
     @property
     def is_production(self) -> bool:
@@ -149,6 +161,10 @@ class Settings(BaseSettings):
     @property
     def is_testing(self) -> bool:
         return self.ENVIRONMENT == "testing"
+
+    @property
+    def admin_firebase_uids(self) -> set[str]:
+        return {uid.strip() for uid in self.ADMIN_FIREBASE_UIDS.split(",") if uid.strip()}
 
 
 settings = Settings()

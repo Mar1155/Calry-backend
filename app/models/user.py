@@ -46,6 +46,7 @@ class User(Base):
     daily_fat_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Push notification token (stored for future push support)
     fcm_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    deletion_in_progress: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),

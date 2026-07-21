@@ -80,9 +80,8 @@ def verify_firebase_token(token: str) -> dict:
         decoded_token = auth.verify_id_token(token)
         return decoded_token
     except Exception as e:
-        logger.error(f"Firebase token verification failed: {e}")
+        logger.warning("Firebase token verification failed error_type=%s", type(e).__name__)
         raise AuthException(
             message="Invalid or expired authentication credentials",
             error_code="INVALID_CREDENTIALS",
-            details={"original_error": str(e)},
         )

@@ -1,8 +1,9 @@
 import logging
+import mimetypes
 import shutil
 import uuid
-import mimetypes
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
@@ -113,3 +114,78 @@ async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
     await run_in_threadpool(upload)
     logger.info("s3 upload succeeded key=%s", key)
     return {"url": _s3_public_url(key), "storage": "s3", "key": key}
+
+
+def storage_key_from_url(url: str) -> str | None:
+    """Resolve only URLs belonging to configured Calry storage."""
+    if not url:
+        return None
+    parsed = urlparse(url)
+    path = unquote(parsed.path)
+    if path.startswith("/static/uploads/"):
+        return f"local:{Path(path).name}"
+
+    if settings.STORAGE_BACKEND != "s3" or not settings.S3_BUCKET:
+        return None
+    if settings.S3_PUBLIC_URL_BASE:
+        base = urlparse(settings.S3_PUBLIC_URL_BASE)
+        prefix = base.path.rstrip("/") + "/"
+        if parsed.netloc == base.netloc and path.startswith(prefix):
+            return path[len(prefix) :].lstrip("/")
+    expected_hosts = {
+        f"{settings.S3_BUCKET}.s3.{settings.S3_REGION}.amazonaws.com",
+        f"{settings.S3_BUCKET}.s3.amazonaws.com",
+    }
+    if parsed.netloc in expected_hosts and path.startswith("/uploads/"):
+        return path.lstrip("/")
+    if settings.S3_ENDPOINT_URL:
+        endpoint = urlparse(settings.S3_ENDPOINT_URL)
+        prefix = f"/{settings.S3_BUCKET}/"
+        if parsed.netloc == endpoint.netloc and path.startswith(prefix):
+            return path[len(prefix) :]
+    return None
+
+
+async def delete_storage_object(storage_key: str) -> bool:
+    """Delete one owned object. Missing objects count as successful absence."""
+    if storage_key.startswith("local:"):
+        filename = storage_key.removeprefix("local:")
+        if filename != Path(filename).name:
+            raise ValueError("Invalid local storage key.")
+        path = UPLOAD_DIR / filename
+
+        def unlink() -> bool:
+            try:
+                path.unlink()
+                return True
+            except FileNotFoundError:
+                return False
+
+        return await run_in_threadpool(unlink)
+
+    if settings.STORAGE_BACKEND != "s3" or not settings.S3_BUCKET:
+        raise RuntimeError("S3 storage is not configured for this object.")
+    if not storage_key.startswith("uploads/") or ".." in Path(storage_key).parts:
+        raise ValueError("Invalid S3 storage key.")
+
+    def delete_s3() -> bool:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        client = boto3.client(
+            "s3",
+            region_name=settings.S3_REGION,
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+        )
+        try:
+            client.head_object(Bucket=settings.S3_BUCKET, Key=storage_key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+        client.delete_object(Bucket=settings.S3_BUCKET, Key=storage_key)
+        return True
+
+    return await run_in_threadpool(delete_s3)
