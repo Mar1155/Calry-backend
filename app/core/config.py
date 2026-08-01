@@ -116,14 +116,11 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
     DEFAULT_AI_PROVIDER: str = "openrouter"
     AI_PROVIDER: str = "openrouter"
-    # Model split (C14): text-only estimation is dominated by the in-prompt
-    # reference anchors + deterministic validation, so flash-lite (-67% in /
-    # -84% out) is adequate. Vision genuinely benefits from flash, so photos
-    # stay on the stronger model. Voice transcription stays on flash for ASR
-    # quality, then its transcript is estimated with the text model.
+    # Text and image models analyze meals. Audio is first converted to text by
+    # the dedicated speech-to-text endpoint, then follows the text pipeline.
     OPENROUTER_TEXT_MODEL: str = "google/gemini-2.5-flash"
     OPENROUTER_IMAGE_MODEL: str = "google/gemini-2.5-flash"
-    OPENROUTER_AUDIO_MODEL: str = "google/gemini-2.5-flash"
+    OPENROUTER_TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     AI_MAX_RETRIES: int = 1
     # Keep structured food responses short. Reasoning-capable budget models can

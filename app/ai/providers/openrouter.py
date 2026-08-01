@@ -37,9 +37,6 @@ from app.ai.prompts.meal_refinement import (
     MEAL_REFINEMENT_SYSTEM_PROMPT,
     build_meal_refinement_user_prompt,
 )
-from app.ai.prompts.voice_transcription import (
-    VOICE_TRANSCRIPTION_SYSTEM_PROMPT,
-)
 from app.ai.providers.base import BaseAIProvider
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult, MealSuggestionItem
 from app.ai.schemas.meal_estimate import (
@@ -64,6 +61,7 @@ _LANGUAGE_NAMES = {
 }
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 _RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 # C7: a single connection-pooled client reused across all calls (and across the
@@ -166,8 +164,8 @@ class OpenRouterProvider(BaseAIProvider):
             return None
         details = usage.get("prompt_tokens_details") or {}
         return {
-            "prompt_tokens": usage.get("prompt_tokens"),
-            "completion_tokens": usage.get("completion_tokens"),
+            "prompt_tokens": usage.get("prompt_tokens", usage.get("input_tokens")),
+            "completion_tokens": usage.get("completion_tokens", usage.get("output_tokens")),
             "total_tokens": usage.get("total_tokens"),
             "cached_tokens": details.get("cached_tokens") if isinstance(details, dict) else None,
         }
@@ -924,7 +922,7 @@ class OpenRouterProvider(BaseAIProvider):
         return result
 
     async def transcribe_audio(self, audio_url: str) -> SpeechTranscriptionResult:
-        model = settings.OPENROUTER_AUDIO_MODEL
+        model = settings.OPENROUTER_TRANSCRIPTION_MODEL
 
         try:
             if not (audio_url.startswith("http://") or audio_url.startswith("https://")):
@@ -938,6 +936,12 @@ class OpenRouterProvider(BaseAIProvider):
                     content_type = "audio/wav"
                 elif audio_url.lower().endswith(".ogg"):
                     content_type = "audio/ogg"
+                elif audio_url.lower().endswith(".webm"):
+                    content_type = "audio/webm"
+                elif audio_url.lower().endswith(".flac"):
+                    content_type = "audio/flac"
+                elif audio_url.lower().endswith(".aac"):
+                    content_type = "audio/aac"
                 else:
                     content_type = "audio/mp3"
             else:
@@ -946,10 +950,15 @@ class OpenRouterProvider(BaseAIProvider):
                 audio_res.raise_for_status()
                 content_type = audio_res.headers.get("content-type", "audio/mp3").split(";", 1)[0].lower()
                 if content_type == "application/octet-stream":
-                    if audio_url.endswith(".m4a"):
+                    audio_path = audio_url.lower().split("?", 1)[0]
+                    if audio_path.endswith(".m4a"):
                         content_type = "audio/m4a"
-                    elif audio_url.endswith(".wav"):
+                    elif audio_path.endswith(".wav"):
                         content_type = "audio/wav"
+                    elif audio_path.endswith(".webm"):
+                        content_type = "audio/webm"
+                    elif audio_path.endswith(".ogg"):
+                        content_type = "audio/ogg"
                     else:
                         content_type = "audio/mp3"
                 audio_content = audio_res.content
@@ -958,6 +967,7 @@ class OpenRouterProvider(BaseAIProvider):
             if not content_type.startswith("audio/"):
                 raise ValueError(f"unsupported audio content type: {content_type}")
             audio_base64 = base64.b64encode(audio_content).decode("utf-8")
+            audio_format = self._audio_format(content_type, audio_url)
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             logger.warning("Audio download returned HTTP %s", status_code)
@@ -981,46 +991,98 @@ class OpenRouterProvider(BaseAIProvider):
                 details={"retryable": False, "reason": type(exc).__name__},
             )
 
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Transcribe the attached audio description of a meal verbatim."},
-                    # OpenRouter uses the standard content-block structure for multimodal files.
-                    {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{audio_base64}"}},
-                ],
-            }
-        ]
+        payload = {
+            "model": model,
+            "input_audio": {"data": audio_base64, "format": audio_format},
+            "temperature": 0,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._get_api_key()}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://calry.ai",
+            "X-Title": "Calry",
+        }
+        client = get_shared_client()
+        max_retries = int(settings.AI_MAX_RETRIES)
+        response: httpx.Response | None = None
+        latency_ms = 0
 
-        raw_text, latency_ms, usage = await self._post_openrouter(
-            model=model,
-            system_prompt=VOICE_TRANSCRIPTION_SYSTEM_PROMPT,
-            messages=messages,
-            response_format={"type": "json_object"},
-        )
+        for attempt in range(max_retries + 1):
+            try:
+                start_time = time.perf_counter()
+                response = await client.post(
+                    OPENROUTER_TRANSCRIPTIONS_URL,
+                    json=payload,
+                    headers=headers,
+                    timeout=float(settings.AI_REQUEST_TIMEOUT_SECONDS),
+                )
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+            except httpx.RequestError as exc:
+                if attempt == max_retries:
+                    raise SpeechTranscriptionError(
+                        "The speech-to-text service is temporarily unavailable. Please try again.",
+                        details={"retryable": True, "reason": type(exc).__name__},
+                    ) from exc
+                await asyncio.sleep(self._retry_delay(attempt))
+                continue
 
-        # C23: salvage the transcript instead of failing the whole voice flow.
-        transcript, confidence, language = "", "low", None
+            if response.status_code == 200:
+                break
+            if response.status_code not in _RETRYABLE_STATUS_CODES or attempt == max_retries:
+                raise SpeechTranscriptionError(
+                    "The speech-to-text service could not transcribe the recording.",
+                    details={
+                        "retryable": response.status_code in _RETRYABLE_STATUS_CODES,
+                        "status_code": response.status_code,
+                    },
+                )
+            await asyncio.sleep(self._retry_delay(attempt, self._retry_after_seconds(response)))
+
         try:
-            parsed = json.loads(self._extract_json(raw_text))
-            transcript = (parsed.get("transcript") or "").strip()
-            confidence = self._coerce_confidence(parsed.get("confidence"))
-            language = parsed.get("language")
-        except (json.JSONDecodeError, AttributeError):
-            logger.warning("Transcription JSON parse failed; salvaging raw text as transcript.")
-        if not transcript:
-            transcript = self._extract_json(raw_text).strip().strip("{}").strip() or raw_text.strip()
-            confidence = "low"
+            raw_output = response.json() if response is not None else {}
+            transcript = raw_output["text"].strip()
+            if not transcript:
+                raise ValueError("empty transcript")
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise SpeechTranscriptionError(
+                "I couldn't understand the audio. Try again or type it.",
+                details={"retryable": False, "reason": type(exc).__name__},
+            ) from exc
 
         return SpeechTranscriptionResult(
             transcript=transcript,
-            confidence=confidence,
-            language=language,
+            confidence=None,
+            language=None,
             model_name=model,
-            raw_output=raw_text,
+            raw_output=raw_output,
             latency_ms=latency_ms,
-            token_usage=self._normalize_usage(usage),
+            token_usage=self._normalize_usage(raw_output.get("usage")),
         )
+
+    @staticmethod
+    def _audio_format(content_type: str, audio_url: str) -> str:
+        """Convert MIME types/extensions to OpenRouter STT format identifiers."""
+        mime = content_type.lower().split(";", 1)[0]
+        mime_formats = {
+            "audio/wav": "wav",
+            "audio/x-wav": "wav",
+            "audio/mpeg": "mp3",
+            "audio/mp3": "mp3",
+            "audio/flac": "flac",
+            "audio/m4a": "m4a",
+            "audio/x-m4a": "m4a",
+            "audio/mp4": "m4a",
+            "audio/ogg": "ogg",
+            "audio/webm": "webm",
+            "audio/aac": "aac",
+        }
+        if mime in mime_formats:
+            return mime_formats[mime]
+        path = audio_url.lower().split("?", 1)[0]
+        for extension in ("wav", "mp3", "flac", "m4a", "ogg", "webm", "aac"):
+            if path.endswith(f".{extension}"):
+                return extension
+        raise ValueError(f"unsupported audio format: {content_type}")
 
     async def suggest_meal_completion(
         self,

@@ -1,11 +1,15 @@
 import datetime as dt
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
-from app.dependencies.premium import free_history_cutoff, has_premium_access
+from app.dependencies.premium import (
+    ensure_history_date_access,
+    free_history_cutoff,
+    has_premium_access,
+)
 from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.daily_summary import DailySummary
 from app.models.user import User
@@ -59,6 +63,22 @@ async def get_today_summary(
     # Perform runtime consolidation of today's calorie logs
     summary = await summary_service.sync_daily_summary(current_user.id, today)
     return summary
+
+
+@router.get("/date/{date_val}", response_model=DailySummaryResponse)
+async def get_summary_for_date(
+    date_val: dt.date,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DailySummary:
+    """Returns an up-to-date summary for one accessible calendar day."""
+    if date_val > dt.date.today():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Future daily summaries are unavailable.",
+        )
+    await ensure_history_date_access(date_val, current_user, db)
+    return await SummaryService(db).sync_daily_summary(current_user.id, date_val)
 
 
 @router.get("/history", response_model=list[DailySummaryResponse])

@@ -38,11 +38,15 @@ class AISpeechService:
         start_time = time.perf_counter()
         success = False
         raw_output = None
+        model_name = "unknown"
+        token_usage = None
         error_msg = None
 
         try:
             result = await provider.transcribe_audio(audio_url)
             raw_output = result.raw_output
+            model_name = result.model_name
+            token_usage = result.token_usage
             success = True
             return result
         except Exception as e:
@@ -54,7 +58,7 @@ class AISpeechService:
             await self.inference_logger.log_call(
                 user_id=user_id,
                 provider=provider.provider_name,
-                model_name=provider.provider_name + "-audio",
+                model_name=model_name,
                 prompt_version=VOICE_TRANSCRIPTION_PROMPT_VERSION,
                 input_type="voice_transcription",
                 raw_input=f"Audio URL: {audio_url}",
@@ -62,4 +66,5 @@ class AISpeechService:
                 latency_ms=latency_ms,
                 success=success,
                 error_message=error_msg,
+                token_usage=token_usage,
             )

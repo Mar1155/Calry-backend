@@ -16,7 +16,6 @@ from app.ai.prompts.meal_estimation import (
 )
 from app.ai.prompts.voice_transcription import (
     VOICE_TRANSCRIPTION_PROMPT_VERSION,
-    VOICE_TRANSCRIPTION_SYSTEM_PROMPT,
 )
 
 __all__ = [
@@ -28,7 +27,6 @@ __all__ = [
     "IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT",
     "IMAGE_MEAL_ESTIMATION_PROMPT_VERSION",
     "build_image_meal_estimation_user_text",
-    "VOICE_TRANSCRIPTION_SYSTEM_PROMPT",
     "VOICE_TRANSCRIPTION_PROMPT_VERSION",
     "MEAL_COMPLETION_SYSTEM_PROMPT",
     "MEAL_COMPLETION_PROMPT_VERSION",
