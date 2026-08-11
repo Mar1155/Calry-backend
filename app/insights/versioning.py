@@ -5,6 +5,7 @@ from enum import StrEnum
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.insights.detectors import PatternDetector
 from app.models.insight import DetectedPattern, InsightSnapshot, UserInsightVersion
 
@@ -128,7 +129,10 @@ class InsightVersionService:
         )
         for snapshot in snapshot_result.scalars().all():
             detector_dependencies = snapshot.ranking_metadata_json.get("detector_dependencies", {})
-            affected = any(set(dependencies).intersection(domain.value for domain in domains) for dependencies in detector_dependencies.values())
+            affected = any(
+                set(dependencies).intersection(domain.value for domain in domains)
+                for dependencies in detector_dependencies.values()
+            )
             if not affected:
                 continue
             if affected_date is not None and snapshot.insight_scope.startswith("weekly"):
@@ -138,6 +142,19 @@ class InsightVersionService:
             snapshot.stale_at = now
 
         await self.db.flush()
+        if settings.ENABLE_PROACTIVE_INSIGHTS:
+            from app.proactive_insights.service import ProactiveInsightService
+            from app.tasks.proactive_insights import enqueue_proactive_processing
+
+            for event in events:
+                inbox_event = await ProactiveInsightService.stage_event(
+                    self.db,
+                    user_id=user_id,
+                    trigger=event.value,
+                    affected_date=affected_date,
+                    source_versions=versions.as_dict(),
+                )
+                enqueue_proactive_processing(inbox_event.event_id)
         logger.info(
             "event=domain_version_incremented user_id=%s events=%s domains=%s detector_count=%s",
             user_id,

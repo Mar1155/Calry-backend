@@ -112,6 +112,34 @@ class Settings(BaseSettings):
     ENABLE_VERSIONED_INSIGHT_SNAPSHOTS: bool = True
     INSIGHT_RECOMPUTE_DEBOUNCE_SECONDS: int = 600
 
+    # Proactive Insight Engine. Events are stored transactionally, then consumed
+    # asynchronously; periodic sweeps recover any missed broker notification.
+    ENABLE_PROACTIVE_INSIGHTS: bool = True
+    PROACTIVE_INSIGHTS_ASYNC_ENABLED: bool = True
+    PROACTIVE_INSIGHT_MODEL: str = "google/gemini-2.5-flash-lite"
+    PROACTIVE_INSIGHT_MIN_CONFIDENCE: float = 0.72
+    PROACTIVE_INSIGHT_MIN_SIGNIFICANCE: float = 0.30
+    PROACTIVE_INSIGHT_MIN_NOVELTY: float = 0.55
+    PROACTIVE_INSIGHT_MIN_USEFULNESS: float = 0.55
+    PROACTIVE_INSIGHT_COOLDOWN_DAYS: int = 7
+    PROACTIVE_INSIGHT_TYPE_COOLDOWNS: str = "daily_calorie_milestone:1,repeated_meal:14"
+    PROACTIVE_INSIGHT_MAX_CANDIDATES_PER_EVENT: int = 4
+    PROACTIVE_NOTIFICATION_MIN_SCORE: float = 0.62
+    PROACTIVE_NOTIFICATION_DAILY_LIMIT: int = 1
+    PROACTIVE_NOTIFICATION_MAX_AGE_HOURS: int = 72
+    PROACTIVE_NOTIFICATION_RETRY_MAX: int = 3
+    PROACTIVE_NOTIFICATION_RETRY_BASE_SECONDS: int = 300
+    PROACTIVE_PUSH_ENABLED: bool = True
+
+    @property
+    def proactive_insight_type_cooldowns(self) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for item in self.PROACTIVE_INSIGHT_TYPE_COOLDOWNS.split(","):
+            name, separator, days = item.strip().partition(":")
+            if separator and name and days.isdigit():
+                values[name] = int(days)
+        return values
+
     # AI API keys
     OPENROUTER_API_KEY: str | None = None
     DEFAULT_AI_PROVIDER: str = "openrouter"

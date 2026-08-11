@@ -4,6 +4,7 @@ set -e
 
 echo "==> Starting Celery worker"
 exec celery -A app.worker.celery_app.celery_app worker \
+  --beat \
   --loglevel="${LOG_LEVEL:-info}" \
   --concurrency="${CELERY_WORKER_CONCURRENCY:-1}" \
   --prefetch-multiplier=1 \

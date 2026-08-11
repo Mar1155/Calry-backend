@@ -5,7 +5,16 @@ from app.models.burned_calories import BurnedCalories
 from app.models.daily_summary import DailySummary
 from app.models.food_memory import UserFoodMemory
 from app.models.inference import AIInferenceLog
-from app.models.insight import DetectedPattern, InsightSnapshot, UserInsightVersion
+from app.models.insight import (
+    DetectedPattern,
+    InsightAnalyticsEvent,
+    InsightNotificationDelivery,
+    InsightNotificationPreference,
+    InsightSnapshot,
+    ProactiveInsight,
+    ProactiveInsightEvent,
+    UserInsightVersion,
+)
 from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.memory import (
@@ -39,6 +48,11 @@ __all__ = [
     "UserInsightVersion",
     "DetectedPattern",
     "InsightSnapshot",
+    "ProactiveInsightEvent",
+    "ProactiveInsight",
+    "InsightNotificationPreference",
+    "InsightNotificationDelivery",
+    "InsightAnalyticsEvent",
     "UserFoodMemory",
     "MemoryBelief",
     "MemoryBeliefRevision",

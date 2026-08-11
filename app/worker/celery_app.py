@@ -15,7 +15,7 @@ celery_app = Celery(
     "calry",
     broker=settings.REDIS_URL,
     backend=settings.CELERY_RESULT_BACKEND or settings.REDIS_URL,
-    include=["app.tasks.meal_analysis", "app.tasks.memory"],
+    include=["app.tasks.meal_analysis", "app.tasks.memory", "app.tasks.proactive_insights"],
 )
 
 celery_app.conf.update(
@@ -41,6 +41,18 @@ celery_app.conf.update(
         "memory-nightly-consolidation": {
             "task": "app.tasks.memory.consolidate_memory",
             "schedule": crontab(hour=3, minute=0),
+        },
+        "proactive-insights-pending-sweep": {
+            "task": "app.tasks.proactive_insights.sweep_pending",
+            "schedule": crontab(minute="*/5"),
+        },
+        "proactive-insights-notification-sweep": {
+            "task": "app.tasks.proactive_insights.sweep_notifications",
+            "schedule": crontab(minute="*"),
+        },
+        "proactive-insights-timezone-aware-evaluation": {
+            "task": "app.tasks.proactive_insights.evaluate_due",
+            "schedule": crontab(minute="*/15"),
         },
     },
 )

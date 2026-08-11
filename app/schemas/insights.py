@@ -103,3 +103,56 @@ class InsightStoriesResponse(BaseModel):
     generated_at: dt.datetime | None = None
     stories: list[InsightStory] = Field(default_factory=list, max_length=4)
     ranking_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProactiveInsightResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    type: str
+    category: str
+    trigger: str
+    title: str
+    body: str
+    evidence_json: dict[str, Any]
+    confidence: float
+    created_at: dt.datetime
+    read_at: dt.datetime | None = None
+    notification_status: str
+    notification_sent_at: dt.datetime | None = None
+    related_insight_id: str | None = None
+    superseded_at: dt.datetime | None = None
+    model_version: str
+    prompt_version: str
+
+
+class ProactiveInsightUnreadResponse(BaseModel):
+    unread_count: int = Field(ge=0)
+
+
+class InsightNotificationPreferenceResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    proactive_enabled: bool
+    daily_enabled: bool
+    weekly_enabled: bool
+    quiet_hours_start: str
+    quiet_hours_end: str
+    timezone: str
+
+
+class InsightNotificationPreferenceUpdate(BaseModel):
+    proactive_enabled: bool | None = None
+    daily_enabled: bool | None = None
+    weekly_enabled: bool | None = None
+    quiet_hours_start: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    quiet_hours_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class InsightAnalyticsEventRequest(BaseModel):
+    event_id: str = Field(min_length=8, max_length=64)
+    event_name: str = Field(min_length=1, max_length=50)
+    insight_id: str | None = Field(default=None, max_length=64)
+    source: str = Field(default="app", min_length=1, max_length=30)
+    metadata: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=8)
