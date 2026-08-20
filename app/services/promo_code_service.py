@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import logging
 import re
+import secrets
 import unicodedata
 
 from fastapi import HTTPException, status
@@ -17,6 +18,14 @@ from app.schemas.premium import PromoCodeRedeemResponse
 from app.services.revenuecat_service import RevenueCatAPIError, RevenueCatClient, derive_entitlement_state
 
 logger = logging.getLogger("app.services.promo_code")
+
+PROMO_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_promo_code() -> str:
+    """Generate a readable, cryptographically secure code without ambiguous glyphs."""
+    token = "".join(secrets.choice(PROMO_CODE_ALPHABET) for _ in range(16))
+    return f"CALRY-{token[:4]}-{token[4:8]}-{token[8:12]}-{token[12:]}"
 
 
 def normalize_promo_code(value: str) -> str:

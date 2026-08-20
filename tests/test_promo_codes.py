@@ -86,7 +86,11 @@ async def test_redeem_free_code_grants_revenuecat_entitlement_once(
     assert second.json()["redeemed"] is False
     assert len(calls) == 1
 
-    promo = (await db_session.execute(select(PromoCode))).scalar_one()
+    promo = (
+        await db_session.execute(
+            select(PromoCode).where(PromoCode.code_digest == promo_code_digest(code, pepper))
+        )
+    ).scalar_one()
     redemptions = list((await db_session.execute(select(PromoCodeRedemption))).scalars().all())
     user = (await db_session.execute(select(User).where(User.firebase_uid == "promo_founder_uid"))).scalar_one()
     assert promo.redemption_count == 1

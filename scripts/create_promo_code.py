@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as dt
-import secrets
 import sys
 from pathlib import Path
 
@@ -28,16 +27,11 @@ from app.core.config import settings  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.promo_code import PromoCode  # noqa: E402
 from app.services.promo_code_service import (  # noqa: E402
+    generate_promo_code,
     normalize_promo_code,
     promo_code_digest,
     promo_code_hint,
 )
-
-
-def _generated_code() -> str:
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    token = "".join(secrets.choice(alphabet) for _ in range(16))
-    return f"CALRY-{token[:4]}-{token[4:8]}-{token[8:12]}-{token[12:]}"
 
 
 async def create_code(args: argparse.Namespace) -> None:
@@ -45,7 +39,7 @@ async def create_code(args: argparse.Namespace) -> None:
     if not pepper:
         raise SystemExit("PROMO_CODE_PEPPER must be configured before creating codes.")
 
-    plaintext = args.code or _generated_code()
+    plaintext = args.code or generate_promo_code()
     normalized = normalize_promo_code(plaintext)
     if len(normalized) < 8 or len(normalized) > 64:
         raise SystemExit("Code must contain between 8 and 64 letters/digits.")

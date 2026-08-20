@@ -5,6 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 JobStatus = Literal["pending", "running", "partially_failed", "completed"]
 AccessStatus = Literal["active", "suspended", "banned"]
+PromoGrantDuration = Literal[
+    "daily",
+    "three_day",
+    "weekly",
+    "monthly",
+    "three_month",
+    "six_month",
+    "yearly",
+    "lifetime",
+]
 
 
 class AdminMeResponse(BaseModel):
@@ -119,6 +129,22 @@ class RevokePromotionalEntitlementResponse(BaseModel):
     entitlement_active: bool
     store: str | None
     expiration_date: dt.datetime | None
+
+
+class CreatePromoCodeRequest(BaseModel):
+    grant_duration: PromoGrantDuration = "lifetime"
+    max_redemptions: int = Field(default=1, ge=1, le=10_000)
+    valid_days: int | None = Field(default=None, ge=1, le=3_650)
+
+
+class PromoCodeCreatedResponse(BaseModel):
+    id: int
+    code: str
+    code_hint: str
+    grant_duration: PromoGrantDuration
+    max_redemptions: int
+    valid_until: dt.datetime | None
+    created_at: dt.datetime
 
 
 class DeletionStepResponse(BaseModel):

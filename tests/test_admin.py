@@ -7,8 +7,10 @@ from sqlalchemy import select
 from app.models.admin import AdminAuditLog, UserDeletionJob
 from app.models.daily_summary import DailySummary
 from app.models.meal import Meal, MealItem
+from app.models.promo_code import PromoCode
 from app.models.user import User
 from app.services.admin_deletion import _delete_database_records, _erase_completed_job_personal_data, initial_steps
+from app.services.promo_code_service import promo_code_digest
 from app.services.revenuecat_service import RevenueCatClient
 
 
@@ -42,6 +44,49 @@ async def test_admin_rejects_verified_non_admin(client):
     response = await client.get("/api/v1/admin/me", headers={"Authorization": "Bearer mock_token_regular_user"})
     assert response.status_code == 403
     assert response.json()["error_code"] == "ADMIN_ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_creates_hashed_promo_code_and_audits_without_plaintext(client, db_session, monkeypatch):
+    pepper = "admin-test-promo-pepper-with-enough-entropy"
+    monkeypatch.setattr("app.api.v1.routes.admin.settings.PROMO_CODE_PEPPER", pepper)
+
+    response = await client.post(
+        "/api/v1/admin/promo-codes",
+        headers=admin_headers(),
+        json={"grant_duration": "monthly", "max_redemptions": 5, "valid_days": 30},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["code"].startswith("CALRY-")
+    assert len(body["code"].split("-")) == 5
+    assert body["grant_duration"] == "monthly"
+    assert body["max_redemptions"] == 5
+    assert body["valid_until"] is not None
+
+    promo = await db_session.get(PromoCode, body["id"])
+    assert promo is not None
+    assert promo.code_digest == promo_code_digest(body["code"], pepper)
+    assert body["code"] not in promo.code_hint
+    audit = await db_session.scalar(
+        select(AdminAuditLog).where(AdminAuditLog.action == "promo_code_created")
+    )
+    assert audit is not None
+    assert audit.metadata_json["promo_code_id"] == promo.id
+    assert body["code"] not in str(audit.metadata_json)
+
+
+@pytest.mark.asyncio
+async def test_admin_promo_code_requires_server_pepper(client, monkeypatch):
+    monkeypatch.setattr("app.api.v1.routes.admin.settings.PROMO_CODE_PEPPER", None)
+    response = await client.post(
+        "/api/v1/admin/promo-codes",
+        headers=admin_headers(),
+        json={"grant_duration": "lifetime", "max_redemptions": 1, "valid_days": None},
+    )
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "PROMO_CODE_NOT_CONFIGURED"
 
 
 @pytest.mark.asyncio

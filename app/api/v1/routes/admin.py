@@ -14,6 +14,7 @@ from app.core.security import init_firebase
 from app.dependencies.admin import AdminIdentity, enforce_admin_rate_limit, get_current_admin, new_audit
 from app.dependencies.db import get_db
 from app.models.admin import AdminAuditLog, UserDeletionJob
+from app.models.promo_code import PromoCode
 from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.admin import (
@@ -22,10 +23,12 @@ from app.schemas.admin import (
     AdminMeResponse,
     AuditLogListResponse,
     CreateDeletionJobRequest,
+    CreatePromoCodeRequest,
     DeletionJobCreatedResponse,
     DeletionJobResponse,
     DeletionPreviewResponse,
     LiftAccessRestrictionRequest,
+    PromoCodeCreatedResponse,
     RevokePromotionalEntitlementRequest,
     RevokePromotionalEntitlementResponse,
     SubscriptionResponse,
@@ -41,6 +44,7 @@ from app.services.admin_deletion import (
     preview_version,
     process_deletion_job,
 )
+from app.services.promo_code_service import generate_promo_code, promo_code_digest, promo_code_hint
 from app.services.revenuecat_service import RevenueCatAPIError, RevenueCatClient, derive_entitlement_state
 
 router = APIRouter()
@@ -350,6 +354,67 @@ async def revoke_user_promotional_entitlement(
         entitlement_active=state.is_active,
         store=state.store,
         expiration_date=state.expires_at,
+    )
+
+
+@router.post("/promo-codes", response_model=PromoCodeCreatedResponse, status_code=201)
+async def create_promo_code(
+    payload: CreatePromoCodeRequest,
+    request: Request,
+    admin: AdminIdentity = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PromoCodeCreatedResponse:
+    """Create a free-access code whose plaintext is returned exactly once."""
+    enforce_admin_rate_limit(request, "promo_code_create", settings.ADMIN_PROMO_CODE_RATE_LIMIT_PER_MINUTE)
+    pepper = settings.PROMO_CODE_PEPPER
+    if not pepper:
+        raise CalryException(
+            "Access-code generation is not configured.",
+            503,
+            "PROMO_CODE_NOT_CONFIGURED",
+        )
+
+    plaintext = generate_promo_code()
+    valid_until = (
+        dt.datetime.now(dt.UTC) + dt.timedelta(days=payload.valid_days)
+        if payload.valid_days is not None
+        else None
+    )
+    promo = PromoCode(
+        code_digest=promo_code_digest(plaintext, pepper),
+        code_hint=promo_code_hint(plaintext),
+        kind="free_access",
+        grant_duration=payload.grant_duration,
+        max_redemptions=payload.max_redemptions,
+        valid_until=valid_until,
+    )
+    db.add(promo)
+    await db.flush()
+    db.add(
+        new_audit(
+            request,
+            admin,
+            "promo_code_created",
+            "success",
+            metadata={
+                "promo_code_id": promo.id,
+                "code_hint": promo.code_hint,
+                "grant_duration": promo.grant_duration,
+                "max_redemptions": promo.max_redemptions,
+                "valid_until": valid_until.isoformat() if valid_until else None,
+            },
+        )
+    )
+    await db.commit()
+    logger.info("admin_promo_code_created promo_code_id=%s admin_uid=%s", promo.id, admin.uid)
+    return PromoCodeCreatedResponse(
+        id=promo.id,
+        code=plaintext,
+        code_hint=promo.code_hint,
+        grant_duration=promo.grant_duration,
+        max_redemptions=promo.max_redemptions,
+        valid_until=promo.valid_until,
+        created_at=promo.created_at,
     )
 
 
