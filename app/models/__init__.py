@@ -1,3 +1,4 @@
+from app.models.onboarding_event import OnboardingEvent
 from app.models.admin import AdminAuditLog, UserDeletionJob
 from app.models.app_setting import AppSetting
 from app.models.base import Base
@@ -31,6 +32,7 @@ from app.models.user import User
 
 __all__ = [
     "Base",
+    "OnboardingEvent",
     "AppSetting",
     "AdminAuditLog",
     "UserDeletionJob",

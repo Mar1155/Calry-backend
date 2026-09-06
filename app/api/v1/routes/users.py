@@ -1,17 +1,20 @@
 import datetime as dt
 import logging
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.user import User
+from app.models.meal import Meal
 from app.repositories.user import UserRepository
 from app.schemas.user import UserResponse, UserUpdate
 from app.services.summary import SummaryService
+from app.services.calorie_target_service import CalorieTargetService
 
 logger = logging.getLogger("app.api.users")
 router = APIRouter()
@@ -20,9 +23,14 @@ router = APIRouter()
 @router.get("/me", response_model=UserResponse)
 async def read_current_user_profile(
     current_user: User = Depends(get_current_user),
-) -> User:
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """Returns the authenticated user's profile details."""
-    return current_user
+    result = UserResponse.model_validate(current_user).model_dump()
+    result["has_confirmed_meals"] = await db.scalar(
+        select(Meal.id).where(Meal.user_id == current_user.id, Meal.confirmed_calories.is_not(None)).limit(1)
+    ) is not None
+    return result
 
 
 @router.patch("/me", response_model=UserResponse)
@@ -30,17 +38,18 @@ async def update_user_profile(
     profile_update: UserUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> User:
+) -> dict:
     """Updates user metadata (e.g. daily calorie goals, target plans, display name).
 
     If the calorie target is modified, automatically synchronizes today's
     DailySummary to match the updated goal.
     """
     user_repo = UserRepository(db)
+    explicit_target = profile_update.daily_calorie_goal is not None
     original_goal = current_user.daily_calorie_goal
     original_values = {
         field: getattr(current_user, field)
-        for field in UserUpdate.model_fields
+        for field in UserUpdate.model_fields if hasattr(current_user, field)
     }
 
     # Check if we should automatically estimate/update the calorie target
@@ -50,18 +59,35 @@ async def update_user_profile(
     weight_kg = profile_update.weight_kg if profile_update.weight_kg is not None else current_user.weight_kg
     goal_type = profile_update.goal_type if profile_update.goal_type is not None else current_user.goal_type
 
-    if profile_update.daily_calorie_goal is None:
+    nutritional_fields = {"sex", "age", "height_cm", "weight_kg", "goal_type"}
+    nutrition_changed = any(
+        field in profile_update.model_fields_set
+        and getattr(profile_update, field) is not None
+        and getattr(profile_update, field) != original_values[field]
+        for field in nutritional_fields
+    )
+    if profile_update.daily_calorie_goal is None and nutrition_changed and current_user.calorie_target_source != "user_adjusted":
         if sex and age is not None and height_cm is not None and weight_kg is not None and goal_type:
-            from app.services.calorie_target_service import CalorieTargetService
             bmr = CalorieTargetService.calculate_bmr(
                 weight_kg=weight_kg,
                 height_cm=height_cm,
                 age=age,
                 sex=sex,
             )
-            maintenance = CalorieTargetService.calculate_maintenance_calories(bmr)
-            estimated_goal = CalorieTargetService.calculate_daily_target(maintenance, goal_type)
+            maintenance = CalorieTargetService.calculate_maintenance_calories(bmr, current_user.activity_level or "light")
+            estimated_goal = CalorieTargetService.calculate_daily_target(maintenance, goal_type, current_user.target_pace or "balanced")
             profile_update.daily_calorie_goal = estimated_goal
+
+    if profile_update.daily_calorie_goal is not None:
+        suggested = original_goal
+        if sex and age is not None and height_cm is not None and weight_kg is not None:
+            bmr = CalorieTargetService.calculate_bmr(weight_kg, height_cm, age, sex)
+            maintenance = CalorieTargetService.calculate_maintenance_calories(bmr, current_user.activity_level or "light")
+            suggested = CalorieTargetService.calculate_daily_target(maintenance, goal_type, current_user.target_pace or "balanced")
+        if CalorieTargetService.requires_confirmation(profile_update.daily_calorie_goal, sex, suggested) and not profile_update.unsafe_target_confirmed:
+            raise HTTPException(status_code=422, detail={"code": "TARGET_CONFIRMATION_REQUIRED"})
+        if explicit_target:
+            current_user.calorie_target_source = "user_adjusted"
 
     # Update profile in-place
     updated_user = await user_repo.update(current_user, profile_update)
@@ -98,7 +124,7 @@ async def update_user_profile(
     if events:
         await InsightVersionService(db).record(updated_user.id, *events, affected_date=dt.date.today())
 
-    return updated_user
+    return await read_current_user_profile(updated_user, db)
 
 
 class FCMTokenUpdate(BaseModel):

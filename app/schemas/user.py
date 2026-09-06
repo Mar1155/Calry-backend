@@ -20,13 +20,14 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(BaseModel):
+    unsafe_target_confirmed: bool = False
     name: str | None = None
     daily_calorie_goal: int | None = Field(default=None, ge=500, le=10000)
     goal_type: Literal["lose", "maintain", "gain"] | None = None
     sex: Literal["male", "female"] | None = None
-    age: int | None = Field(default=None, ge=1, le=120)
-    height_cm: float | None = Field(default=None, ge=50.0, le=250.0)
-    weight_kg: float | None = Field(default=None, ge=10.0, le=300.0)
+    age: int | None = Field(default=None, ge=18, le=100)
+    height_cm: float | None = Field(default=None, ge=120.0, le=230.0)
+    weight_kg: float | None = Field(default=None, ge=30.0, le=300.0)
     daily_protein_goal: int | None = None
     daily_carbs_goal: int | None = None
     daily_fat_goal: int | None = None
@@ -54,3 +55,6 @@ class UserResponse(UserBase):
     activity_level: str | None = None
     target_pace: str | None = None
     calorie_target_source: str = "calculated"
+    onboarding_journey_id: str | None = None
+    onboarding_offer_status: str = "handled"
+    has_confirmed_meals: bool = False

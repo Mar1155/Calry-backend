@@ -30,6 +30,8 @@ class User(Base):
     activity_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     target_pace: Mapped[str | None] = mapped_column(String(32), nullable=True)
     calorie_target_source: Mapped[str] = mapped_column(String(32), default="calculated", nullable=False)
+    onboarding_offer_status: Mapped[str] = mapped_column(String(16), default="handled", server_default="handled", nullable=False)
+    onboarding_journey_id: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
 
     # Premium Billing Fields
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

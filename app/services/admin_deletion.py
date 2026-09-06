@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.models.onboarding_event import OnboardingEvent
 
 import asyncio
 import datetime as dt
@@ -194,6 +195,7 @@ async def _delete_database_records(db: AsyncSession, job: UserDeletionJob) -> bo
         dict.fromkeys(filter(None, [job.target_revenuecat_app_user_id, job.target_firebase_uid]))
     )
     statements = [
+        delete(OnboardingEvent).where(OnboardingEvent.journey_id.in_(select(User.onboarding_journey_id).where(User.id == user_id))),
         delete(RevenueCatEvent).where(RevenueCatEvent.app_user_id.in_(rc_ids)),
         delete(RevenueCatSubscriberSnapshot).where(
             or_(

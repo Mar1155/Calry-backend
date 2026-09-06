@@ -107,7 +107,7 @@ Flutter feature code lives under `lib/features/insights/`:
 - settings request notification permission only after an explicit enable action; daily, weekly, quiet hours, and device timezone remain separate
 - Firebase Messaging restores authorized tokens, handles rotation, refreshes foreground diary data, and deep-links trusted insight payloads
 
-Home uses the living Calry “C” beside the calorie balance as its single Insight Diary entry point. The mark breathes slightly more and shows a soft dot when something is unread; tapping it opens the diary. Home never becomes an AI-card dashboard or numeric notification feed.
+Home uses the living Calry “C” beside the calorie balance as its single Insight Diary entry point. It has no permanent label, badge, or counter. Unread observations give the mark a restrained warm glow and an occasional shimmer; a newly received observation travels into the C as a small particle before a gentle pulse. Tapping the C gives a soft spring-and-haptic response and opens the diary. Reduced Motion replaces spatial effects with opacity. The onboarding result explains this visual language once, while Home remains free of AI cards and notification-feed chrome.
 
 ## Analytics
 

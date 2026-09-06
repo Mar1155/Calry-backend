@@ -26,6 +26,9 @@ class CalculateTargetRequest(OnboardingInput):
 
 
 class CompleteOnboardingRequest(OnboardingInput):
+    owner_uid: str | None = Field(default=None, max_length=128)
+    journey_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    started_at: dt.datetime | None = None
     selected_target: int = Field(ge=500, le=10000)
     target_was_manually_adjusted: bool = False
     unsafe_target_confirmed: bool = False

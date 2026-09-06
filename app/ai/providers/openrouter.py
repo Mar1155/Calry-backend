@@ -116,19 +116,8 @@ class OpenRouterProvider(BaseAIProvider):
                 "values such as confidence/source_type in lowercase English exactly "
                 "as specified by the schema."
             )
-        if user_context.sex or user_context.age or user_context.height_cm or user_context.weight_kg:
-            profile = []
-            if user_context.sex:
-                profile.append(f"Sex: {user_context.sex}")
-            if user_context.age:
-                profile.append(f"Age: {user_context.age}")
-            if user_context.height_cm:
-                profile.append(f"Height: {user_context.height_cm} cm")
-            if user_context.weight_kg:
-                profile.append(f"Weight: {user_context.weight_kg} kg")
-            context_parts.append(f"User Physical Profile: {', '.join(profile)}")
-        if user_context.daily_calorie_goal:
-            context_parts.append(f"User Daily Calorie Goal: {user_context.daily_calorie_goal} kcal")
+        # A meal's nutritional estimate does not depend on the eater's body
+        # measurements or calorie target. Keep that context out of this prompt.
         if user_context.previous_corrections_summary:
             context_parts.append(
                 "User Recent Meal Confirmations (meal-specific reference only):\n"

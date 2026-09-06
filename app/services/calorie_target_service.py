@@ -1,3 +1,6 @@
+import math
+
+
 class CalorieTargetService:
     """Service to estimate resting metabolic rate (BMR), maintenance calories,
 
@@ -42,4 +45,13 @@ class CalorieTargetService:
         target = maintenance_calories + CalorieTargetService.PACE_ADJUSTMENTS[goal_type].get(target_pace, 0)
 
         # Round to nearest 50 kcal
-        return int(round(target / 50.0)) * 50
+        return math.floor(target / 50.0 + 0.5) * 50
+
+    @staticmethod
+    def requires_confirmation(selected: int, sex: str | None, suggested: int | None = None) -> bool:
+        """Existing product guardrail, shared by onboarding and profile edits.
+
+        These thresholds are not a clinical assessment of a person's needs.
+        """
+        minimum = 1500 if sex != "female" else 1200
+        return selected < minimum or (suggested is not None and selected < suggested - 500)
