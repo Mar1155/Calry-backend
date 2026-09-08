@@ -31,6 +31,7 @@ class UserUpdate(BaseModel):
     daily_protein_goal: int | None = None
     daily_carbs_goal: int | None = None
     daily_fat_goal: int | None = None
+    locale: Literal["en", "it", "es", "zh", "ja", "ar"] | None = None
 
 
 class UserResponse(UserBase):
@@ -38,6 +39,7 @@ class UserResponse(UserBase):
 
     id: int
     firebase_uid: str
+    locale: Literal["en", "it", "es", "zh", "ja", "ar"] = "en"
     is_premium: bool
     premium_entitlement: str | None = None
     premium_expires_at: dt.datetime | None = None

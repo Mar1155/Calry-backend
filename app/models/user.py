@@ -13,6 +13,9 @@ class User(Base):
     firebase_uid: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The app's supported language selected from the device on first sign-in.
+    # Background AI jobs use this instead of a request header.
+    locale: Mapped[str] = mapped_column(String(12), default="en", server_default="en", nullable=False)
     daily_calorie_goal: Mapped[int] = mapped_column(Integer, default=2000, nullable=False)
     # goal_type: "lose" | "maintain" | "gain"
     goal_type: Mapped[str] = mapped_column(String(50), default="maintain", nullable=False)

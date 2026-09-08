@@ -6,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 @pytest.mark.asyncio
 async def test_get_current_user_profile_auto_registers(client: AsyncClient) -> None:
     """Verifies that accessing profile endpoint auto-registers new firebase users."""
-    headers = {"Authorization": "Bearer mock_token_user_abc_123"}
+    headers = {
+        "Authorization": "Bearer mock_token_user_abc_123",
+        "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+    }
 
     response = await client.get("/api/v1/users/me", headers=headers)
     assert response.status_code == 200
@@ -16,6 +19,7 @@ async def test_get_current_user_profile_auto_registers(client: AsyncClient) -> N
     assert data["email"] == "user_abc_123@example.com"
     assert data["daily_calorie_goal"] == 2000
     assert data["goal_type"] == "maintain"
+    assert data["locale"] == "it"
     assert "id" in data
 
 
@@ -41,6 +45,16 @@ async def test_update_user_profile_and_daily_goals(client: AsyncClient) -> None:
     assert data["name"] == "Alex CalorieTracker"
     assert data["daily_calorie_goal"] == 2200
     assert data["goal_type"] == "gain"
+
+
+@pytest.mark.asyncio
+async def test_update_user_locale(client: AsyncClient) -> None:
+    headers = {"Authorization": "Bearer mock_token_locale_profile"}
+    await client.get("/api/v1/users/me", headers=headers)
+
+    response = await client.patch("/api/v1/users/me", json={"locale": "ja"}, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["locale"] == "ja"
 
 
 @pytest.mark.asyncio

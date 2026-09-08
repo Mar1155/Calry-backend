@@ -370,7 +370,7 @@ class ProactiveInsightService:
         self,
         event_id: str,
         *,
-        locale: str = "en",
+        locale: str | None = None,
         today: dt.date | None = None,
         now: dt.datetime | None = None,
     ) -> dict[str, int | str]:
@@ -395,6 +395,9 @@ class ProactiveInsightService:
             event.result_json = {"persisted": 0, "reason": "user_missing"}
             await self.db.flush()
             return {"status": "completed", "persisted": 0}
+        # Workers have no request headers. Persisted profile locale is the
+        # authoritative language for generated, stored insight copy.
+        locale = locale or user.locale
         premium = await PremiumService(self.db).get_premium_status(user)
         if not premium.is_premium:
             event.status = "completed"

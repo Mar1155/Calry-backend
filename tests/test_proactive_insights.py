@@ -33,9 +33,11 @@ class FakeVerbalizer:
     def __init__(self, *, invalid_number: bool = False):
         self.calls = 0
         self.invalid_number = invalid_number
+        self.locales: list[str] = []
 
     async def verbalize(self, candidate: InsightCandidate, *, locale: str = "en") -> GeneratedInsight:
         self.calls += 1
+        self.locales.append(locale)
         metric_key = next(iter(candidate.metrics))
         label = candidate.type.replace("_", " ")
         body = f"Verified logs show your {label}."
@@ -230,6 +232,7 @@ async def test_meal_event_creates_verified_calorie_milestone_candidate(db_sessio
 @pytest.mark.asyncio
 async def test_valid_candidate_persists_once_and_event_retry_is_safe(db_session: AsyncSession) -> None:
     user = await _user(db_session)
+    user.locale = "es"
     await _logged_week(db_session, user)
     event = await ProactiveInsightService.stage_event(
         db_session,
@@ -252,6 +255,7 @@ async def test_valid_candidate_persists_once_and_event_retry_is_safe(db_session:
     assert second == {"status": "completed", "persisted": first_count}
     assert await db_session.scalar(select(func.count(ProactiveInsight.id))) == first_count
     assert verbalizer.calls == first_calls
+    assert verbalizer.locales == ["es"] * first_calls
     rows = list((await db_session.scalars(select(ProactiveInsight))).all())
     assert all(row.evidence_json["metrics"] for row in rows)
     assert all(row.model_version and row.prompt_version for row in rows)

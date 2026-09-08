@@ -1,6 +1,6 @@
 import datetime as dt
 
-from fastapi import Depends, Security
+from fastapi import Depends, Header, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,10 +15,22 @@ from app.repositories.user import UserRepository
 # Initialize standard Bearer HTTP verification scheme
 security = HTTPBearer(auto_error=True)
 
+_SUPPORTED_LOCALES = frozenset({"en", "it", "es", "zh", "ja", "ar"})
+
+
+def _preferred_locale(accept_language: str | None) -> str:
+    """Return the first supported device language, otherwise English."""
+    if accept_language:
+        primary = accept_language.split(",", 1)[0].split("-", 1)[0].split("_", 1)[0].strip().lower()
+        if primary in _SUPPORTED_LOCALES:
+            return primary
+    return "en"
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(security),
     db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default=None),
 ) -> User:
     """FastAPI dependency to retrieve the authenticated user.
 
@@ -40,6 +52,7 @@ async def get_current_user(
     firebase_uid = payload.get("uid")
     email = payload.get("email")
     name = payload.get("name")
+    locale = _preferred_locale(accept_language)
 
     if not firebase_uid or not email:
         raise AuthException(
@@ -80,6 +93,7 @@ async def get_current_user(
                 firebase_uid=firebase_uid,
                 email=email,
                 name=name,
+                locale=locale,
                 daily_calorie_goal=2000,  # Standard baseline recommendation
                 goal_type="maintain",
             )
