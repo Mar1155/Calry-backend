@@ -49,11 +49,20 @@ def _hash(value: Any) -> str:
 class CandidateEligibility:
     @staticmethod
     def passes(candidate: InsightCandidate) -> bool:
+        # Events are not insights. Statistics are not necessarily insights.
+        # An insight should reveal something about the user that becomes
+        # visible because Calry remembers - so on top of the existing
+        # confidence/significance/novelty/usefulness gate, a candidate must
+        # also teach the user something not already obvious, and draw on
+        # Calry's memory of the user rather than a single snapshot.
         return (
             candidate.confidence >= settings.PROACTIVE_INSIGHT_MIN_CONFIDENCE
             and candidate.significance >= settings.PROACTIVE_INSIGHT_MIN_SIGNIFICANCE
             and candidate.novelty >= settings.PROACTIVE_INSIGHT_MIN_NOVELTY
             and candidate.usefulness >= settings.PROACTIVE_INSIGHT_MIN_USEFULNESS
+            and candidate.information_gain >= settings.PROACTIVE_INSIGHT_MIN_INFORMATION_GAIN
+            and candidate.obviousness <= settings.PROACTIVE_INSIGHT_MAX_OBVIOUSNESS
+            and candidate.longitudinal_value >= settings.PROACTIVE_INSIGHT_MIN_LONGITUDINAL_VALUE
         )
 
 
@@ -276,16 +285,11 @@ class ProactiveInsightService:
             DomainEvent.MEAL_CORRECTED.value,
         }
         if meal_event or event.trigger in PERIODIC_TRIGGERS:
-            current_day = next((day for day in snapshot.days if day.date == end_date), None)
-            if current_day is not None:
-                milestone = CandidateFactory.calorie_milestone(
-                    user_id=user.id,
-                    source_trigger=event.trigger,
-                    day=current_day,
-                    now=now,
-                )
-                if milestone is not None:
-                    candidates.append(milestone)
+            # Calorie milestones (25/50/75/100% of target) are not published
+            # as standalone insights: a single day's percent-of-target is a
+            # status report the dashboard already shows, not something Calry
+            # has learned. CandidateFactory.calorie_milestone stays available
+            # as an internal signal for future contextual-pattern detection.
             repeated = CandidateFactory.repeated_meal(
                 user_id=user.id,
                 source_trigger=event.trigger,

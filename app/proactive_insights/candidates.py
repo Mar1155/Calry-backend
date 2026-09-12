@@ -59,6 +59,12 @@ class InsightCandidate(BaseModel):
     dedup_key: str = Field(min_length=16, max_length=64)
     created_at: dt.datetime
 
+    # Editorial scoring, mirrored from VerifiedPattern (see there for meaning).
+    # Prefer high information_gain and longitudinal_value, low obviousness.
+    information_gain: float = Field(default=0.6, ge=0, le=1)
+    obviousness: float = Field(default=0.4, ge=0, le=1)
+    longitudinal_value: float = Field(default=0.5, ge=0, le=1)
+
     def verified_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
 
@@ -136,10 +142,20 @@ class CandidateFactory:
             direction=direction,
             dedup_key=_hash([pattern.concept or pattern.id, direction])[:40],
             created_at=now,
+            information_gain=pattern.information_gain,
+            obviousness=pattern.obviousness,
+            longitudinal_value=pattern.longitudinal_value,
         )
 
     @staticmethod
     def calorie_milestone(*, user_id: int, source_trigger: str, day: Any, now: dt.datetime) -> InsightCandidate | None:
+        """Detects a daily calorie-target crossing.
+
+        Not published to the Insight Diary as a standalone insight (a raw
+        25/50/75/100% threshold is an event, not something Calry has learned).
+        Kept as an internal signal detectors/callers may use to notice
+        meaningful contextual patterns around target-crossing days.
+        """
         if day.goal_calories <= 0 or day.calories <= 0:
             return None
         ratio = day.calories / day.goal_calories
@@ -182,6 +198,11 @@ class CandidateFactory:
             direction="neutral",
             dedup_key=_hash(["daily_calorie_milestone", day.date])[:40],
             created_at=now,
+            # A single day's percent-of-target is exactly the kind of status
+            # report the dashboard already shows; never eligible on its own.
+            information_gain=0.10,
+            obviousness=0.95,
+            longitudinal_value=0.10,
         )
 
     @staticmethod
@@ -240,4 +261,9 @@ class CandidateFactory:
             direction="neutral",
             dedup_key=_hash(["repeated_meal", key])[:40],
             created_at=now,
+            # Repetition across multiple distinct days is a real emerging
+            # habit, only visible because Calry remembers past meals.
+            information_gain=0.72,
+            obviousness=0.30,
+            longitudinal_value=0.68,
         )

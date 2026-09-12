@@ -23,6 +23,15 @@ class VerifiedPattern(BaseModel):
     actionability: float = Field(default=0.7, ge=0, le=1, exclude=True)
     freshness_weight: float = Field(default=1.0, ge=0, le=1, exclude=True)
 
+    # Editorial scoring: does this teach the user something they could not
+    # already see (information_gain), is it already obvious from the current
+    # dashboard/data (obviousness), and does it draw on Calry's memory/history
+    # rather than a single snapshot (longitudinal_value)? A candidate should
+    # have high information_gain and longitudinal_value, and low obviousness.
+    information_gain: float = Field(default=0.6, ge=0, le=1, exclude=True)
+    obviousness: float = Field(default=0.4, ge=0, le=1, exclude=True)
+    longitudinal_value: float = Field(default=0.5, ge=0, le=1, exclude=True)
+
     def verified_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,

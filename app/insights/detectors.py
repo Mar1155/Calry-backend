@@ -51,6 +51,12 @@ class GoalConsistencyDetector(PatternDetector):
                 priority=84,
                 novelty=0.72,
                 effect_size=max(0.25, abs(rate - 0.5) * 2),
+                # A point-in-time adherence rate is visible on the dashboard
+                # today; it becomes an insight only once it changes over time
+                # (see ImprovementDetector's goal_adherence_change).
+                information_gain=0.35,
+                obviousness=0.75,
+                longitudinal_value=0.30,
                 concept="goal_adherence",
                 payload={
                     "days_logged": len(days),
@@ -88,6 +94,11 @@ class WeekendDetector(PatternDetector):
                 priority=82,
                 novelty=0.90,
                 effect_size=min(1.0, abs(difference_pct) * 2.5),
+                # A comparison against the user's own weekday baseline, not a
+                # number already sitting on the dashboard.
+                information_gain=0.75,
+                obviousness=0.30,
+                longitudinal_value=0.70,
                 concept="weekend_calories",
                 payload={
                     "weekend_days": len(weekend),
@@ -127,6 +138,12 @@ class MealDistributionDetector(PatternDetector):
                 priority=69,
                 novelty=0.62,
                 effect_size=max(0.25, dominant_share),
+                # Meal counts and category shares are already reporting the
+                # user can see per-day in the app; no comparison to a baseline
+                # or change over time is made here.
+                information_gain=0.30,
+                obviousness=0.80,
+                longitudinal_value=0.25,
                 concept="meal_frequency",
                 payload={
                     "days_logged": len(days),
@@ -178,6 +195,11 @@ class MacroBalanceDetector(PatternDetector):
                 priority=73,
                 novelty=0.74,
                 effect_size=min(1.0, largest_gap_size),
+                # Period-average macros versus goal is a single-point stat the
+                # nutrition dashboard already shows; not a change or pattern.
+                information_gain=0.35,
+                obviousness=0.72,
+                longitudinal_value=0.30,
                 concept="macro_balance",
                 payload={
                     "days_with_macro_data": len(days),
@@ -217,6 +239,11 @@ class WaterDetector(PatternDetector):
                 priority=61,
                 novelty=0.68,
                 effect_size=min(1.0, max(0.2, abs(sum(recent) / len(recent) - sum(earlier) / len(earlier)) / 3)),
+                # Compares recent hydration against the user's own earlier
+                # average rather than reporting a single "water logged" total.
+                information_gain=0.68,
+                obviousness=0.38,
+                longitudinal_value=0.72,
                 concept="hydration",
                 payload={
                     "days_with_water_logs": len(days),
@@ -257,6 +284,11 @@ class ActivityDetector(PatternDetector):
                 priority=64,
                 novelty=0.70,
                 effect_size=max(0.25, abs(recent_rate - earlier_rate)),
+                # Compares recent active-day rate against the earlier period,
+                # not a single "activity logged" event.
+                information_gain=0.70,
+                obviousness=0.38,
+                longitudinal_value=0.72,
                 concept="activity",
                 payload={
                     "days_observed": len(observed),
@@ -289,6 +321,11 @@ class LoggingHabitDetector(PatternDetector):
                 priority=78,
                 novelty=0.55,
                 effect_size=max(0.25, snapshot.days_logged / snapshot.period_days),
+                # A logging streak/rate accrued over the whole evaluation
+                # window reflects an emerging habit, not a single day's count.
+                information_gain=0.55,
+                obviousness=0.50,
+                longitudinal_value=0.55,
                 concept="logging_consistency",
                 payload={
                     "period_days": snapshot.period_days,
@@ -340,6 +377,12 @@ class AIAccuracyDetector(PatternDetector):
                 priority=80,
                 novelty=0.94,
                 effect_size=max(0.25, within_ten / len(corrections)),
+                # A snapshot of current AI accuracy, not a change; the
+                # meaningful "AI learning" signal is LearningProgressDetector's
+                # ai_accuracy_trend below.
+                information_gain=0.40,
+                obviousness=0.65,
+                longitudinal_value=0.30,
                 concept="ai_accuracy",
                 payload={
                     "confirmed_meals": len(corrections),
@@ -388,6 +431,11 @@ class LearningProgressDetector(PatternDetector):
                 priority=86,
                 novelty=0.98,
                 effect_size=min(1.0, abs(recent_avg - older_avg) / 10),
+                # Whether Calry's own estimation accuracy is meaningfully
+                # changing over time is the kind of thing only memory reveals.
+                information_gain=0.85,
+                obviousness=0.20,
+                longitudinal_value=0.90,
                 concept="ai_learning",
                 payload={
                     "older_confirmed_meals": len(older),
@@ -435,6 +483,11 @@ class CaloriesTrendDetector(PatternDetector):
                 priority=76,
                 novelty=0.82,
                 effect_size=min(1.0, abs(change) * 2),
+                # Compares recent calorie intake against the user's own
+                # earlier baseline, rather than reporting a day's total.
+                information_gain=0.78,
+                obviousness=0.30,
+                longitudinal_value=0.85,
                 concept="calorie_trend",
                 payload={
                     "earlier_days": len(earlier),
@@ -470,6 +523,11 @@ class ImprovementDetector(PatternDetector):
                 priority=88,
                 novelty=0.96,
                 effect_size=min(1.0, abs(change)),
+                # The evolution of goal adherence over time, not a snapshot
+                # rate the dashboard already shows.
+                information_gain=0.82,
+                obviousness=0.25,
+                longitudinal_value=0.90,
                 concept="goal_adherence",
                 payload={
                     "earlier_days": len(earlier),

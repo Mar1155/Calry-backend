@@ -122,6 +122,13 @@ class Settings(BaseSettings):
     PROACTIVE_INSIGHT_MIN_SIGNIFICANCE: float = 0.30
     PROACTIVE_INSIGHT_MIN_NOVELTY: float = 0.55
     PROACTIVE_INSIGHT_MIN_USEFULNESS: float = 0.55
+    # Editorial filter: does this teach the user something they likely could
+    # not see directly (information_gain), is it already obvious from the
+    # current dashboard/data (obviousness), and does it use Calry's
+    # memory/history to reveal something (longitudinal_value)?
+    PROACTIVE_INSIGHT_MIN_INFORMATION_GAIN: float = 0.50
+    PROACTIVE_INSIGHT_MAX_OBVIOUSNESS: float = 0.55
+    PROACTIVE_INSIGHT_MIN_LONGITUDINAL_VALUE: float = 0.40
     PROACTIVE_INSIGHT_COOLDOWN_DAYS: int = 7
     PROACTIVE_INSIGHT_TYPE_COOLDOWNS: str = "daily_calorie_milestone:1,repeated_meal:14"
     PROACTIVE_INSIGHT_MAX_CANDIDATES_PER_EVENT: int = 4

@@ -1,4 +1,5 @@
 import datetime as dt
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -6,6 +7,14 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.insights.detectors import (
+    AIAccuracyDetector,
+    GoalConsistencyDetector,
+    ImprovementDetector,
+    LearningProgressDetector,
+)
+from app.insights.features import CorrectionFeatures, DayFeatures, FeatureSnapshot
 from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.daily_summary import DailySummary
 from app.models.insight import (
@@ -22,7 +31,7 @@ from app.proactive_insights.notifications import (
     quiet_hours_end,
 )
 from app.proactive_insights.quality import InsightQualityGate, QualityGateError
-from app.proactive_insights.service import ProactiveInsightService
+from app.proactive_insights.service import CandidateEligibility, ProactiveInsightService
 from app.proactive_insights.verbalizer import GeneratedInsight
 
 TODAY = dt.date(2026, 8, 11)
@@ -198,7 +207,14 @@ async def test_domain_version_event_stages_transactional_proactive_event(
 
 
 @pytest.mark.asyncio
-async def test_meal_event_creates_verified_calorie_milestone_candidate(db_session: AsyncSession) -> None:
+async def test_meal_event_does_not_publish_calorie_milestone_as_standalone_insight(
+    db_session: AsyncSession,
+) -> None:
+    """25/50/75/100% calorie milestones stay internal triggers, never diary rows.
+
+    A single day's percent-of-target is a status report the dashboard
+    already shows the user; Calry has not "learned" anything from it.
+    """
     user = await _user(db_session)
     db_session.add(
         DailySummary(
@@ -222,11 +238,153 @@ async def test_meal_event_creates_verified_calorie_milestone_candidate(db_sessio
     candidates = await ProactiveInsightService(db_session, verbalizer=FakeVerbalizer()).candidates_for(
         event, user, today=TODAY, now=NOW
     )
-    milestone = next(item for item in candidates if item.trigger == ProactiveTrigger.CALORIE_MILESTONE.value)
 
+    assert all(item.trigger != ProactiveTrigger.CALORIE_MILESTONE.value for item in candidates)
+
+
+def test_calorie_milestone_factory_still_detects_target_crossings_internally() -> None:
+    """The milestone math itself is kept as an internal signal, just not published."""
+    day = SimpleNamespace(date=TODAY, calories=1540, goal_calories=2000)
+
+    milestone = CandidateFactory.calorie_milestone(
+        user_id=1, source_trigger=DomainEvent.MEAL_CREATED.value, day=day, now=NOW
+    )
+
+    assert milestone is not None
     assert milestone.metrics["milestone"] == "75_percent"
     assert milestone.metrics["consumed_calories"] == 1540
     assert milestone.confidence == 1.0
+    # Low information_gain/longitudinal_value and high obviousness mean this
+    # would never clear CandidateEligibility.passes() even if ever surfaced.
+    assert milestone.information_gain < settings.PROACTIVE_INSIGHT_MIN_INFORMATION_GAIN
+    assert milestone.obviousness > settings.PROACTIVE_INSIGHT_MAX_OBVIOUSNESS
+    assert milestone.longitudinal_value < settings.PROACTIVE_INSIGHT_MIN_LONGITUDINAL_VALUE
+    assert not CandidateEligibility.passes(milestone)
+
+
+def _day(date: dt.date, *, calories: int, goal: int = 2000, meal_count: int = 1) -> DayFeatures:
+    return DayFeatures(
+        date=date,
+        calories=calories,
+        goal_calories=goal,
+        burned_calories=0,
+        water_glasses=0,
+        meal_count=meal_count,
+        meal_categories={"lunch": meal_count},
+        protein_g=0.0,
+        carbs_g=0.0,
+        fat_g=0.0,
+        macro_meal_count=0,
+    )
+
+
+def test_basic_goal_adherence_pattern_fails_editorial_gate() -> None:
+    """A plain adherence rate is filtered - it's visible on the dashboard today."""
+    start = TODAY - dt.timedelta(days=19)
+    days = tuple(
+        _day(start + dt.timedelta(days=offset), calories=1950 if offset < 18 else 1000) for offset in range(20)
+    )
+    snapshot = FeatureSnapshot(period_days=20, start_date=start, end_date=TODAY, days=days, corrections=())
+
+    pattern = GoalConsistencyDetector().detect(snapshot)[0]
+    candidate = CandidateFactory.from_pattern(
+        pattern,
+        user_id=1,
+        detector_id="goal_consistency",
+        source_trigger=ProactiveTrigger.DAILY.value,
+        period_start=snapshot.start_date,
+        period_end=snapshot.end_date,
+        now=NOW,
+    )
+
+    # The pre-existing confidence/significance/novelty/usefulness gates all
+    # pass on their own - only the new editorial dimensions filter this out.
+    assert candidate.confidence >= settings.PROACTIVE_INSIGHT_MIN_CONFIDENCE
+    assert candidate.significance >= settings.PROACTIVE_INSIGHT_MIN_SIGNIFICANCE
+    assert candidate.novelty >= settings.PROACTIVE_INSIGHT_MIN_NOVELTY
+    assert candidate.usefulness >= settings.PROACTIVE_INSIGHT_MIN_USEFULNESS
+    assert candidate.information_gain < settings.PROACTIVE_INSIGHT_MIN_INFORMATION_GAIN
+    assert not CandidateEligibility.passes(candidate)
+
+
+def test_snapshot_ai_accuracy_pattern_fails_editorial_gate() -> None:
+    """A static AI-accuracy snapshot is filtered - the trend version is what's learned."""
+    corrections = tuple(
+        CorrectionFeatures(
+            date=TODAY - dt.timedelta(days=offset), source_type="text", meal_category="lunch", correction_percent=4.0
+        )
+        for offset in range(10)
+    )
+    snapshot = FeatureSnapshot(
+        period_days=14, start_date=TODAY - dt.timedelta(days=13), end_date=TODAY, days=(), corrections=corrections
+    )
+
+    pattern = AIAccuracyDetector().detect(snapshot)[0]
+    candidate = CandidateFactory.from_pattern(
+        pattern,
+        user_id=1,
+        detector_id="ai_accuracy",
+        source_trigger=ProactiveTrigger.DAILY.value,
+        period_start=snapshot.start_date,
+        period_end=snapshot.end_date,
+        now=NOW,
+    )
+
+    assert candidate.confidence >= settings.PROACTIVE_INSIGHT_MIN_CONFIDENCE
+    assert candidate.significance >= settings.PROACTIVE_INSIGHT_MIN_SIGNIFICANCE
+    assert candidate.obviousness > settings.PROACTIVE_INSIGHT_MAX_OBVIOUSNESS
+    assert not CandidateEligibility.passes(candidate)
+
+
+def test_goal_adherence_evolution_pattern_passes_editorial_gate() -> None:
+    """A meaningful change in adherence over time is a real, longitudinal insight."""
+    start = TODAY - dt.timedelta(days=13)
+    days = tuple(_day(start + dt.timedelta(days=offset), calories=1200 if offset < 7 else 1950) for offset in range(14))
+    snapshot = FeatureSnapshot(period_days=14, start_date=start, end_date=TODAY, days=days, corrections=())
+
+    pattern = ImprovementDetector().detect(snapshot)[0]
+    candidate = CandidateFactory.from_pattern(
+        pattern,
+        user_id=1,
+        detector_id="improvement",
+        source_trigger=ProactiveTrigger.DAILY.value,
+        period_start=snapshot.start_date,
+        period_end=snapshot.end_date,
+        now=NOW,
+    )
+
+    assert candidate.longitudinal_value >= settings.PROACTIVE_INSIGHT_MIN_LONGITUDINAL_VALUE
+    assert CandidateEligibility.passes(candidate)
+
+
+def test_ai_accuracy_trend_pattern_passes_editorial_gate() -> None:
+    """A meaningful AI learning/accuracy change over time reaches the diary."""
+    corrections = tuple(
+        CorrectionFeatures(
+            date=TODAY - dt.timedelta(days=9 - offset),
+            source_type="text",
+            meal_category="lunch",
+            correction_percent=3.0 if offset < 5 else 25.0,
+        )
+        for offset in range(10)
+    )
+    snapshot = FeatureSnapshot(
+        period_days=14, start_date=TODAY - dt.timedelta(days=13), end_date=TODAY, days=(), corrections=corrections
+    )
+
+    pattern = LearningProgressDetector().detect(snapshot)[0]
+    candidate = CandidateFactory.from_pattern(
+        pattern,
+        user_id=1,
+        detector_id="learning_progress",
+        source_trigger=ProactiveTrigger.DAILY.value,
+        period_start=snapshot.start_date,
+        period_end=snapshot.end_date,
+        now=NOW,
+    )
+
+    assert candidate.information_gain >= settings.PROACTIVE_INSIGHT_MIN_INFORMATION_GAIN
+    assert CandidateEligibility.passes(candidate)
 
 
 @pytest.mark.asyncio
