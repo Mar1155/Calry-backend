@@ -1,10 +1,11 @@
 import asyncio
 import datetime as dt
 import logging
+import math
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from firebase_admin import auth as firebase_auth
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +15,10 @@ from app.core.security import init_firebase
 from app.dependencies.admin import AdminIdentity, enforce_admin_rate_limit, get_current_admin, new_audit
 from app.dependencies.db import get_db
 from app.models.admin import AdminAuditLog, UserDeletionJob
+from app.models.meal import Meal
+from app.models.onboarding_event import OnboardingEvent
 from app.models.promo_code import PromoCode
+from app.models.revenuecat_event import RevenueCatEvent
 from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.admin import (
@@ -28,6 +32,8 @@ from app.schemas.admin import (
     DeletionJobResponse,
     DeletionPreviewResponse,
     LiftAccessRestrictionRequest,
+    OnboardingFunnelResponse,
+    OnboardingFunnelStage,
     PromoCodeCreatedResponse,
     RevokePromotionalEntitlementRequest,
     RevokePromotionalEntitlementResponse,
@@ -49,6 +55,18 @@ from app.services.revenuecat_service import RevenueCatAPIError, RevenueCatClient
 
 router = APIRouter()
 logger = logging.getLogger("app.api.admin")
+
+
+def _percentile(values: list[int], percentile: float) -> int | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = (len(ordered) - 1) * percentile
+    lower = math.floor(rank)
+    upper = math.ceil(rank)
+    if lower == upper:
+        return ordered[lower]
+    return round(ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower))
 
 
 def _abbreviate(value: str) -> str:
@@ -85,7 +103,9 @@ def _job_response(job: UserDeletionJob) -> DeletionJobResponse:
     now = dt.datetime.now(dt.UTC)
     created_at = job.created_at.replace(tzinfo=job.created_at.tzinfo or dt.UTC)
     started_at = job.started_at.replace(tzinfo=job.started_at.tzinfo or dt.UTC) if job.started_at else None
-    stale_pending = job.status == "pending" and (now - created_at).total_seconds() >= settings.ADMIN_DELETION_STALE_SECONDS
+    stale_pending = (
+        job.status == "pending" and (now - created_at).total_seconds() >= settings.ADMIN_DELETION_STALE_SECONDS
+    )
     stale_running = bool(
         job.status == "running"
         and started_at
@@ -117,6 +137,158 @@ async def admin_me(
 ) -> AdminMeResponse:
     db.add(new_audit(request, admin, "admin_login", "success"))
     return AdminMeResponse(uid=admin.uid, email=admin.email)
+
+
+@router.get("/onboarding-funnel", response_model=OnboardingFunnelResponse)
+async def onboarding_funnel(
+    request: Request,
+    days: int = Query(30, ge=1, le=90),
+    admin: AdminIdentity = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> OnboardingFunnelResponse:
+    """Aggregated launch funnel. Never returns answers or user identifiers."""
+    enforce_admin_rate_limit(
+        request,
+        "onboarding_funnel",
+        settings.ADMIN_SEARCH_RATE_LIMIT_PER_MINUTE,
+    )
+    now = dt.datetime.now(dt.UTC)
+    starts_at = now - dt.timedelta(days=days)
+    event_rows = (
+        await db.execute(
+            select(
+                OnboardingEvent.event_name,
+                OnboardingEvent.step,
+                func.count(func.distinct(OnboardingEvent.journey_id)),
+            )
+            .where(OnboardingEvent.occurred_at >= starts_at)
+            .group_by(OnboardingEvent.event_name, OnboardingEvent.step)
+        )
+    ).all()
+    event_counts = {(name, step): int(count) for name, step, count in event_rows}
+
+    async def event_durations(event_name: str) -> list[int]:
+        return list(
+            await db.scalars(
+                select(func.min(OnboardingEvent.duration_ms))
+                .where(
+                    OnboardingEvent.event_name == event_name,
+                    OnboardingEvent.occurred_at >= starts_at,
+                    OnboardingEvent.duration_ms.is_not(None),
+                )
+                .group_by(OnboardingEvent.journey_id)
+            )
+        )
+
+    first_frame_durations = await event_durations("app_first_frame")
+    welcome_durations = await event_durations("welcome_ready")
+    paywall_exposed = int(
+        await db.scalar(
+            select(func.count(func.distinct(OnboardingEvent.journey_id))).where(
+                OnboardingEvent.occurred_at >= starts_at,
+                OnboardingEvent.event_name.in_(["paywall_closed", "paywall_purchased", "paywall_restored"]),
+            )
+        )
+        or 0
+    )
+
+    cohort_rows = (
+        await db.execute(
+            select(
+                User.firebase_uid,
+                User.revenuecat_app_user_id,
+                User.onboarding_journey_id,
+                User.onboarding_completed_at,
+                func.min(Meal.confirmed_at),
+            )
+            .outerjoin(
+                Meal,
+                and_(Meal.user_id == User.id, Meal.confirmed_at.is_not(None)),
+            )
+            .where(
+                User.onboarding_completed_at >= starts_at,
+                User.onboarding_journey_id.is_not(None),
+            )
+            .group_by(
+                User.id,
+                User.firebase_uid,
+                User.revenuecat_app_user_id,
+                User.onboarding_journey_id,
+                User.onboarding_completed_at,
+            )
+        )
+    ).all()
+    completed_profiles = len(cohort_rows)
+    activated = 0
+    activation_minutes: list[int] = []
+    cohort_purchase_ids: set[str] = set()
+    for firebase_uid, revenuecat_id, _, completed_at, first_meal_at in cohort_rows:
+        if first_meal_at is not None and completed_at is not None:
+            first = first_meal_at.replace(tzinfo=first_meal_at.tzinfo or dt.UTC)
+            completed = completed_at.replace(tzinfo=completed_at.tzinfo or dt.UTC)
+            if completed <= first <= completed + dt.timedelta(hours=24):
+                activated += 1
+                activation_minutes.append(round((first - completed).total_seconds() / 60))
+        cohort_purchase_ids.add(firebase_uid)
+        if revenuecat_id:
+            cohort_purchase_ids.add(revenuecat_id)
+
+    paid_ids = (
+        set(
+            await db.scalars(
+                select(RevenueCatEvent.app_user_id)
+                .where(
+                    RevenueCatEvent.app_user_id.in_(cohort_purchase_ids),
+                    RevenueCatEvent.processing_status == "processed",
+                    RevenueCatEvent.event_type.in_(["INITIAL_PURCHASE", "NON_RENEWING_PURCHASE"]),
+                    or_(RevenueCatEvent.environment.is_(None), RevenueCatEvent.environment != "SANDBOX"),
+                    RevenueCatEvent.received_at >= starts_at,
+                )
+                .distinct()
+            )
+        )
+        if cohort_purchase_ids
+        else set()
+    )
+    paid_users = sum(
+        1
+        for firebase_uid, revenuecat_id, *_ in cohort_rows
+        if firebase_uid in paid_ids or (revenuecat_id is not None and revenuecat_id in paid_ids)
+    )
+
+    stage_specs = [
+        ("welcome", "Welcome viewed", event_counts.get(("step_viewed", "welcome"), 0)),
+        ("personalization", "Personalization completed", event_counts.get(("step_completed", "target"), 0)),
+        ("account", "Account viewed", event_counts.get(("auth_viewed", "account"), 0)),
+        ("profile", "Profile completed", completed_profiles),
+        ("paywall", "Paywall shown", paywall_exposed),
+        ("paid", "Verified purchase", paid_users),
+        ("activated", "First meal within 24h", activated),
+    ]
+    db.add(
+        new_audit(
+            request,
+            admin,
+            "onboarding_funnel_view",
+            "success",
+            metadata={"days": days},
+        )
+    )
+    return OnboardingFunnelResponse(
+        days=days,
+        starts_at=starts_at,
+        generated_at=now,
+        stages=[OnboardingFunnelStage(key=key, label=label, journeys=count) for key, label, count in stage_specs],
+        completed_profiles=completed_profiles,
+        activated_within_24h=activated,
+        verified_paid_users=paid_users,
+        paywall_unavailable=event_counts.get(("paywall_unavailable", "offer"), 0),
+        median_first_frame_ms=_percentile(first_frame_durations, 0.5),
+        p90_first_frame_ms=_percentile(first_frame_durations, 0.9),
+        median_welcome_ready_ms=_percentile(welcome_durations, 0.5),
+        p90_welcome_ready_ms=_percentile(welcome_durations, 0.9),
+        median_activation_minutes=_percentile(activation_minutes, 0.5),
+    )
 
 
 @router.get("/users/search", response_model=UserSearchResponse)
@@ -376,9 +548,7 @@ async def create_promo_code(
 
     plaintext = generate_promo_code()
     valid_until = (
-        dt.datetime.now(dt.UTC) + dt.timedelta(days=payload.valid_days)
-        if payload.valid_days is not None
-        else None
+        dt.datetime.now(dt.UTC) + dt.timedelta(days=payload.valid_days) if payload.valid_days is not None else None
     )
     promo = PromoCode(
         code_digest=promo_code_digest(plaintext, pepper),
@@ -452,7 +622,9 @@ async def create_deletion_job(
     db: AsyncSession = Depends(get_db),
 ) -> DeletionJobCreatedResponse:
     enforce_admin_rate_limit(request, "deletion", settings.ADMIN_DELETION_RATE_LIMIT_PER_MINUTE)
-    existing = await db.scalar(select(UserDeletionJob).where(UserDeletionJob.idempotency_key == payload.idempotency_key))
+    existing = await db.scalar(
+        select(UserDeletionJob).where(UserDeletionJob.idempotency_key == payload.idempotency_key)
+    )
     if existing:
         if existing.target_user_id != user_id or existing.requested_by_admin_uid != admin.uid:
             raise CalryException("Idempotency key is already in use.", 409, "IDEMPOTENCY_KEY_CONFLICT")

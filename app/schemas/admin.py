@@ -23,6 +23,28 @@ class AdminMeResponse(BaseModel):
     authorized: bool = True
 
 
+class OnboardingFunnelStage(BaseModel):
+    key: str
+    label: str
+    journeys: int
+
+
+class OnboardingFunnelResponse(BaseModel):
+    days: int
+    starts_at: dt.datetime
+    generated_at: dt.datetime
+    stages: list[OnboardingFunnelStage]
+    completed_profiles: int
+    activated_within_24h: int
+    verified_paid_users: int
+    paywall_unavailable: int
+    median_first_frame_ms: int | None
+    p90_first_frame_ms: int | None
+    median_welcome_ready_ms: int | None
+    p90_welcome_ready_ms: int | None
+    median_activation_minutes: int | None
+
+
 class UserSummaryResponse(BaseModel):
     id: int
     email: str

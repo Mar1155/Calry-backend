@@ -1,3 +1,4 @@
+import datetime as dt
 import uuid
 from unittest.mock import AsyncMock
 
@@ -7,7 +8,9 @@ from sqlalchemy import select
 from app.models.admin import AdminAuditLog, UserDeletionJob
 from app.models.daily_summary import DailySummary
 from app.models.meal import Meal, MealItem
+from app.models.onboarding_event import OnboardingEvent
 from app.models.promo_code import PromoCode
+from app.models.revenuecat_event import RevenueCatEvent
 from app.models.user import User
 from app.services.admin_deletion import _delete_database_records, _erase_completed_job_personal_data, initial_steps
 from app.services.promo_code_service import promo_code_digest
@@ -47,6 +50,158 @@ async def test_admin_rejects_verified_non_admin(client):
 
 
 @pytest.mark.asyncio
+async def test_admin_onboarding_funnel_is_aggregated_and_identifier_free(client):
+    response = await client.get(
+        "/api/v1/admin/onboarding-funnel?days=30",
+        headers=admin_headers(),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["days"] == 30
+    assert [stage["key"] for stage in body["stages"]] == [
+        "welcome",
+        "personalization",
+        "account",
+        "profile",
+        "paywall",
+        "paid",
+        "activated",
+    ]
+    assert "firebase_uid" not in str(body)
+
+
+@pytest.mark.asyncio
+async def test_admin_onboarding_funnel_uses_verified_outcomes(client, db_session):
+    now = dt.datetime.now(dt.UTC)
+    journeys = [uuid.uuid4().hex, uuid.uuid4().hex]
+    users = []
+    for index, journey in enumerate(journeys):
+        suffix = uuid.uuid4().hex[:8]
+        user = User(
+            firebase_uid=f"funnel-{suffix}",
+            email=f"funnel-{suffix}@example.com",
+            revenuecat_app_user_id=f"rc-funnel-{suffix}",
+            onboarding_status="completed",
+            onboarding_version=3,
+            onboarding_journey_id=journey,
+            onboarding_started_at=now - dt.timedelta(minutes=5),
+            onboarding_completed_at=now - dt.timedelta(minutes=2),
+        )
+        db_session.add(user)
+        await db_session.flush()
+        users.append(user)
+        db_session.add_all(
+            [
+                OnboardingEvent(
+                    event_id=uuid.uuid4().hex,
+                    journey_id=journey,
+                    event_name="app_first_frame",
+                    step=None,
+                    locale="en",
+                    platform="ios",
+                    duration_ms=[180, 320][index],
+                    occurred_at=now - dt.timedelta(minutes=5),
+                    received_at=now,
+                ),
+                OnboardingEvent(
+                    event_id=uuid.uuid4().hex,
+                    journey_id=journey,
+                    event_name="step_viewed",
+                    step="welcome",
+                    locale="en",
+                    platform="ios",
+                    occurred_at=now - dt.timedelta(minutes=5),
+                    received_at=now,
+                ),
+                OnboardingEvent(
+                    event_id=uuid.uuid4().hex,
+                    journey_id=journey,
+                    event_name="welcome_ready",
+                    step="welcome",
+                    locale="en",
+                    platform="ios",
+                    duration_ms=[420, 980][index],
+                    occurred_at=now - dt.timedelta(minutes=5),
+                    received_at=now,
+                ),
+            ]
+        )
+
+    db_session.add_all(
+        [
+            OnboardingEvent(
+                event_id=uuid.uuid4().hex,
+                journey_id=journeys[0],
+                event_name="paywall_closed",
+                step="offer",
+                locale="en",
+                platform="ios",
+                occurred_at=now - dt.timedelta(minutes=1),
+                received_at=now,
+            ),
+            OnboardingEvent(
+                event_id=uuid.uuid4().hex,
+                journey_id=journeys[1],
+                event_name="paywall_unavailable",
+                step="offer",
+                locale="en",
+                platform="ios",
+                occurred_at=now - dt.timedelta(minutes=1),
+                received_at=now,
+            ),
+            Meal(
+                user_id=users[0].id,
+                source_type="text",
+                original_input="synthetic",
+                confirmed_at=now,
+            ),
+            Meal(
+                user_id=users[1].id,
+                source_type="text",
+                original_input="synthetic",
+                confirmed_at=now + dt.timedelta(hours=25),
+            ),
+            RevenueCatEvent(
+                event_id=f"purchase-{uuid.uuid4().hex}",
+                event_type="INITIAL_PURCHASE",
+                app_user_id=users[0].revenuecat_app_user_id,
+                environment="PRODUCTION",
+                payload={},
+                processing_status="processed",
+                received_at=now,
+            ),
+            RevenueCatEvent(
+                event_id=f"sandbox-{uuid.uuid4().hex}",
+                event_type="INITIAL_PURCHASE",
+                app_user_id=users[1].revenuecat_app_user_id,
+                environment="SANDBOX",
+                payload={},
+                processing_status="processed",
+                received_at=now,
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    response = await client.get(
+        "/api/v1/admin/onboarding-funnel?days=30",
+        headers=admin_headers(),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["completed_profiles"] == 2
+    assert body["activated_within_24h"] == 1
+    assert body["verified_paid_users"] == 1
+    assert body["median_first_frame_ms"] == 250
+    assert body["p90_first_frame_ms"] == 306
+    assert body["median_welcome_ready_ms"] == 700
+    assert body["p90_welcome_ready_ms"] == 924
+    assert body["median_activation_minutes"] == 2
+    stages = {stage["key"]: stage["journeys"] for stage in body["stages"]}
+    assert stages["paywall"] == 1
+
+
+@pytest.mark.asyncio
 async def test_admin_creates_hashed_promo_code_and_audits_without_plaintext(client, db_session, monkeypatch):
     pepper = "admin-test-promo-pepper-with-enough-entropy"
     monkeypatch.setattr("app.api.v1.routes.admin.settings.PROMO_CODE_PEPPER", pepper)
@@ -69,9 +224,7 @@ async def test_admin_creates_hashed_promo_code_and_audits_without_plaintext(clie
     assert promo is not None
     assert promo.code_digest == promo_code_digest(body["code"], pepper)
     assert body["code"] not in promo.code_hint
-    audit = await db_session.scalar(
-        select(AdminAuditLog).where(AdminAuditLog.action == "promo_code_created")
-    )
+    audit = await db_session.scalar(select(AdminAuditLog).where(AdminAuditLog.action == "promo_code_created"))
     assert audit is not None
     assert audit.metadata_json["promo_code_id"] == promo.id
     assert body["code"] not in str(audit.metadata_json)
@@ -191,9 +344,7 @@ async def test_admin_restricts_and_restores_access_with_pseudonymous_audit(clien
     await db_session.refresh(admin_target)
     assert admin_target.access_status == "banned"
 
-    audit = await db_session.scalar(
-        select(AdminAuditLog).where(AdminAuditLog.action == "user_access_restricted")
-    )
+    audit = await db_session.scalar(select(AdminAuditLog).where(AdminAuditLog.action == "user_access_restricted"))
     assert audit is not None
     assert audit.safe_target_identifier.startswith("target:")
     assert admin_target.email not in audit.safe_target_identifier
