@@ -2,15 +2,20 @@ from xml.sax.saxutils import escape
 
 from app.ai.prompts._shared import OUTPUT_CONTRACT
 
-IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v8_compact"
+IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v10_compact"
 
 _VISUAL_RULES = """<rules>
 Use evidence in this order: readable labels and explicit user facts; visible food
-and portion; typical local serving data. Estimate the edible amount consumed and
-include each calorie-bearing component once. Item macros are for the full portion;
-weight and kcal/100g must use the same cooked/raw state. Use realistic uncertainty
-bounds. Ask for clarification only when no food or caloric drink can be identified.
-Never invent a brand, recipe, preparation, or exact portion.
+and portion; typical local serving data. Decompose every composite or prepared
+dish into its calorie-bearing ingredients, one item per ingredient (for example,
+pizza margherita becomes dough, tomato sauce, mozzarella, and olive oil). Put
+the dish name only in meal_name, never as an item name. Keep a single item only
+for a genuinely single-ingredient food or a branded product eaten as sold.
+Estimate the edible amount consumed and represent each ingredient exactly once.
+Item macros are for the full portion; weight and kcal/100g must use the
+same cooked/raw state. Use realistic uncertainty bounds. Ask for clarification
+only when no food or caloric drink can be identified. Never invent a brand,
+recipe, preparation, or exact portion.
 </rules>"""
 
 IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT = "\n\n".join(

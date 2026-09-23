@@ -154,8 +154,8 @@ class Settings(BaseSettings):
     AI_PROVIDER: str = "openrouter"
     # Text and image models analyze meals. Audio is first converted to text by
     # the dedicated speech-to-text endpoint, then follows the text pipeline.
-    OPENROUTER_TEXT_MODEL: str = "google/gemini-2.5-flash"
-    OPENROUTER_IMAGE_MODEL: str = "google/gemini-2.5-flash"
+    OPENROUTER_TEXT_MODEL: str = "google/gemini-3.8-flash"
+    OPENROUTER_IMAGE_MODEL: str = "google/gemini-3.8-flash"
     OPENROUTER_TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     AI_MAX_RETRIES: int = 1

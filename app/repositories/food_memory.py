@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.text_normalization import canonicalize_food_name
-from app.models.food_memory import UserFoodMemory
+from app.models.food_memory import CURRENT_ITEMS_SNAPSHOT_VERSION, UserFoodMemory
 from app.models.meal import Meal
 
 _DIGIT_TOKEN_RE = re.compile(r"\d+")
@@ -14,6 +14,21 @@ _DIGIT_TOKEN_RE = re.compile(r"\d+")
 
 def _digit_tokens(text: str) -> set[str]:
     return set(_DIGIT_TOKEN_RE.findall(text or ""))
+
+
+def _is_stale_composite_snapshot(memory: UserFoodMemory) -> bool:
+    """C21: a snapshot from before ingredient decomposition may have squashed an
+    entire composite dish (e.g. "Pizza Napoletana") into a single item. Serving
+    it from cache would silently keep repeating that undecomposed result forever
+    — a memory is only ever refreshed on reconfirm. Treat a lone-item legacy
+    snapshot as a cache miss instead, so the next log runs the full pipeline,
+    decomposes it properly, and the following confirm re-stamps the snapshot at
+    the current version. A memory with no snapshot at all, or with 2+ items
+    already, is unaffected."""
+    snapshot = memory.items_snapshot
+    if not snapshot or len(snapshot) != 1:
+        return False
+    return (memory.items_snapshot_version or 0) < CURRENT_ITEMS_SNAPSHOT_VERSION
 
 
 class FoodMemoryRepository:
@@ -83,7 +98,7 @@ class FoodMemoryRepository:
         )
         row = exact.scalars().first()
         if row is not None:
-            return row
+            return None if _is_stale_composite_snapshot(row) else row
 
         # 2. Strict fuzzy fallback over the user's own (small) memory set — no vector DB.
         if not settings.FOOD_MEMORY_FUZZY_ENABLED:
@@ -118,7 +133,7 @@ class FoodMemoryRepository:
             if score > best_score:
                 best, best_score = c, score
         if best is not None and best_score >= settings.FOOD_MEMORY_FUZZY_THRESHOLD:
-            return best
+            return None if _is_stale_composite_snapshot(best) else best
         return None
 
     async def upsert_from_meal(self, meal: Meal, confirmed_calories: int) -> UserFoodMemory:
@@ -197,6 +212,7 @@ class FoodMemoryRepository:
             existing.canonical_key = canonical or existing.canonical_key
             if items_snapshot:
                 existing.items_snapshot = items_snapshot
+                existing.items_snapshot_version = CURRENT_ITEMS_SNAPSHOT_VERSION
             await self.db.flush()
             return existing
 
@@ -210,6 +226,7 @@ class FoodMemoryRepository:
             carbs_g=meal.total_carbs_g,
             fat_g=meal.total_fat_g,
             items_snapshot=items_snapshot,
+            items_snapshot_version=CURRENT_ITEMS_SNAPSHOT_VERSION if items_snapshot else None,
             use_count=1,
             last_used_at=now,
             created_at=now,

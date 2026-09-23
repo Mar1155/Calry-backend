@@ -16,19 +16,20 @@ from app.ai.schemas.meal_estimate import MEAL_ESTIMATE_RESPONSE_SCHEMA, MEAL_REF
 
 
 def test_prompt_versions_track_the_new_contract() -> None:
-    assert TEXT_MEAL_ESTIMATION_PROMPT_VERSION == "text_meal_estimation_v7"
-    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v8_compact"
-    assert MEAL_REFINEMENT_PROMPT_VERSION == "meal_refinement_v3"
+    assert TEXT_MEAL_ESTIMATION_PROMPT_VERSION == "text_meal_estimation_v9"
+    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v10_compact"
+    assert MEAL_REFINEMENT_PROMPT_VERSION == "meal_refinement_v5"
 
 
 def test_estimation_prompts_keep_core_numerical_invariants() -> None:
-    assert "never both" in TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "Decompose every composite or prepared dish" in TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "never as an item name" in TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT
     assert "not 100 g" in TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT
 
     # Vision uses a deliberately compact contract to reduce reasoning-model
     # latency, while retaining the invariants needed by deterministic validation.
     assert "Return exactly one raw JSON object" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
-    assert "include each calorie-bearing component once" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "Decompose every composite or prepared" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
     assert "same cooked/raw state" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
     assert "readable labels and explicit user facts" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
 
@@ -66,13 +67,17 @@ def test_structured_output_requires_complete_semantic_contract() -> None:
     assert required == set(MEAL_ESTIMATE_RESPONSE_SCHEMA["properties"])
     assert MEAL_ESTIMATE_RESPONSE_SCHEMA["additionalProperties"] is False
     assert "confidence" not in required
-    assert "assumptions" not in required
+    # EVIDENCE_POLICY instructs the model to disclose assumptions; the schema
+    # must actually allow the field or the instruction is unfulfillable.
+    assert "assumptions" in required
     assert "total_protein_g" not in required
 
     item_schema = MEAL_ESTIMATE_RESPONSE_SCHEMA["properties"]["items"]["items"]
     assert set(item_schema["required"]) == set(item_schema["properties"])
     assert "full consumed item portion" in item_schema["properties"]["protein_g"]["description"]
     assert "Energy density" in item_schema["properties"]["calories_per_100g"]["description"]
+    assert "never a whole dish or meal name" in item_schema["properties"]["name"]["description"]
+    assert "decomposed one ingredient per" in MEAL_ESTIMATE_RESPONSE_SCHEMA["properties"]["items"]["description"]
 
     refinement_required = set(MEAL_REFINEMENT_RESPONSE_SCHEMA["required"])
     assert refinement_required == set(MEAL_REFINEMENT_RESPONSE_SCHEMA["properties"])

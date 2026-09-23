@@ -14,19 +14,64 @@ _FILLER_TOKENS = {
     "a", "an", "the", "of", "with", "and", "some", "my", "your", "for",
     "plate", "bowl", "cup", "glass", "serving", "portion", "piece", "pieces",
     "fresh", "homemade", "small", "medium", "large", "plain",
+    # Italian equivalents (articles, prepositions, units, common adjectives).
+    "un", "uno", "una", "il", "lo", "la", "i", "gli", "le", "l",
+    "di", "del", "dello", "della", "dei", "degli", "delle",
+    "con", "e", "ed", "al", "alla", "ai", "agli", "alle",
+    "da", "in", "su", "per", "tra", "fra",
+    "piatto", "ciotola", "tazza", "bicchiere", "porzione", "pezzo", "pezzi",
+    "fresco", "fresca", "freschi", "fresche", "casalingo", "casalinga",
+    "casalinghi", "casalinghe", "piccolo", "piccola", "piccoli", "piccole",
+    "medio", "media", "medi", "medie", "grande", "grandi", "semplice",
 }
 
 _PUNCT_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
 _WS_RE = re.compile(r"\s+")
 _NUM_RE = re.compile(r"\d")
 
+# Curated Italian plural -> singular map for common foods. Italian pluralization
+# is too irregular to safely handle with a suffix rule the way English is below
+# (e.g. blindly turning a trailing "e" into "a" would corrupt singular words
+# like "carne" or "pane", which themselves end in "e"). This lookup is
+# deliberately explicit and only ever merges a known pair — false negatives
+# (a plural we don't recognise) just fall through unchanged, never a false
+# merge of two different foods.
+_IT_PLURAL_TO_SINGULAR: dict[str, str] = {
+    "mele": "mela", "banane": "banana", "arance": "arancia", "pere": "pera",
+    "pesche": "pesca", "albicocche": "albicocca", "prugne": "prugna",
+    "ciliegie": "ciliegia", "fragole": "fragola", "angurie": "anguria",
+    "meloni": "melone",
+    "pomodori": "pomodoro", "patate": "patata", "cipolle": "cipolla",
+    "carote": "carota", "zucchine": "zucchina", "melanzane": "melanzana",
+    "peperoni": "peperone", "funghi": "fungo", "olive": "oliva",
+    "broccoli": "broccolo", "carciofi": "carciofo", "zucche": "zucca",
+    "insalate": "insalata", "lenticchie": "lenticchia", "ceci": "cece",
+    "fagioli": "fagiolo", "piselli": "pisello",
+    "uova": "uovo", "formaggi": "formaggio", "salumi": "salume",
+    "prosciutti": "prosciutto", "salsicce": "salsiccia",
+    "polpette": "polpetta", "bistecche": "bistecca", "cotolette": "cotoletta",
+    "gamberi": "gambero", "gamberetti": "gamberetto", "cozze": "cozza",
+    "vongole": "vongola", "acciughe": "acciuga", "sarde": "sarda",
+    "mandorle": "mandorla", "noci": "noce", "nocciole": "nocciola",
+    "pistacchi": "pistacchio", "arachidi": "arachide",
+    "biscotti": "biscotto", "patatine": "patatina", "crostini": "crostino",
+    "grissini": "grissino", "panini": "panino", "focacce": "focaccia",
+    "torte": "torta", "cornetti": "cornetto", "ravioli": "raviolo",
+    "tortellini": "tortellino", "gnocchi": "gnocco", "lasagne": "lasagna",
+    "bruschette": "bruschetta", "fette": "fetta", "salse": "salsa",
+}
+
 
 def _singularize(token: str) -> str:
-    """Trivial English singularization — enough to merge 'eggs'/'egg'.
+    """Merge a token's plural with its singular so cache keys and density-table
+    lookups match regardless of wording. Checks the curated Italian map first,
+    then falls back to a trivial English suffix rule ('eggs' -> 'egg').
 
     Intentionally conservative: only strips a trailing plural 's'/'es' on longer
     tokens, never touches numbers or short words.
     """
+    if token in _IT_PLURAL_TO_SINGULAR:
+        return _IT_PLURAL_TO_SINGULAR[token]
     if len(token) <= 3 or _NUM_RE.search(token):
         return token
     if token.endswith("ies") and len(token) > 4:

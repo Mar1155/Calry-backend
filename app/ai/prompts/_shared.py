@@ -33,6 +33,7 @@ write all other strings in the requested output language.
     "carbs_g": number | null,
     "fat_g": number | null
   }],
+  "assumptions": string[],
   "needs_clarification": boolean,
   "clarifying_question": string | null
 }
@@ -61,14 +62,26 @@ material conflict as an assumption.
 ESTIMATION_RULES = """<estimation_rules>
 - Model the edible amount actually consumed. Distinguish cooked from dry weight
   and use an energy density for the same state.
-- Represent every calorie-bearing component once. For a composite dish, use
-  either one realistic composite item or its components, never both.
+- Decompose every composite or prepared dish into its calorie-bearing
+  ingredients: one item per ingredient, in the state as eaten (for example,
+  pizza margherita becomes baked dough, tomato sauce, mozzarella, and olive
+  oil, never one "pizza margherita" item). Put the dish name only in
+  meal_name, never as an item name. Keep a single item only for a genuinely
+  single-ingredient food (an apple, plain yogurt) or a branded product eaten
+  as sold (a candy bar, a can of soda).
+- Represent every calorie-bearing ingredient exactly once; never double-count
+  a composite item and its own ingredients.
+- Merge only negligible components (a pinch of herbs or spices, under about
+  10 kcal) into the closest ingredient instead of listing them separately.
 - Always return at least one item. A single-food meal is one item, never an
   itemless meal.
 - Include calorically material drinks, sauces, dressings, toppings, and cooking
-  fat. Add an unseen standard ingredient only when strongly typical; make it a
-  separate item and disclose it. Never add generic oil on top of a density that
-  already includes that oil.
+  fat as their own ingredient item. Add an unseen standard ingredient only when
+  strongly typical; make it a separate item and disclose it. Never add generic
+  oil on top of a density that already includes that oil.
+- After decomposing, check that the ingredient sum falls within the typical
+  calorie range for that whole dish; fix weights, not the ingredient list,
+  before answering.
 - For every estimable item provide a realistic weight_grams and
   calories_per_100g. calories_per_100g is energy density, not item calories.
 - Item protein_g, carbs_g, and fat_g describe the full estimated item portion,

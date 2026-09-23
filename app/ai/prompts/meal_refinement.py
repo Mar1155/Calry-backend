@@ -9,7 +9,7 @@ from app.ai.prompts._shared import (
     REFERENCE_ANCHORS,
 )
 
-MEAL_REFINEMENT_PROMPT_VERSION = "meal_refinement_v3"
+MEAL_REFINEMENT_PROMPT_VERSION = "meal_refinement_v5"
 
 MEAL_REFINEMENT_SYSTEM_PROMPT = "\n\n".join(
     [
@@ -56,6 +56,8 @@ Emit every key. Keep enum values in lowercase English; localize other strings.
   quantities, preparation, assumptions, and names.
 - If an item is added, removed, replaced, or partly eaten, update that item and
   all affected totals and ranges. Do not introduce unrelated ingredients.
+- Keep the existing per-ingredient decomposition. Do not collapse ingredients
+  back into a single dish-name item unless the user explicitly asks for that.
 - Recalculate the entire numerical contract after the targeted change so item
   calories, macro totals, central total, range, and confidence stay coherent.
 - Keep meal_category_suggestion unchanged unless the user explicitly changes

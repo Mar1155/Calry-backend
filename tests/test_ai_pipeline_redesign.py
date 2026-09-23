@@ -12,8 +12,8 @@ from app.ai.services.confidence_service import AIConfidenceService, bucket_confi
 from app.ai.services.correction_context_service import AICorrectionContextService
 from app.ai.services.validation_service import AIValidationService
 from app.core.text_normalization import canonicalize_food_name
-from app.models.food_memory import UserFoodMemory
-from app.models.meal import Meal
+from app.models.food_memory import CURRENT_ITEMS_SNAPSHOT_VERSION, UserFoodMemory
+from app.models.meal import Meal, MealItem
 from app.models.user import User
 from app.repositories.food_memory import FoodMemoryRepository
 
@@ -198,6 +198,52 @@ async def test_food_memory_cache_exact_hit(db_session: AsyncSession):
     # Below min use_count is not served.
     miss = await repo.get_cached_match(user.id, "something never logged")
     assert miss is None
+
+
+@pytest.mark.asyncio
+async def test_food_memory_cache_skips_stale_single_item_snapshot(db_session: AsyncSession):
+    """C21: a memory confirmed before ingredient decomposition may have squashed
+    a whole composite dish into one item. It must not be served forever — the
+    lookup treats it as a miss so the pipeline re-decomposes it."""
+    user = User(firebase_uid="stale_uid", email="stale@x.io", name="S", daily_calorie_goal=2000)
+    db_session.add(user)
+    await db_session.flush()
+
+    stale = UserFoodMemory(
+        user_id=user.id,
+        normalized_name="pizza napoletana",
+        canonical_key=canonicalize_food_name("Pizza Napoletana"),
+        display_name="Pizza Napoletana",
+        learned_calories=800,
+        items_snapshot=[{"name": "Pizza Napoletana", "estimated_calories": 800}],
+        items_snapshot_version=None,  # legacy: predates C21 decomposition
+        use_count=3,
+        last_used_at=dt.datetime.now(dt.UTC),
+        created_at=dt.datetime.now(dt.UTC),
+    )
+    db_session.add(stale)
+    await db_session.flush()
+
+    repo = FoodMemoryRepository(db_session)
+    miss = await repo.get_cached_match(user.id, "Pizza Napoletana")
+    assert miss is None
+
+    # Once reconfirmed with a decomposed snapshot, it is served again.
+    meal = Meal(
+        user_id=user.id, source_type="text", original_input="Pizza Napoletana",
+        meal_name="Pizza Napoletana", estimated_calories=800,
+    )
+    meal.items = [
+        MealItem(name="Baked Dough", weight_grams=200, calories_per_100g=270.0),
+        MealItem(name="Tomato Sauce", weight_grams=60, calories_per_100g=60.0),
+        MealItem(name="Mozzarella", weight_grams=90, calories_per_100g=280.0),
+    ]
+    updated = await repo.upsert_from_meal(meal, 800)
+    assert updated.items_snapshot_version == CURRENT_ITEMS_SNAPSHOT_VERSION
+    assert len(updated.items_snapshot) == 3
+
+    hit = await repo.get_cached_match(user.id, "Pizza Napoletana")
+    assert hit is not None and hit.id == updated.id
 
 
 @pytest.mark.asyncio

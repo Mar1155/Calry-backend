@@ -10,7 +10,7 @@ from app.ai.prompts._shared import (
     REFERENCE_ANCHORS,
 )
 
-TEXT_MEAL_ESTIMATION_PROMPT_VERSION = "text_meal_estimation_v7"
+TEXT_MEAL_ESTIMATION_PROMPT_VERSION = "text_meal_estimation_v9"
 JSON_REPAIR_PROMPT_VERSION = "json_repair_v2"
 
 TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT = "\n\n".join(

@@ -118,7 +118,11 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
         "items": {
             "type": "array",
             "minItems": 1,
-            "description": "Each calorie-bearing component exactly once; no composite/component overlap.",
+            "description": (
+                "Every calorie-bearing ingredient of the meal, decomposed one ingredient per "
+                "item (e.g. dough/sauce/cheese for a pizza, never one 'pizza' item); no "
+                "composite/component overlap."
+            ),
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -126,7 +130,11 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
                     "name": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Specific but non-invented food component.",
+                        "description": (
+                            "A single decomposed, non-invented ingredient (e.g. 'mozzarella', "
+                            "'tomato sauce'), never a whole dish or meal name — that belongs "
+                            "only in meal_name."
+                        ),
                     },
                     "quantity_estimate": {
                         "type": ["string", "null"],
@@ -168,6 +176,14 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
                 ],
             },
         },
+        "assumptions": {
+            "type": "array",
+            "description": (
+                "Conservative assumptions made when evidence was incomplete (e.g. an "
+                "unseen standard ingredient, an assumed cooking method); empty when none."
+            ),
+            "items": {"type": "string"},
+        },
         "needs_clarification": {
             "type": "boolean",
             "description": "True only when no defensible food estimate can be made.",
@@ -185,6 +201,7 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
         "meal_category_suggestion",
         "meal_category_confidence",
         "items",
+        "assumptions",
         "needs_clarification",
         "clarifying_question",
     ],

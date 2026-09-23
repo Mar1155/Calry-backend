@@ -73,8 +73,10 @@ class AIConfidenceService:
             )
             frac = weighted / len(result.items)
             score += 0.12 * frac - 0.10 * (1 - frac)
-            # Very complex plates are harder to get right.
-            if len(result.items) >= 6:
+            # Very complex plates are harder to get right. Ingredient decomposition
+            # (C20) makes 6-10 items normal for an ordinary composite dish, so only
+            # penalize genuinely large item counts.
+            if len(result.items) >= 10:
                 score -= 0.05
         else:
             score -= 0.10
