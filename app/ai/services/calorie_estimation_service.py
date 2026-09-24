@@ -227,6 +227,7 @@ class AICalorieEstimationService:
                 success=success,
                 error_message=error_msg,
                 token_usage=raw_result.token_usage if raw_result is not None else None,
+                finish_reason=raw_result.finish_reason if raw_result is not None else None,
             )
 
     async def estimate_from_image(
@@ -283,6 +284,7 @@ class AICalorieEstimationService:
                 success=success,
                 error_message=error_msg,
                 token_usage=raw_result.token_usage if raw_result is not None else None,
+                finish_reason=raw_result.finish_reason if raw_result is not None else None,
             )
 
     async def estimate_from_voice(
@@ -378,6 +380,7 @@ class AICalorieEstimationService:
         raw_text = ""
         usage: dict | None = None
         latency_ms: int = 0
+        finish_reason: str | None = None
         item_index = 0
         start_time = time.perf_counter()
         success = False
@@ -402,6 +405,7 @@ class AICalorieEstimationService:
                         usage = meta.get("usage")
                         latency_ms = meta.get("latency_ms") or 0
                         raw_text = meta.get("raw_text") or raw_text
+                        finish_reason = meta.get("finish_reason")
             except AIProviderError as exc:
                 if exc.details.get("retryable") is not True:
                     raise
@@ -428,6 +432,7 @@ class AICalorieEstimationService:
                 source_type="text",
                 model=settings.OPENROUTER_TEXT_MODEL,
                 prompt_version=TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
+                finish_reason=finish_reason,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
             self._finalize(validated, user_context, channel, transcription_confidence)
@@ -456,6 +461,7 @@ class AICalorieEstimationService:
                     success=success,
                     error_message=error_msg,
                     token_usage=usage,
+                    finish_reason=finish_reason,
                 )
             except Exception as log_err:  # logging must never break the stream
                 logger.warning(f"Stream inference log failed: {log_err}")
@@ -473,6 +479,7 @@ class AICalorieEstimationService:
         raw_text = ""
         usage: dict | None = None
         latency_ms: int = 0
+        finish_reason: str | None = None
         item_index = 0
         start_time = time.perf_counter()
         success = False
@@ -497,6 +504,7 @@ class AICalorieEstimationService:
                         usage = meta.get("usage")
                         latency_ms = meta.get("latency_ms") or 0
                         raw_text = meta.get("raw_text") or raw_text
+                        finish_reason = meta.get("finish_reason")
             except AIProviderError as exc:
                 if exc.details.get("retryable") is not True:
                     raise
@@ -523,6 +531,7 @@ class AICalorieEstimationService:
                 source_type="photo",
                 model=settings.OPENROUTER_IMAGE_MODEL,
                 prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
+                finish_reason=finish_reason,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
             self._finalize(validated, user_context, "photo")
@@ -547,6 +556,7 @@ class AICalorieEstimationService:
                     success=success,
                     error_message=error_msg,
                     token_usage=usage,
+                    finish_reason=finish_reason,
                 )
             except Exception as log_err:
                 logger.warning(f"Stream inference log failed: {log_err}")
@@ -604,6 +614,7 @@ class AICalorieEstimationService:
                 success=success,
                 error_message=error_msg,
                 token_usage=raw_result.token_usage if raw_result is not None else None,
+                finish_reason=raw_result.finish_reason if raw_result is not None else None,
             )
 
     async def suggest_meal_completion(

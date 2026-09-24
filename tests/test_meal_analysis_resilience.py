@@ -44,7 +44,7 @@ async def test_provider_downgrade_does_not_consume_retry_budget() -> None:
             patch.object(settings, "OPENROUTER_API_KEY", "test-key"),
             patch.object(settings, "AI_MAX_RETRIES", 0),
         ):
-            result, _, _ = await OpenRouterProvider()._post_openrouter(
+            result, _, _, _ = await OpenRouterProvider()._post_openrouter(
                 model="test/model",
                 system_prompt="system",
                 messages=[{"role": "user", "content": "meal"}],
@@ -76,7 +76,7 @@ async def test_provider_retries_transient_http_failure() -> None:
             patch.object(settings, "OPENROUTER_API_KEY", "test-key"),
             patch.object(settings, "AI_MAX_RETRIES", 1),
         ):
-            result, _, _ = await OpenRouterProvider()._post_openrouter(
+            result, _, _, _ = await OpenRouterProvider()._post_openrouter(
                 model="test/model",
                 system_prompt="system",
                 messages=[{"role": "user", "content": "meal"}],
@@ -86,3 +86,73 @@ async def test_provider_retries_transient_http_failure() -> None:
 
     assert result == "{}"
     assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_post_openrouter_surfaces_finish_reason() -> None:
+    """C26: a completion cut off by max_completion_tokens must be identifiable
+    by the caller, not just silently swallowed."""
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "partial"}, "finish_reason": "length"}]},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with (
+            patch("app.ai.providers.openrouter.get_shared_client", return_value=client),
+            patch.object(settings, "OPENROUTER_API_KEY", "test-key"),
+        ):
+            _, _, _, finish_reason = await OpenRouterProvider()._post_openrouter(
+                model="test/model",
+                system_prompt="system",
+                messages=[{"role": "user", "content": "meal"}],
+            )
+    finally:
+        await client.aclose()
+
+    assert finish_reason == "length"
+
+
+@pytest.mark.asyncio
+async def test_truncated_completion_is_marked_degraded() -> None:
+    """A truncated response that still happens to parse as valid JSON must not
+    be trusted at full confidence — finish_reason=length forces degraded_extraction."""
+    provider = OpenRouterProvider()
+    complete_json = json.dumps(
+        {
+            "meal_name": "Pizza",
+            "estimated_calories": 800,
+            "estimated_min_calories": 700,
+            "estimated_max_calories": 900,
+            "meal_category_suggestion": None,
+            "meal_category_confidence": None,
+            "items": [
+                {
+                    "name": "Dough",
+                    "quantity_estimate": "200 g",
+                    "weight_grams": 200,
+                    "calories_per_100g": 270.0,
+                    "protein_g": 10.0,
+                    "carbs_g": 40.0,
+                    "fat_g": 3.0,
+                }
+            ],
+            "assumptions": [],
+            "needs_clarification": False,
+            "clarifying_question": None,
+        }
+    )
+    result = await provider._parse_and_build_meal(
+        complete_json,
+        latency_ms=100,
+        usage=None,
+        source_type="photo",
+        model="test/model",
+        prompt_version="test",
+        finish_reason="length",
+    )
+    assert result.degraded_extraction is True
+    assert result.finish_reason == "length"

@@ -159,9 +159,14 @@ class Settings(BaseSettings):
     OPENROUTER_TRANSCRIPTION_MODEL: str = "openai/whisper-large-v3"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     AI_MAX_RETRIES: int = 1
-    # Keep structured food responses short. Reasoning-capable budget models can
-    # otherwise spend thousands of completion tokens thinking before emitting JSON.
-    AI_MAX_COMPLETION_TOKENS: int = 900
+    # Keep structured food responses bounded, but leave enough headroom for a
+    # fully decomposed composite dish (C20): a multi-topping pizza or mixed
+    # plate can need 8-12 ingredient items plus assumptions, which regularly
+    # exceeded a 900-token budget and got cut mid-JSON — collapsing the whole
+    # meal into one recovered fallback item (C26). Reasoning-capable budget
+    # models can otherwise spend thousands of completion tokens thinking before
+    # emitting JSON; AI_REASONING_EFFORT/AI_EXCLUDE_REASONING keep that in check.
+    AI_MAX_COMPLETION_TOKENS: int = 1600
     AI_TEMPERATURE: float = 0.1
     AI_REASONING_EFFORT: str = "minimal"
     AI_EXCLUDE_REASONING: bool = True

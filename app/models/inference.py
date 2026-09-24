@@ -20,6 +20,10 @@ class AIInferenceLog(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # C26: the provider's raw finish_reason ("stop", "length", ...). "length"
+    # means the completion was cut off by max_completion_tokens — queryable
+    # signal for how often meal estimates are getting truncated.
+    finish_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
     # Token usage (C2) — cost telemetry and cache-hit measurement.
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

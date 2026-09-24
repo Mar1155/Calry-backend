@@ -48,6 +48,11 @@ class MealEstimateResult(BaseModel):
 
     # Raw provider token usage (prompt/completion/cached) for cost telemetry.
     token_usage: dict | None = None
+    # C26: the provider's raw finish_reason ("stop", "length", ...). "length"
+    # means the completion was cut off by max_completion_tokens — surfaced for
+    # logging/telemetry so a truncated response is diagnosable directly instead
+    # of only inferable from a single-item result after the fact.
+    finish_reason: str | None = None
 
     # Revision-only metadata. These fields are populated by the conversational
     # refinement pipeline and may be surfaced to the client before save.

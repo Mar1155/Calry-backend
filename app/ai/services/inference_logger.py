@@ -28,6 +28,7 @@ class AIInferenceLogger:
         success: bool,
         error_message: str | None = None,
         token_usage: dict | None = None,
+        finish_reason: str | None = None,
     ) -> None:
         usage = token_usage or {}
         try:
@@ -48,6 +49,10 @@ class AIInferenceLogger:
                     prompt_tokens=usage.get("prompt_tokens"),
                     completion_tokens=usage.get("completion_tokens"),
                     cached_tokens=usage.get("cached_tokens"),
+                    # C26: "length" means the provider cut the completion off at
+                    # max_completion_tokens — queryable here instead of only
+                    # inferable after the fact from a collapsed single-item result.
+                    finish_reason=finish_reason,
                 )
                 await self.repo.create(log_entry)
         except Exception as e:

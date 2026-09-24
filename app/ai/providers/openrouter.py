@@ -179,8 +179,12 @@ class OpenRouterProvider(BaseAIProvider):
         system_prompt: str,
         messages: list,
         response_format: dict | None = None,
-    ) -> tuple[str, int, dict | None]:
-        """Performs a POST to OpenRouter. Returns (text, latency_ms, usage)."""
+    ) -> tuple[str, int, dict | None, str | None]:
+        """Performs a POST to OpenRouter. Returns (text, latency_ms, usage,
+        finish_reason). finish_reason is "length" when the completion was cut
+        off by max_completion_tokens (C26) — the caller uses it to flag a
+        truncated meal estimate instead of silently trusting a JSON-repair
+        recovery that may have fabricated a single fallback item."""
         api_key = self._get_api_key()
 
         full_messages = [{"role": "system", "content": system_prompt}] + messages
@@ -231,10 +235,19 @@ class OpenRouterProvider(BaseAIProvider):
             if response.status_code == 200:
                 try:
                     res_json = response.json()
-                    text_out = res_json["choices"][0]["message"]["content"]
+                    choice = res_json["choices"][0]
+                    text_out = choice["message"]["content"]
                     if not isinstance(text_out, str) or not text_out.strip():
                         raise ValueError("empty completion content")
-                    return text_out, latency_ms, res_json.get("usage")
+                    finish_reason = choice.get("finish_reason")
+                    if finish_reason == "length":
+                        logger.warning(
+                            "OpenRouter completion for model %s hit finish_reason=length "
+                            "(max_completion_tokens=%s); response may be truncated.",
+                            model,
+                            settings.AI_MAX_COMPLETION_TOKENS,
+                        )
+                    return text_out, latency_ms, res_json.get("usage"), finish_reason
                 except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
                     logger.warning("Malformed OpenRouter response on attempt %s: %s", attempt + 1, exc)
                     if attempt == max_retries:
@@ -332,6 +345,7 @@ class OpenRouterProvider(BaseAIProvider):
             start_time = time.perf_counter()
             parts: list[str] = []
             usage: dict | None = None
+            finish_reason: str | None = None
             emitted_content = False
             try:
                 async with client.stream(
@@ -387,15 +401,32 @@ class OpenRouterProvider(BaseAIProvider):
                             usage = chunk["usage"]
                         choices = chunk.get("choices") or []
                         if choices:
-                            delta = choices[0].get("delta") or {}
+                            choice = choices[0]
+                            delta = choice.get("delta") or {}
                             content = delta.get("content")
                             if content:
                                 parts.append(content)
                                 emitted_content = True
                                 yield {"delta": content}
+                            if choice.get("finish_reason"):
+                                finish_reason = choice["finish_reason"]
 
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
-                yield {"meta": {"usage": usage, "latency_ms": latency_ms, "raw_text": "".join(parts)}}
+                if finish_reason == "length":
+                    logger.warning(
+                        "OpenRouter stream for model %s hit finish_reason=length "
+                        "(max_completion_tokens=%s); response may be truncated.",
+                        model,
+                        settings.AI_MAX_COMPLETION_TOKENS,
+                    )
+                yield {
+                    "meta": {
+                        "usage": usage,
+                        "latency_ms": latency_ms,
+                        "raw_text": "".join(parts),
+                        "finish_reason": finish_reason,
+                    }
+                }
                 return
             except httpx.RequestError as e:
                 logger.warning(f"OpenRouter stream request error: {e}")
@@ -514,8 +545,13 @@ class OpenRouterProvider(BaseAIProvider):
         latency_ms: int,
         usage: dict | None,
         degraded: bool,
+        finish_reason: str | None = None,
     ) -> MealEstimateResult:
         """Single dict->MealEstimateResult constructor shared by text/image/voice."""
+        # C26: a completion cut off by the token budget is untrustworthy even
+        # when it happened to parse (e.g. truncated right after a valid item) —
+        # cap its confidence the same way an actual parse failure does.
+        truncated = finish_reason == "length"
         return MealEstimateResult(
             meal_name=parsed.get("meal_name", ""),
             estimated_calories=self._as_int(parsed.get("estimated_calories")) or 0,
@@ -537,7 +573,8 @@ class OpenRouterProvider(BaseAIProvider):
             total_carbs_g=parsed.get("total_carbs_g"),
             total_fat_g=parsed.get("total_fat_g"),
             estimation_reasoning=parsed.get("estimation_reasoning"),
-            degraded_extraction=degraded,
+            degraded_extraction=degraded or truncated,
+            finish_reason=finish_reason,
             token_usage=self._normalize_usage(usage),
         )
 
@@ -550,10 +587,16 @@ class OpenRouterProvider(BaseAIProvider):
         source_type: str,
         model: str,
         prompt_version: str,
+        finish_reason: str | None = None,
     ) -> MealEstimateResult:
         try:
             parsed, degraded = self._parse_payload(raw_text, MealEstimateResult)
         except json.JSONDecodeError as e:
+            if finish_reason == "length":
+                logger.warning(
+                    "Meal JSON parse failed after a truncated (finish_reason=length) "
+                    "completion; falling back to deterministic partial recovery."
+                )
             parsed = await self._repair_json(raw_text, str(e), MealEstimateResult)
             degraded = True
 
@@ -564,6 +607,7 @@ class OpenRouterProvider(BaseAIProvider):
             "raw_text": raw_text,
             "latency_ms": latency_ms,
             "usage": usage,
+            "finish_reason": finish_reason,
         }
         try:
             return self._build_meal_estimate(parsed, degraded=degraded, **kwargs)
@@ -581,7 +625,7 @@ class OpenRouterProvider(BaseAIProvider):
             }
         ]
         try:
-            repaired_text, _, _ = await self._post_openrouter(
+            repaired_text, _, _, _ = await self._post_openrouter(
                 model=settings.OPENROUTER_TEXT_MODEL,
                 system_prompt=JSON_REPAIR_SYSTEM_PROMPT,
                 messages=repair_messages,
@@ -687,7 +731,7 @@ class OpenRouterProvider(BaseAIProvider):
                 ),
             }
         ]
-        raw_text, latency_ms, usage = await self._post_openrouter(
+        raw_text, latency_ms, usage, finish_reason = await self._post_openrouter(
             model=model,
             system_prompt=TEXT_MEAL_ESTIMATION_SYSTEM_PROMPT,
             messages=messages,
@@ -700,6 +744,7 @@ class OpenRouterProvider(BaseAIProvider):
             source_type="text",
             model=model,
             prompt_version=TEXT_MEAL_ESTIMATION_PROMPT_VERSION,
+            finish_reason=finish_reason,
         )
 
     def _prepare_image_data_uri(self, image_bytes: bytes, content_type: str) -> str:
@@ -852,7 +897,7 @@ class OpenRouterProvider(BaseAIProvider):
             }
         ]
 
-        raw_text, latency_ms, usage = await self._post_openrouter(
+        raw_text, latency_ms, usage, finish_reason = await self._post_openrouter(
             model=model,
             system_prompt=IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
             messages=messages,
@@ -865,6 +910,7 @@ class OpenRouterProvider(BaseAIProvider):
             source_type="photo",
             model=model,
             prompt_version=IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
+            finish_reason=finish_reason,
         )
 
     async def refine_meal_estimate(
@@ -887,7 +933,7 @@ class OpenRouterProvider(BaseAIProvider):
                 ),
             }
         ]
-        raw_text, latency_ms, usage = await self._post_openrouter(
+        raw_text, latency_ms, usage, finish_reason = await self._post_openrouter(
             model=model,
             system_prompt=MEAL_REFINEMENT_SYSTEM_PROMPT,
             messages=messages,
@@ -900,6 +946,7 @@ class OpenRouterProvider(BaseAIProvider):
             source_type=source_type,
             model=model,
             prompt_version=MEAL_REFINEMENT_PROMPT_VERSION,
+            finish_reason=finish_reason,
         )
         try:
             parsed, _ = self._parse_payload(raw_text, MealEstimateResult)
@@ -1112,7 +1159,7 @@ class OpenRouterProvider(BaseAIProvider):
             }
         ]
 
-        raw_text, latency_ms, usage = await self._post_openrouter(
+        raw_text, latency_ms, usage, finish_reason = await self._post_openrouter(
             model=model,
             system_prompt=MEAL_COMPLETION_SYSTEM_PROMPT,
             messages=messages,
@@ -1192,7 +1239,7 @@ class OpenRouterProvider(BaseAIProvider):
             }
         ]
         try:
-            text, _, _ = await self._post_openrouter(
+            text, _, _, _ = await self._post_openrouter(
                 model=settings.OPENROUTER_TEXT_MODEL,
                 system_prompt=WEEKLY_OBSERVATION_SYSTEM_PROMPT,
                 messages=messages,
@@ -1238,7 +1285,7 @@ class OpenRouterProvider(BaseAIProvider):
             }
         ]
         try:
-            text, _, _ = await self._post_openrouter(
+            text, _, _, _ = await self._post_openrouter(
                 model=settings.OPENROUTER_TEXT_MODEL,
                 system_prompt=PATTERN_INSIGHTS_SYSTEM_PROMPT,
                 messages=messages,
@@ -1360,7 +1407,7 @@ class OpenRouterProvider(BaseAIProvider):
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                text, latency_ms, usage = await self._post_openrouter(
+                text, latency_ms, usage, _ = await self._post_openrouter(
                     model=settings.OPENROUTER_TEXT_MODEL,
                     system_prompt=STORY_VERBALIZATION_SYSTEM_PROMPT,
                     messages=messages,
