@@ -78,6 +78,7 @@ class AICalorieEstimationService:
             if val is not None:
                 setattr(result, attr, round(val * mult, 1) if "_g" in attr else round(val * mult))
         result.assumptions.append("Adjusted for your recent correction trend.")
+        result.bias_applied = True
 
     def _finalize(
         self,
@@ -157,6 +158,7 @@ class AICalorieEstimationService:
             raw_output=f"memory_id={memory.id}",
             latency_ms=0,
             success=True,
+            result=result,
         )
         logger.info(f"Food-memory cache hit for user {user_id} (memory_id={memory.id}); skipped LLM.")
         return result
@@ -228,6 +230,7 @@ class AICalorieEstimationService:
                 error_message=error_msg,
                 token_usage=raw_result.token_usage if raw_result is not None else None,
                 finish_reason=raw_result.finish_reason if raw_result is not None else None,
+                result=validated_result if success else None,
             )
 
     async def estimate_from_image(
@@ -285,6 +288,7 @@ class AICalorieEstimationService:
                 error_message=error_msg,
                 token_usage=raw_result.token_usage if raw_result is not None else None,
                 finish_reason=raw_result.finish_reason if raw_result is not None else None,
+                result=validated_result if success else None,
             )
 
     async def estimate_from_voice(
@@ -317,6 +321,8 @@ class AICalorieEstimationService:
             transcription_confidence=transcription_result.confidence,
             additional_context=additional_context,
         )
+        if transcription_result.inference_log_id is not None:
+            estimation_result.linked_inference_log_ids.append(transcription_result.inference_log_id)
 
         return transcript, estimation_result
 
@@ -461,7 +467,8 @@ class AICalorieEstimationService:
                     success=success,
                     error_message=error_msg,
                     token_usage=usage,
-                    finish_reason=finish_reason,
+                    finish_reason=finish_reason or (validated.finish_reason if success else None),
+                    result=validated if success else None,
                 )
             except Exception as log_err:  # logging must never break the stream
                 logger.warning(f"Stream inference log failed: {log_err}")
@@ -556,7 +563,8 @@ class AICalorieEstimationService:
                     success=success,
                     error_message=error_msg,
                     token_usage=usage,
-                    finish_reason=finish_reason,
+                    finish_reason=finish_reason or (validated.finish_reason if success else None),
+                    result=validated if success else None,
                 )
             except Exception as log_err:
                 logger.warning(f"Stream inference log failed: {log_err}")
@@ -615,6 +623,7 @@ class AICalorieEstimationService:
                 error_message=error_msg,
                 token_usage=raw_result.token_usage if raw_result is not None else None,
                 finish_reason=raw_result.finish_reason if raw_result is not None else None,
+                result=validated_result if success else None,
             )
 
     async def suggest_meal_completion(

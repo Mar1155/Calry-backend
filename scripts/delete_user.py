@@ -39,6 +39,7 @@ from app.models.revenuecat_event import (  # noqa: E402
     RevenueCatEvent,
     RevenueCatSubscriberSnapshot,
 )
+from app.models.scan_review import ScanReview  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.services.revenuecat_service import RevenueCatClient  # noqa: E402
 
@@ -126,6 +127,12 @@ async def delete_database_user(db: AsyncSession, target: UserDeletionTarget) -> 
             or_(
                 RevenueCatSubscriberSnapshot.user_id == target.id,
                 RevenueCatSubscriberSnapshot.app_user_id.in_(rc_ids),
+            )
+        ),
+        delete(ScanReview).where(
+            or_(
+                ScanReview.user_id == target.id,
+                ScanReview.inference_log_id.in_(select(AIInferenceLog.id).where(AIInferenceLog.user_id == target.id)),
             )
         ),
         delete(AIInferenceLog).where(AIInferenceLog.user_id == target.id),

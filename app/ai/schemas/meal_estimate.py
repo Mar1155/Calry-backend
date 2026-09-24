@@ -53,6 +53,11 @@ class MealEstimateResult(BaseModel):
     # logging/telemetry so a truncated response is diagnosable directly instead
     # of only inferable from a single-item result after the fact.
     finish_reason: str | None = None
+    # Scan audit (C27): ids of the ai_inference_logs rows behind this result
+    # (the estimate itself, plus a voice transcription). Stamped with meal_id
+    # once the meal is persisted. Not part of the API response.
+    linked_inference_log_ids: list[int] = Field(default_factory=list)
+    bias_applied: bool = False
 
     # Revision-only metadata. These fields are populated by the conversational
     # refinement pipeline and may be surfaced to the client before save.
@@ -68,6 +73,7 @@ class SpeechTranscriptionResult(BaseModel):
     raw_output: dict | str | None = None
     latency_ms: int | None = None
     token_usage: dict | None = None
+    inference_log_id: int | None = None
 
 
 class UserContext(BaseModel):

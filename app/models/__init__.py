@@ -28,6 +28,7 @@ from app.models.memory import (
 )
 from app.models.promo_code import PromoCode, PromoCodeAttempt, PromoCodeRedemption
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
+from app.models.scan_review import ScanReview
 from app.models.user import User
 
 __all__ = [
@@ -47,6 +48,7 @@ __all__ = [
     "BurnedCalories",
     "DailySummary",
     "AIInferenceLog",
+    "ScanReview",
     "UserInsightVersion",
     "DetectedPattern",
     "InsightSnapshot",

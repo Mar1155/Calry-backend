@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.public.legal import router as legal_router
 from app.api.v1.routes.admin import router as admin_router
+from app.api.v1.routes.admin_scans import router as admin_scans_router
 from app.api.v1.routes.awareness import router as awareness_router
 from app.api.v1.routes.burned_calories import router as burned_router
 from app.api.v1.routes.food_memory import router as food_memory_router
@@ -179,6 +180,7 @@ app.include_router(food_memory_router, prefix="/api/v1/food-memory", tags=["Food
 app.include_router(habits_router, prefix="/api/v1/habits", tags=["Habits"])
 app.include_router(awareness_router, prefix="/api/v1/awareness", tags=["Awareness"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(admin_scans_router, prefix="/api/v1/admin", tags=["Admin Scans"])
 
 # Public HTTPS pages used by store metadata and RevenueCat paywalls.
 app.include_router(legal_router, tags=["Legal"])

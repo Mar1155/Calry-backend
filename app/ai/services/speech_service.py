@@ -41,6 +41,7 @@ class AISpeechService:
         model_name = "unknown"
         token_usage = None
         error_msg = None
+        result: SpeechTranscriptionResult | None = None
 
         try:
             result = await provider.transcribe_audio(audio_url)
@@ -55,7 +56,7 @@ class AISpeechService:
             raise e
         finally:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
-            await self.inference_logger.log_call(
+            log_id = await self.inference_logger.log_call(
                 user_id=user_id,
                 provider=provider.provider_name,
                 model_name=model_name,
@@ -68,3 +69,6 @@ class AISpeechService:
                 error_message=error_msg,
                 token_usage=token_usage,
             )
+            # Scan audit (C27): lets the voice meal link its transcription row.
+            if result is not None:
+                result.inference_log_id = log_id

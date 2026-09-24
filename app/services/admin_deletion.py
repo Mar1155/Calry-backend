@@ -25,6 +25,7 @@ from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.promo_code import PromoCodeAttempt, PromoCodeRedemption
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
+from app.models.scan_review import ScanReview
 from app.models.user import User
 from app.services.privacy import pseudonymize
 from app.services.revenuecat_service import RevenueCatClient
@@ -201,6 +202,12 @@ async def _delete_database_records(db: AsyncSession, job: UserDeletionJob) -> bo
             or_(
                 RevenueCatSubscriberSnapshot.user_id == user_id,
                 RevenueCatSubscriberSnapshot.app_user_id.in_(rc_ids),
+            )
+        ),
+        delete(ScanReview).where(
+            or_(
+                ScanReview.user_id == user_id,
+                ScanReview.inference_log_id.in_(select(AIInferenceLog.id).where(AIInferenceLog.user_id == user_id)),
             )
         ),
         delete(AIInferenceLog).where(AIInferenceLog.user_id == user_id),

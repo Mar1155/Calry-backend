@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     ADMIN_FIREBASE_UIDS: str = ""
     ADMIN_FRONTEND_ORIGIN: str | None = None
     ADMIN_SEARCH_RATE_LIMIT_PER_MINUTE: int = 30
+    # Scan audit pages step through many scans in a review session.
+    ADMIN_SCAN_RATE_LIMIT_PER_MINUTE: int = 120
     ADMIN_PROMO_CODE_RATE_LIMIT_PER_MINUTE: int = 10
     ADMIN_DELETION_RATE_LIMIT_PER_MINUTE: int = 5
     ADMIN_DELETION_STALE_SECONDS: int = 300

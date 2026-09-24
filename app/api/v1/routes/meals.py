@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
+from app.ai.services.inference_logger import AIInferenceLogger
 from app.ai.streaming import protocol
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -130,6 +131,9 @@ async def _process_and_save_meal(
         db.add(meal_item)
 
     await db.flush()
+
+    # Scan audit (C27): point the inference rows behind this estimate at the meal.
+    await AIInferenceLogger(db).link_to_meal(estimation.linked_inference_log_ids, meal.id)
 
     # 3. Synchronize User's Daily Summary for this meal's creation date
     try:
@@ -751,6 +755,8 @@ async def stream_log_meal_via_voice(
 
                 if estimation is None:
                     raise RuntimeError("stream produced no result")
+                if transcription.inference_log_id is not None:
+                    estimation.linked_inference_log_ids.append(transcription.inference_log_id)
 
                 meal = await _process_and_save_meal(
                     db=db,
@@ -1161,6 +1167,7 @@ async def refine_meal_estimate(
     )
     previous_items = _meal_items_payload(meal)
     user_refinement = payload.user_refinement
+    transcription_log_id: int | None = None
 
     if payload.refinement_type == "voice":
         try:
@@ -1169,6 +1176,7 @@ async def refine_meal_estimate(
                 user_id=current_user.id,
             )
             user_refinement = transcription.transcript
+            transcription_log_id = transcription.inference_log_id
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1190,6 +1198,8 @@ async def refine_meal_estimate(
         )
 
     estimation = enforce_estimate_ingredient_invariants(estimation)
+    if transcription_log_id is not None:
+        estimation.linked_inference_log_ids.append(transcription_log_id)
 
     revised_items = [item.model_dump() for item in estimation.items]
     revision = MealRevision(
@@ -1208,6 +1218,7 @@ async def refine_meal_estimate(
     )
     db.add(revision)
     await db.flush()
+    await AIInferenceLogger(db).link_to_meal(estimation.linked_inference_log_ids, meal.id)
 
     return _meal_response_dict(meal, estimation)
 

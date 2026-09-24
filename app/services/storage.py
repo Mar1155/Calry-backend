@@ -189,3 +189,59 @@ async def delete_storage_object(storage_key: str) -> bool:
         return True
 
     return await run_in_threadpool(delete_s3)
+
+
+async def read_storage_object(storage_key: str, *, max_bytes: int) -> tuple[bytes, str] | None:
+    """Read one owned object for server-side proxying (admin scan audit, C27).
+
+    Returns (bytes, content_type), or None when the object is missing. Raises
+    ValueError for keys outside Calry storage and for objects over max_bytes.
+    """
+    if storage_key.startswith("local:"):
+        filename = storage_key.removeprefix("local:")
+        if not filename or filename != Path(filename).name:
+            raise ValueError("Invalid local storage key.")
+        path = UPLOAD_DIR / filename
+
+        def read_local() -> tuple[bytes, str] | None:
+            try:
+                if path.stat().st_size > max_bytes:
+                    raise ValueError("Storage object is too large.")
+                data = path.read_bytes()
+            except FileNotFoundError:
+                return None
+            guessed_type, _ = mimetypes.guess_type(filename)
+            return data, guessed_type or "application/octet-stream"
+
+        return await run_in_threadpool(read_local)
+
+    if settings.STORAGE_BACKEND != "s3" or not settings.S3_BUCKET:
+        raise RuntimeError("S3 storage is not configured for this object.")
+    if not storage_key.startswith("uploads/") or ".." in Path(storage_key).parts:
+        raise ValueError("Invalid S3 storage key.")
+
+    def read_s3() -> tuple[bytes, str] | None:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        client = boto3.client(
+            "s3",
+            region_name=settings.S3_REGION,
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+        )
+        try:
+            obj = client.get_object(Bucket=settings.S3_BUCKET, Key=storage_key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                return None
+            raise
+        if int(obj.get("ContentLength") or 0) > max_bytes:
+            obj["Body"].close()
+            raise ValueError("Storage object is too large.")
+        data = obj["Body"].read()
+        guessed_type, _ = mimetypes.guess_type(storage_key)
+        return data, obj.get("ContentType") or guessed_type or "application/octet-stream"
+
+    return await run_in_threadpool(read_s3)
