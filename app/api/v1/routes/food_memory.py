@@ -28,16 +28,37 @@ async def get_recent_foods(
     favorites_only: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list:
+) -> list[FoodMemoryResponse]:
     """Returns the user's most recently confirmed foods for one-tap repeat logging."""
     repo = FoodMemoryRepository(db)
-    return await repo.get_recents(
+    memories = await repo.get_recents(
         user_id=current_user.id,
         limit=limit,
         offset=offset,
         search=search,
         favorites_only=favorites_only,
     )
+    names = {memory.display_name for memory in memories}
+    image_by_name: dict[str, str] = {}
+    if names:
+        photos = await db.execute(
+            select(Meal.meal_name, Meal.image_url)
+            .where(
+                Meal.user_id == current_user.id,
+                Meal.meal_name.in_(names),
+                Meal.image_url.is_not(None),
+            )
+            .order_by(Meal.created_at.desc())
+        )
+        for name, image_url in photos:
+            if name and image_url:
+                image_by_name.setdefault(name, image_url)
+    return [
+        FoodMemoryResponse.model_validate(memory).model_copy(
+            update={"image_url": image_by_name.get(memory.display_name)}
+        )
+        for memory in memories
+    ]
 
 
 @router.get("/meal/{meal_id}/favorite", response_model=FoodMemoryResponse)

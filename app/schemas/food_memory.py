@@ -26,3 +26,4 @@ class FoodMemoryResponse(BaseModel):
     use_count: int
     is_favorite: bool = False
     last_used_at: dt.datetime
+    image_url: str | None = None

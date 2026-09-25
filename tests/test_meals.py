@@ -179,6 +179,29 @@ async def test_meal_detail_favorite_creates_and_toggles_memory(client: AsyncClie
     assert second.json()["is_favorite"] is False
 
 
+@pytest.mark.asyncio
+async def test_recent_food_memory_includes_its_latest_meal_photo(client: AsyncClient, db_session) -> None:
+    headers = {"Authorization": "Bearer mock_token_recent_photo"}
+    user_response = await client.get("/api/v1/users/me", headers=headers)
+    user_id = user_response.json()["id"]
+    meal = Meal(
+        user_id=user_id,
+        source_type="photo",
+        original_input="Pasta al pomodoro",
+        meal_name="Pasta al pomodoro",
+        image_url="/static/meals/pasta.jpg",
+        estimated_calories=540,
+    )
+    db_session.add(meal)
+    await db_session.commit()
+
+    await client.patch(f"/api/v1/food-memory/meal/{meal.id}/favorite", headers=headers)
+    response = await client.get("/api/v1/food-memory/recents", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()[0]["image_url"] == "/static/meals/pasta.jpg"
+
+
 @pytest.fixture
 def mock_estimation_result():
     return MealEstimateResult(
