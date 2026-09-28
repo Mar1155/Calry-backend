@@ -127,10 +127,7 @@ class OpenRouterProvider(BaseAIProvider):
                 "percentage: systematic bias is handled deterministically after inference."
             )
         if user_context.memory_summary:
-            context_parts.append(
-                "Learned User Memories (reference priors only):\n"
-                f"{user_context.memory_summary}"
-            )
+            context_parts.append(f"Learned User Memories (reference priors only):\n{user_context.memory_summary}")
         if not context_parts:
             return ""
 
@@ -1138,7 +1135,11 @@ class OpenRouterProvider(BaseAIProvider):
             f"Target Protein: {f'{completion_req.target_protein_g}g' if completion_req.target_protein_g is not None else 'not set'}\n"
             f"Target Carbs: {f'{completion_req.target_carbs_g}g' if completion_req.target_carbs_g is not None else 'not set'}\n"
             f"Target Fat: {f'{completion_req.target_fat_g}g' if completion_req.target_fat_g is not None else 'not set'}\n"
-            f"Meals Eaten Today: {', '.join(completion_req.meals_eaten_today) if completion_req.meals_eaten_today else 'None'}"
+            f"Meals Eaten Today: {', '.join(completion_req.meals_eaten_today) if completion_req.meals_eaten_today else 'None'}\n"
+            f"Requested Meal Type: {completion_req.requested_meal_type or 'any'}\n"
+            f"Maximum Preparation Time: {completion_req.max_prep_minutes or 'not set'} minutes\n"
+            f"Dietary Preference: {completion_req.dietary_preference}\n"
+            f"Available Ingredients: {', '.join(completion_req.available_ingredients) if completion_req.available_ingredients else 'not provided'}"
         )
 
         output_lang = "English"
@@ -1150,11 +1151,14 @@ class OpenRouterProvider(BaseAIProvider):
             {
                 "role": "user",
                 "content": (
-                    f"Suggest 3 standalone meal alternatives based on this info:\n{req_info}{context_str}\n\n"
+                    f"Suggest 3 distinct standalone meal alternatives based on this info:\n{req_info}{context_str}\n\n"
+                    "Treat stated meal type, dietary preference, and preparation time as hard constraints. "
+                    "Prefer available ingredients when supplied, but do not claim the user owns anything else. "
                     f"Write all free-text fields (meal_name, description, ingredients, preparation_hint, reasoning, "
                     f"daily_context_summary, macro_balance_note) in this language: {output_lang}. "
                     f"But keep meal_type and difficulty as the exact lowercase English enum values "
-                    f"(lunch/dinner/snack, easy/medium)."
+                    f"(lunch/dinner/snack, easy/medium). Include dietary_tags using only vegetarian and vegan; "
+                    f"vegan suggestions must include both vegan and vegetarian."
                 ),
             }
         ]
@@ -1196,6 +1200,7 @@ class OpenRouterProvider(BaseAIProvider):
                 meal_type=self._coerce_enum(item.get("meal_type"), {"lunch", "dinner", "snack"}, "snack"),
                 difficulty=self._coerce_enum(item.get("difficulty"), {"easy", "medium"}, "easy"),
                 prep_time_minutes=self._as_int(item.get("prep_time_minutes")) or 0,
+                dietary_tags=[tag for tag in item.get("dietary_tags", []) if tag in {"vegetarian", "vegan"}],
             )
             for item in (parsed.get("suggestions", []) or [])
             if isinstance(item, dict)
@@ -1641,11 +1646,7 @@ class OpenRouterProvider(BaseAIProvider):
                     if italian
                     else f"Longest streak: {payload['longest_streak']} days"
                 ),
-                (
-                    f"{payload['total_meals']} pasti registrati"
-                    if italian
-                    else f"{payload['total_meals']} meals logged"
-                ),
+                (f"{payload['total_meals']} pasti registrati" if italian else f"{payload['total_meals']} meals logged"),
             ]
         if pattern.id == "ai_estimation_accuracy":
             sources = payload.get("correction_source_counts", {})

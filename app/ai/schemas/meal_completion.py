@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MealSuggestionItem(BaseModel):
@@ -16,6 +16,7 @@ class MealSuggestionItem(BaseModel):
     meal_type: Literal["lunch", "dinner", "snack"]
     difficulty: Literal["easy", "medium"]
     prep_time_minutes: int
+    dietary_tags: list[Literal["vegetarian", "vegan"]] = Field(default_factory=list)
 
 
 class MealCompletionResult(BaseModel):
@@ -40,3 +41,7 @@ class MealCompletionRequest(BaseModel):
     target_carbs_g: float | None = None
     target_fat_g: float | None = None
     meals_eaten_today: list[str]
+    requested_meal_type: Literal["lunch", "dinner", "snack"] | None = None
+    max_prep_minutes: int | None = None
+    dietary_preference: Literal["any", "vegetarian", "vegan"] = "any"
+    available_ingredients: list[str] = Field(default_factory=list)

@@ -1,4 +1,13 @@
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class MealCompletionPreferences(BaseModel):
+    meal_type: Literal["lunch", "dinner", "snack"] | None = None
+    max_prep_minutes: int | None = Field(default=None, ge=5, le=120)
+    dietary_preference: Literal["any", "vegetarian", "vegan"] = "any"
+    available_ingredients: list[str] = Field(default_factory=list, max_length=12)
 
 
 class MealSuggestionResponse(BaseModel):

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.schemas.meal_completion import MealCompletionResult, MealSuggestionItem
 from app.api.v1.routes.meal_completion import _macro_targets
-from app.models.meal import Meal
+from app.models.meal import Meal, MealItem
 from app.models.user import User
 
 
@@ -124,6 +124,104 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
         assert completion_req.target_protein_g == 130
         assert completion_req.target_carbs_g == 220
         assert completion_req.target_fat_g == 65
+
+
+@pytest.mark.asyncio
+async def test_meal_completion_passes_and_enforces_user_constraints(
+    client: AsyncClient, db_session: AsyncSession, mock_completion_result
+) -> None:
+    headers = {"Authorization": "Bearer mock_token_completion_constraints"}
+    await client.get("/api/v1/users/me", headers=headers)
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "Calry Pro",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "completion_constraints",
+        },
+    )
+    mock_completion_result.suggestions[0].dietary_tags = ["vegetarian"]
+    mock_completion_result.suggestions[0].meal_type = "dinner"
+    mock_completion_result.suggestions[0].prep_time_minutes = 15
+    mock_completion_result.suggestions[1].dietary_tags = []
+    with patch(
+        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion",
+        new_callable=AsyncMock,
+        return_value=mock_completion_result,
+    ) as complete:
+        response = await client.post(
+            "/api/v1/meals/complete-day",
+            headers=headers,
+            json={
+                "meal_type": "dinner",
+                "max_prep_minutes": 20,
+                "dietary_preference": "vegetarian",
+                "available_ingredients": ["tomatoes", "beans"],
+            },
+        )
+    assert response.status_code == 200
+    assert [item["meal_type"] for item in response.json()["suggestions"]] == ["dinner"]
+    request = complete.await_args.kwargs["completion_req"]
+    assert request.requested_meal_type == "dinner"
+    assert request.max_prep_minutes == 20
+    assert request.dietary_preference == "vegetarian"
+    assert request.available_ingredients == ["tomatoes", "beans"]
+
+
+@pytest.mark.asyncio
+async def test_meal_review_uses_only_owned_confirmed_category_entries(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    headers = {
+        "Authorization": "Bearer mock_token_meal_review",
+        "Accept-Language": "it",
+    }
+    profile = await client.get("/api/v1/users/me", headers=headers)
+    user_id = profile.json()["id"]
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "Calry Pro",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "meal_review",
+        },
+    )
+    meal = Meal(
+        user_id=user_id,
+        source_type="text",
+        original_input="pasta e pollo",
+        meal_name="Pasta e pollo",
+        meal_category="lunch",
+        estimated_calories=620,
+        confirmed_calories=620,
+        total_protein_g=42,
+        total_carbs_g=70,
+        total_fat_g=18,
+        created_at=dt.datetime.now(dt.UTC),
+    )
+    meal.items = [
+        MealItem(name="Pasta", weight_grams=250, calories_per_100g=160),
+        MealItem(name="Pollo", weight_grams=150, calories_per_100g=147),
+    ]
+    db_session.add(meal)
+    await db_session.commit()
+
+    response = await client.get("/api/v1/meals/review/lunch", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["category"] == "lunch"
+    assert body["meal_ids"] == [meal.id]
+    assert body["total_calories"] == 620
+    assert "pranzo" in body["observation"]
+    assert body["fingerprint"]
+    assert len(body["evidence"]) >= 4
+
+    empty = await client.get("/api/v1/meals/review/dinner", headers=headers)
+    assert empty.status_code == 404
 
 
 @pytest.mark.asyncio
