@@ -42,7 +42,7 @@ async def test_completion_retry_preserves_profile_and_offer(client):
     data = payload(selected_target=2350, onboarding_version=3, journey_id="a" * 32, started_at="2026-09-01T12:00:00Z")
     assert (await client.post("/api/v1/onboarding/complete", json=data, headers=HEADERS)).status_code == 200
     profile = (await client.get("/api/v1/users/me", headers=HEADERS)).json()
-    assert profile["onboarding_offer_status"] == "pending"
+    assert profile["onboarding_offer_status"] == "handled"
     assert profile["onboarding_journey_id"] == "a" * 32
     assert not profile["has_confirmed_meals"]
     assert (await client.post("/api/v1/onboarding/offer/handled", headers=HEADERS)).status_code == 204
@@ -104,4 +104,4 @@ async def test_account_switch_cannot_complete_or_handle_another_journey(client):
     await client.post('/api/v1/onboarding/complete', json=payload(selected_target=2350, onboarding_version=3, journey_id='d' * 32), headers=HEADERS)
     response = await client.post('/api/v1/onboarding/offer/handled', json={'journey_id':'e' * 32}, headers=HEADERS)
     assert response.status_code == 409
-    assert (await client.get('/api/v1/users/me', headers=HEADERS)).json()['onboarding_offer_status'] == 'pending'
+    assert (await client.get('/api/v1/users/me', headers=HEADERS)).json()['onboarding_offer_status'] == 'handled'

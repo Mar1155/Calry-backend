@@ -76,7 +76,7 @@ async def complete_onboarding(payload: CompleteOnboardingRequest, current_user: 
         started = min(now, max(now - dt.timedelta(days=30), started))
     current_user.onboarding_started_at = current_user.onboarding_started_at or started or now
     current_user.onboarding_completed_at = now
-    current_user.onboarding_offer_status = "pending" if payload.onboarding_version >= 3 and not current_user.is_premium else "handled"
+    current_user.onboarding_offer_status = "handled"
     current_user.onboarding_journey_id = payload.journey_id
     db.add(current_user)
     await db.flush()

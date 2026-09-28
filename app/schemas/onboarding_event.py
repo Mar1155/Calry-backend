@@ -9,6 +9,19 @@ class OnboardingEventInput(BaseModel):
     event_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     journey_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     event_name: Literal[
+        "analysis_started",
+        "analysis_completed",
+        "analysis_failed",
+        "analysis_cancelled",
+        "analysis_retried",
+        "meal_review_shown",
+        "meal_save_requested",
+        "meal_save_confirmed",
+        "meal_save_failed",
+        "meal_correction_requested",
+        "meal_correction_completed",
+        "daily_review_shown",
+        "daily_review_completed",
         "step_viewed",
         "step_completed",
         "back_tapped",

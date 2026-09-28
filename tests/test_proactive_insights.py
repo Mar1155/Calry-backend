@@ -18,6 +18,7 @@ from app.insights.features import CorrectionFeatures, DayFeatures, FeatureSnapsh
 from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.daily_summary import DailySummary
 from app.models.insight import (
+    InsightAnalyticsEvent,
     InsightNotificationDelivery,
     InsightNotificationPreference,
     ProactiveInsight,
@@ -605,6 +606,29 @@ async def test_diary_api_lists_and_marks_owned_insight_read(client: AsyncClient,
     assert marked.status_code == 200
     assert marked.json()["read_at"] is not None
     assert unread_after.json() == {"unread_count": 0}
+    feedback_url = f"/api/v1/insights/diary/{insight.id}/feedback"
+    positive = await client.patch(feedback_url, headers=headers, json={"helpful": True})
+    assert positive.status_code == 200
+    assert positive.json()["helpful"] is True
+    await client.patch(feedback_url, headers=headers, json={"helpful": True})
+    negative = await client.patch(feedback_url, headers=headers, json={"helpful": False})
+    assert negative.json()["helpful"] is False
+    reloaded = await client.get(f"/api/v1/insights/diary/{insight.id}", headers=headers)
+    assert reloaded.json()["helpful"] is False
+    events = list((await db_session.scalars(select(InsightAnalyticsEvent).where(
+        InsightAnalyticsEvent.insight_id == insight.id,
+        InsightAnalyticsEvent.event_name == "insight_feedback_changed",
+    ))).all())
+    assert len(events) == 2
+    other_headers = {"Authorization": "Bearer mock_token_feedback_other_user"}
+    await client.get("/api/v1/users/me", headers=other_headers)
+    await client.post("/api/v1/premium/sync", headers=other_headers, json={
+        "is_premium": True, "entitlement": "Calry Pro", "expires_at": "2030-01-01T00:00:00Z",
+        "revenuecat_app_user_id": "feedback_other_user",
+    })
+    denied = await client.patch(feedback_url, headers=other_headers, json={"helpful": True})
+    assert denied.status_code == 404
+
 
 
 @pytest.mark.asyncio

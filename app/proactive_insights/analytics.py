@@ -11,6 +11,8 @@ from app.models.insight import InsightAnalyticsEvent, ProactiveInsight
 
 TRACKED_EVENTS = frozenset(
     {
+        "meal_save_confirmed",
+        "insight_feedback_changed",
         "insight_created",
         "insight_viewed",
         "insight_marked_read",

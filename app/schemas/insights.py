@@ -105,6 +105,11 @@ class InsightStoriesResponse(BaseModel):
     ranking_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class InsightFeedbackRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    helpful: bool
+
+
 class ProactiveInsightResponse(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -117,6 +122,7 @@ class ProactiveInsightResponse(BaseModel):
     evidence_json: dict[str, Any]
     confidence: float
     created_at: dt.datetime
+    helpful: bool | None = None
     read_at: dt.datetime | None = None
     notification_status: str
     notification_sent_at: dt.datetime | None = None

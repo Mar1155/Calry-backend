@@ -171,6 +171,7 @@ class ProactiveInsight(Base):
     notification_status: Mapped[str] = mapped_column(String(20), default="not_eligible", index=True, nullable=False)
     notification_ready_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notification_sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    helpful: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     read_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     model_version: Mapped[str] = mapped_column(String(120), nullable=False)

@@ -1275,6 +1275,13 @@ async def update_meal(
             detail=str(exc),
         ) from exc
 
+    if payload.is_confirmed is True:
+        from app.proactive_insights.analytics import InsightAnalytics
+        await InsightAnalytics(db).record(
+            user_id=current_user.id, event_name="meal_save_confirmed", source="backend",
+            event_id=f"meal:{meal.id}:confirmed",
+        )
+
     # When confirmed, learn the ingredient-derived total for future repeat logs.
     if payload.is_confirmed is True:
         try:

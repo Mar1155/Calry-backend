@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult
 from app.ai.services.validation_service import AIValidationService
 from app.api.v1.routes.meals import delete_meal
+from app.models.insight import InsightAnalyticsEvent
 from app.models.meal import Meal, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 
@@ -476,7 +477,7 @@ async def test_log_meal_via_voice(client: AsyncClient, mock_estimation_result) -
 
 
 @pytest.mark.asyncio
-async def test_meal_correction_tracking(client: AsyncClient, mock_estimation_result) -> None:
+async def test_meal_correction_tracking(client: AsyncClient, db_session, mock_estimation_result) -> None:
     """Tests PATCH /api/v1/meals/{id} and verifies correction delta/percent calculations."""
     headers = {"Authorization": "Bearer mock_token_correction_test"}
     await client.get("/api/v1/users/me", headers=headers)
@@ -510,6 +511,14 @@ async def test_meal_correction_tracking(client: AsyncClient, mock_estimation_res
     updated_meal = response.json()
     assert updated_meal["confirmed_calories"] == 950
     assert updated_meal["meal_name"] == "Spaghetti Bolognese"
+    repeated = await client.patch(f"/api/v1/meals/{meal_id}", json=update_payload, headers=headers)
+    assert repeated.status_code == 200
+    events = list((await db_session.scalars(select(InsightAnalyticsEvent).where(
+        InsightAnalyticsEvent.event_id == f"meal:{meal_id}:confirmed",
+    ))).all())
+    assert len(events) == 1
+    assert events[0].source == "backend"
+
 
     # 3. Retrieve directly from DB using get endpoint to check DB-only correction fields
     get_res = await client.get(f"/api/v1/meals/{meal_id}", headers=headers)

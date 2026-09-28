@@ -182,6 +182,12 @@ async def log_from_memory(
 
     await db.flush()
 
+    from app.proactive_insights.analytics import InsightAnalytics
+    await InsightAnalytics(db).record(
+        user_id=current_user.id, event_name="meal_save_confirmed", source="backend",
+        event_id=f"meal:{meal.id}:confirmed",
+    )
+
     # Update memory use_count and last_used_at
     memory.use_count += 1
     memory.last_used_at = now

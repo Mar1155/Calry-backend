@@ -21,6 +21,7 @@ from app.models.meal import Meal
 from app.models.user import User
 from app.schemas.insights import (
     InsightAnalyticsEventRequest,
+    InsightFeedbackRequest,
     InsightNotificationPreferenceResponse,
     InsightNotificationPreferenceUpdate,
     InsightStoriesResponse,
@@ -84,6 +85,29 @@ async def get_diary_insight(
     )
     if insight is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insight not found.")
+    return insight
+
+
+@router.patch("/insights/diary/{insight_id}/feedback", response_model=ProactiveInsightResponse)
+async def update_insight_feedback(
+    insight_id: str,
+    payload: InsightFeedbackRequest,
+    current_user: User = Depends(require_premium_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProactiveInsight:
+    insight = await db.scalar(select(ProactiveInsight).where(
+        ProactiveInsight.id == insight_id, ProactiveInsight.user_id == current_user.id,
+    ).with_for_update())
+    if insight is None:
+        raise HTTPException(status_code=404, detail="Insight not found.")
+    if insight.helpful != payload.helpful:
+        insight.helpful = payload.helpful
+        from app.proactive_insights.analytics import InsightAnalytics
+        await InsightAnalytics(db).record(
+            user_id=current_user.id, insight=insight, event_name="insight_feedback_changed",
+            source="app", metadata={"helpful": payload.helpful},
+        )
+        await db.flush()
     return insight
 
 
