@@ -31,6 +31,11 @@ from app.ai.prompts.ingredient_image import (
     INGREDIENT_IMAGE_PROMPT_VERSION,
     build_ingredient_image_prompt,
 )
+from app.ai.prompts.ingredient_translation import (
+    INGREDIENT_TRANSLATION_PROMPT_VERSION,
+    INGREDIENT_TRANSLATION_SYSTEM_PROMPT,
+    build_ingredient_translation_user_text,
+)
 from app.ai.prompts.meal_completion import (
     MEAL_COMPLETION_PROMPT_VERSION,
     MEAL_COMPLETION_SYSTEM_PROMPT,
@@ -49,6 +54,10 @@ from app.ai.prompts.meal_refinement import (
 from app.ai.providers.base import BaseAIProvider
 from app.ai.schemas.food_detection import FOOD_DETECTION_RESPONSE_SCHEMA, DetectedRegion, FoodDetectionResult
 from app.ai.schemas.ingredient_image import IngredientImageResult
+from app.ai.schemas.ingredient_translation import (
+    INGREDIENT_TRANSLATION_RESPONSE_SCHEMA,
+    IngredientTranslationResult,
+)
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult, MealSuggestionItem
 from app.ai.schemas.meal_estimate import (
     MEAL_ESTIMATE_RESPONSE_SCHEMA,
@@ -1031,6 +1040,39 @@ class OpenRouterProvider(BaseAIProvider):
             latency_ms=latency_ms,
             token_usage=self._normalize_usage(usage),
             finish_reason=finish_reason,
+        )
+
+    # ---- ingredient name translation (C29 cache normalization) --------------
+
+    async def translate_ingredient_name(self, name: str) -> IngredientTranslationResult:
+        """Best-effort translation of an ingredient name to English, so the
+        image cache can key on one language regardless of what language the
+        meal estimate produced the name in. Raises on any failure — the
+        caller treats that as "keep the original name", never a reason to
+        skip the image entirely. Uses the same cheap/fast model as food
+        region detection (C28): this is a short text-only call, not worth
+        the estimator's heavier model or retry budget."""
+        model = settings.OPENROUTER_DETECTION_MODEL
+        raw_text, latency_ms, usage, _ = await self._post_openrouter(
+            model=model,
+            system_prompt=INGREDIENT_TRANSLATION_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": build_ingredient_translation_user_text(name)}],
+            response_format=self._response_format(INGREDIENT_TRANSLATION_RESPONSE_SCHEMA, "ingredient_translation"),
+            max_completion_tokens=60,
+            max_retries=0,
+            timeout_seconds=settings.INGREDIENT_IMAGE_TIMEOUT_SECONDS,
+            include_reasoning=False,
+        )
+        parsed = json.loads(raw_text)
+        english_name = str(parsed["english_name"]).strip()
+        if not english_name:
+            raise AIInvalidResponseError("Ingredient translation returned an empty name.")
+        return IngredientTranslationResult(
+            english_name=english_name,
+            model_name=model,
+            prompt_version=INGREDIENT_TRANSLATION_PROMPT_VERSION,
+            latency_ms=latency_ms,
+            token_usage=self._normalize_usage(usage),
         )
 
     # ---- ingredient image generation (C29) -----------------------------------

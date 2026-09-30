@@ -7,6 +7,7 @@ from app.models.daily_summary import DailySummary
 from app.models.food_memory import UserFoodMemory
 from app.models.inference import AIInferenceLog
 from app.models.ingredient_image import IngredientImage
+from app.models.ingredient_translation import IngredientTranslation
 from app.models.insight import (
     DetectedPattern,
     InsightAnalyticsEvent,
@@ -50,6 +51,7 @@ __all__ = [
     "DailySummary",
     "AIInferenceLog",
     "IngredientImage",
+    "IngredientTranslation",
     "ScanReview",
     "UserInsightVersion",
     "DetectedPattern",

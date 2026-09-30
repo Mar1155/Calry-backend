@@ -19,11 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.density_table import lookup_food
 from app.ai.prompts.ingredient_image import INGREDIENT_IMAGE_PROMPT_VERSION
+from app.ai.prompts.ingredient_translation import INGREDIENT_TRANSLATION_PROMPT_VERSION
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.services.inference_logger import AIInferenceLogger
 from app.core.config import settings
 from app.core.text_normalization import canonicalize_food_name
 from app.models.ingredient_image import IngredientImage
+from app.models.ingredient_translation import IngredientTranslation
 from app.services.storage import save_generated_asset
 
 logger = logging.getLogger("app.ai.ingredient_image")
@@ -31,6 +33,7 @@ logger = logging.getLogger("app.ai.ingredient_image")
 # Logged alongside the other AI calls (photo_detection, voice_transcription, ...)
 # so ingredient-image generations are visible in the same admin scan audit.
 INGREDIENT_IMAGE_INPUT_TYPE = "ingredient_image"
+INGREDIENT_TRANSLATION_INPUT_TYPE = "ingredient_translation"
 
 _EXTENSION_BY_CONTENT_TYPE = {
     "image/png": "png",
@@ -59,33 +62,6 @@ def _strip_parenthetical(name: str) -> str:
     stripped = _PARENTHETICAL_RE.sub(" ", name)
     return " ".join(stripped.split()) or name
 
-
-def _cache_target(name: str) -> tuple[str, str]:
-    """Returns (cache_key, name_to_generate_from) for `name`.
-
-    Deliberately looser than the food-memory cache's plain
-    canonicalize_food_name: an illustration only needs to look plausibly
-    right, never calorie precision, so most real-world phrasings of the same
-    rough ingredient should share one image instead of each paying for its
-    own generation. Reuses density_table's curated, bilingual (English/
-    Italian) keyword buckets — e.g. "Pasta Di Semola Cotta", "Spaghetti" and
-    "Penne" all become the one "Cooked pasta" bucket — before falling back to
-    the plain per-name canonical key for anything the table doesn't
-    recognise, which keeps its own, unshared image.
-
-    Only English and Italian are covered by density_table's keyword lists
-    today, so the same real ingredient logged in Spanish, Chinese, Japanese
-    or Arabic still gets its own cache entry rather than sharing across
-    languages — the model's calorie estimate isn't affected either way, only
-    how often the illustration is reused.
-    """
-    cleaned = _strip_parenthetical(name)
-    bucket = lookup_food(cleaned)
-    if bucket is not None and bucket.name not in _NO_BUCKET_SHARING:
-        return canonicalize_food_name(bucket.name), bucket.name
-    return canonicalize_food_name(cleaned), cleaned
-
-
 def _asset_key(canonical: str, content_type: str) -> str:
     # sha1 of the canonical key, not the raw name: stable across languages/
     # unicode, filesystem- and S3-key-safe, and one name always maps to one
@@ -110,15 +86,114 @@ class IngredientImageService:
     async def _get_cached(self, canonical_key: str) -> IngredientImage | None:
         return await self.db.scalar(select(IngredientImage).where(IngredientImage.canonical_key == canonical_key))
 
+    async def _get_cached_translation(self, source_key: str) -> IngredientTranslation | None:
+        return await self.db.scalar(
+            select(IngredientTranslation).where(IngredientTranslation.source_key == source_key)
+        )
+
+    async def _resolve_cache_target(self, name: str, *, user_id: int | None) -> tuple[str, str]:
+        """Returns (cache_key, name_to_generate_from) for `name` — always an
+        English name, so the same real ingredient shares one cached image
+        regardless of what language it was logged in.
+
+        Deliberately looser than the food-memory cache's plain
+        canonicalize_food_name: an illustration only needs to look plausibly
+        right, never calorie precision, so most real-world phrasings of the
+        same rough ingredient should share one image instead of each paying
+        for its own generation.
+
+        Two layers, cheapest first:
+        1. density_table's curated, bilingual (English/Italian) keyword
+           buckets — e.g. "Pasta Di Semola Cotta", "Spaghetti" and "Penne"
+           all become the one "Cooked pasta" bucket — free, no network call.
+        2. For anything that table doesn't recognise (any other language, or
+           an EN/IT name outside its buckets), a best-effort model
+           translation to English, memoized in ingredient_translations so
+           the same source name is only ever translated once, ever. A
+           translation failure falls back to the plain per-name canonical
+           key of the original (untranslated) name, which still caches —
+           just not shared across languages until it succeeds later.
+        """
+        cleaned = _strip_parenthetical(name)
+        if not cleaned.strip():
+            return "", ""
+
+        bucket = lookup_food(cleaned)
+        if bucket is not None and bucket.name not in _NO_BUCKET_SHARING:
+            return canonicalize_food_name(bucket.name), bucket.name
+
+        source_key = canonicalize_food_name(cleaned)
+        cached_translation = await self._get_cached_translation(source_key)
+        if cached_translation is not None:
+            return canonicalize_food_name(cached_translation.english_name), cached_translation.english_name
+
+        started = time.perf_counter()
+        try:
+            result = await self.provider.translate_ingredient_name(cleaned)
+        except Exception as exc:  # noqa: BLE001 — best-effort; keep the original name on any failure
+            logger.warning(
+                "event=ingredient_translation_failed name=%s error_type=%s error=%s",
+                cleaned,
+                type(exc).__name__,
+                exc,
+            )
+            await self.inference_logger.log_call(
+                user_id=user_id,
+                provider="openrouter",
+                model_name=settings.OPENROUTER_DETECTION_MODEL,
+                prompt_version=INGREDIENT_TRANSLATION_PROMPT_VERSION,
+                input_type=INGREDIENT_TRANSLATION_INPUT_TYPE,
+                raw_input=cleaned,
+                raw_output=None,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                success=False,
+                error_message=str(exc),
+            )
+            return source_key, cleaned
+
+        await self.inference_logger.log_call(
+            user_id=user_id,
+            provider="openrouter",
+            model_name=result.model_name,
+            prompt_version=result.prompt_version,
+            input_type=INGREDIENT_TRANSLATION_INPUT_TYPE,
+            raw_input=cleaned,
+            raw_output=result.english_name,
+            latency_ms=result.latency_ms,
+            success=True,
+            token_usage=result.token_usage,
+        )
+
+        entry = IngredientTranslation(
+            source_key=source_key,
+            source_name=cleaned,
+            english_name=result.english_name,
+            model_name=result.model_name,
+            prompt_version=result.prompt_version,
+        )
+        try:
+            # A savepoint, not a plain flush: a concurrent worker may have
+            # memoized the same source_key first — see the matching comment
+            # on the IngredientImage insert below for why this must not roll
+            # back the caller's whole session.
+            async with self.db.begin_nested():
+                self.db.add(entry)
+                await self.db.flush()
+        except IntegrityError:
+            winner = await self._get_cached_translation(source_key)
+            english_name = winner.english_name if winner is not None else result.english_name
+            return canonicalize_food_name(english_name), english_name
+        return canonicalize_food_name(result.english_name), result.english_name
+
     async def get_or_generate(self, name: str, *, user_id: int | None = None) -> str | None:
         """Returns an image URL for `name` — cached, freshly generated, or a
         stale cached fallback — or None when nothing usable exists yet.
 
-        `name` is only ever used for the cache lookup and, when nothing
-        matches a shared bucket, as the literal generation prompt subject —
-        see _cache_target for how variant phrasings of the same ingredient
-        end up sharing one cached image."""
-        canonical, generation_name = _cache_target(name)
+        `name` is only ever used for the cache lookup and, as a translated or
+        bucketed English name, the literal generation prompt subject — see
+        _resolve_cache_target for how variant phrasings of the same
+        ingredient, in any language, end up sharing one cached image."""
+        canonical, generation_name = await self._resolve_cache_target(name, user_id=user_id)
         if not canonical:
             return None
 
@@ -185,7 +260,7 @@ class IngredientImageService:
 
         entry = IngredientImage(
             canonical_key=canonical,
-            display_name=generation_name,
+            display_name=name.strip(),
             image_url=uploaded["url"],
             storage_key=uploaded.get("key"),
             model_name=result.model_name,
