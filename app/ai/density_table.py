@@ -123,3 +123,13 @@ def lookup_food(name: str | None) -> FoodDensity | None:
         if entry.keywords & tokens:
             return entry
     return None
+
+
+def matching_foods(name: str | None) -> list[FoodDensity]:
+    """Every density entry whose keywords intersect the item name's canonical
+    tokens, in table order. Lets a caller tell an unambiguous match from a
+    name that touches several buckets at once."""
+    if not name:
+        return []
+    tokens = set(canonicalize_food_name(name).split(" "))
+    return [entry for entry in _TABLE if entry.keywords & tokens]

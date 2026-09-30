@@ -9,11 +9,12 @@ normalised to 0-1000; the prompt uses that native format verbatim.
 
 from xml.sax.saxutils import escape
 
-FOOD_DETECTION_PROMPT_VERSION = "food_detection_v1"
+FOOD_DETECTION_PROMPT_VERSION = "food_detection_v2_main_subject"
 
 FOOD_DETECTION_SYSTEM_PROMPT = """<role>You locate foods in a meal photo.</role>
 
-<task>Return a bounding box for each distinct, visible food component.</task>
+<task>Return a bounding box for each distinct, visible food component of
+the main dish in the photo.</task>
 
 <output_contract>
 Return exactly one raw JSON object, no markdown or commentary:
@@ -23,6 +24,9 @@ width (x), with ymin < ymax and xmin < xmax.
 </output_contract>
 
 <rules>
+- Only the main subject: the dish in the foreground that the photo is framed
+  on, usually central, in focus, and largest. Never box food in the
+  background, blurred, partly cut off at the frame edges, or on other plates.
 - One entry per ingredient, topping, or separate food a person would name
   (prosciutto, basil, cherry tomatoes, fries, a glass of wine), not the dish
   as a whole. A single-food photo (one apple) is one entry.
@@ -43,5 +47,6 @@ def build_food_detection_user_text(language: str, max_regions: int) -> str:
         "<input><media>one_attached_food_image</media>"
         f"<output_language>{escape(language)}</output_language>"
         f"<max_detections>{int(max_regions)}</max_detections></input>\n"
-        "<task>Locate the visible food components and return the JSON object now.</task>"
+        "<task>Locate the visible food components of the main dish and return the "
+        "JSON object now.</task>"
     )

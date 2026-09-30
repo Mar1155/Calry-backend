@@ -17,7 +17,7 @@ from app.ai.schemas.meal_estimate import MEAL_ESTIMATE_RESPONSE_SCHEMA, MEAL_REF
 
 def test_prompt_versions_track_the_new_contract() -> None:
     assert TEXT_MEAL_ESTIMATION_PROMPT_VERSION == "text_meal_estimation_v9"
-    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v10_compact"
+    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v11_main_subject"
     assert MEAL_REFINEMENT_PROMPT_VERSION == "meal_refinement_v5"
 
 
@@ -32,6 +32,7 @@ def test_estimation_prompts_keep_core_numerical_invariants() -> None:
     assert "Decompose every composite or prepared" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
     assert "same cooked/raw state" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
     assert "readable labels and explicit user facts" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
+    assert "Estimate only the main subject" in IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT
 
 
 def test_text_user_data_is_delimited_and_xml_escaped() -> None:

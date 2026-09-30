@@ -2,10 +2,13 @@ from xml.sax.saxutils import escape
 
 from app.ai.prompts._shared import OUTPUT_CONTRACT
 
-IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v10_compact"
+IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v11_main_subject"
 
 _VISUAL_RULES = """<rules>
-Use evidence in this order: readable labels and explicit user facts; visible food
+Estimate only the main subject: the dish in the foreground that the photo is
+framed on, usually central, in focus, and largest. Ignore food in the
+background, blurred, partly cut off at the frame edges, or on other plates,
+unless the user hint or context says it was eaten too. Use evidence in this order: readable labels and explicit user facts; visible food
 and portion; typical local serving data. Decompose every composite or prepared
 dish into its calorie-bearing ingredients, one item per ingredient (for example,
 pizza margherita becomes dough, tomato sauce, mozzarella, and olive oil). Put

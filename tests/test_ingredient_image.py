@@ -20,6 +20,8 @@ from app.ai.schemas.ingredient_image import IngredientImageResult
 from app.ai.schemas.ingredient_translation import IngredientTranslationResult
 from app.ai.services.ingredient_image_service import (
     IngredientImageService,
+    _head_phrase,
+    _shared_bucket,
     _strip_parenthetical,
 )
 from app.core.config import settings
@@ -113,6 +115,34 @@ async def test_bucketing_bridges_english_and_italian_for_the_same_ingredient(db_
     cheese_en, _ = await service._resolve_cache_target("grated cheese", user_id=None)
     cheese_it, _ = await service._resolve_cache_target("Formaggio Grattugiato", user_id=None)
     assert cheese_en == cheese_it
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name",
+    ["Acciughe All'Olio D'Oliva", "anchovies in olive oil", "Petto di pollo"],
+)
+async def test_a_bucket_keyword_outside_the_name_head_does_not_share_its_key(db_session, name):
+    # Regression: "acciughe all'olio d'oliva" used to match the oil bucket via
+    # "olio" and got the olive-oil illustration. Only the head noun counts.
+    service, translate = _service(db_session, translate_result=_translation("preserved food"))
+    oil, _ = await service._resolve_cache_target("olio d'oliva", user_id=None)
+    canonical, _ = await service._resolve_cache_target(name, user_id=None)
+    assert canonical != oil
+    translate.assert_awaited_once()
+
+
+def test_head_phrase_stops_at_the_first_connector():
+    assert _head_phrase("Acciughe All'Olio D'Oliva") == "acciughe"
+    assert _head_phrase("Olio Extravergine Di Oliva") == "olio extravergine"
+    assert _head_phrase("anchovies in olive oil") == "anchovies"
+    assert _head_phrase("a glass of wine") == "glass"
+
+
+def test_a_head_touching_two_buckets_is_ambiguous():
+    assert _shared_bucket("tonno olio") is None
+    assert _shared_bucket("olio extravergine") == "Olive / cooking oil"
+    assert _shared_bucket("Tonno Sott'Olio") == "Salmon / oily fish"  # head is the tuna
 
 
 @pytest.mark.asyncio

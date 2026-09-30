@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.density_table import lookup_food
+from app.ai.density_table import matching_foods
 from app.ai.prompts.ingredient_image import INGREDIENT_IMAGE_PROMPT_VERSION
 from app.ai.prompts.ingredient_translation import INGREDIENT_TRANSLATION_PROMPT_VERSION
 from app.ai.providers.openrouter import OpenRouterProvider
@@ -53,6 +53,45 @@ _PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
 # right in the app, not on food-density accuracy — that concern belongs to
 # density_table.py's own callers, not this one.
 _NO_BUCKET_SHARING = frozenset({"Fruit", "Cooked vegetables"})
+
+
+# Words that end an ingredient name's head noun and start a modifier: in
+# "acciughe all'olio d'oliva" or "anchovies in olive oil" the food is the
+# anchovy, and the oil is only how it is preserved. Matched on folded tokens,
+# so "all'olio" is already split into "all" + "olio".
+_HEAD_CONNECTORS = frozenset({
+    "in", "of", "with", "on", "and", "e", "ed", "con", "senza", "without",
+    "a", "al", "all", "allo", "alla", "ai", "agli", "alle",
+    "di", "d", "del", "dello", "della", "dei", "degli", "delle",
+    "su", "sul", "sullo", "sulla", "sott", "sotto",
+})
+_NON_WORD_RE = re.compile(r"[^\w]+", flags=re.UNICODE)
+
+
+def _head_phrase(name: str) -> str:
+    """The part of an ingredient name before its first connector word
+    ("Acciughe All'Olio D'Oliva" -> "acciughe", "Olio Extravergine Di Oliva"
+    -> "olio extravergine"): the words that say *which* food it is, not
+    what it comes in or with."""
+    head: list[str] = []
+    for token in _NON_WORD_RE.sub(" ", name.casefold()).split():
+        if token in _HEAD_CONNECTORS:
+            if head:
+                break
+            continue
+        head.append(token)
+    return " ".join(head)
+
+
+def _shared_bucket(name: str) -> str | None:
+    """The density_table bucket this ingredient can share an illustration
+    with, or None. Only the name's head counts, and a head that touches more
+    than one bucket ("tonno olio") is ambiguous, so it gets its own image
+    rather than the wrong one."""
+    buckets = matching_foods(_head_phrase(name))
+    if len(buckets) != 1 or buckets[0].name in _NO_BUCKET_SHARING:
+        return None
+    return buckets[0].name
 
 
 def _strip_parenthetical(name: str) -> str:
@@ -106,6 +145,8 @@ class IngredientImageService:
         1. density_table's curated, bilingual (English/Italian) keyword
            buckets — e.g. "Pasta Di Semola Cotta", "Spaghetti" and "Penne"
            all become the one "Cooked pasta" bucket — free, no network call.
+           Matched on the name's head only (see _shared_bucket), so
+           "acciughe all'olio d'oliva" never borrows the olive-oil image.
         2. For anything that table doesn't recognise (any other language, or
            an EN/IT name outside its buckets), a best-effort model
            translation to English, memoized in ingredient_translations so
@@ -118,9 +159,9 @@ class IngredientImageService:
         if not cleaned.strip():
             return "", ""
 
-        bucket = lookup_food(cleaned)
-        if bucket is not None and bucket.name not in _NO_BUCKET_SHARING:
-            return canonicalize_food_name(bucket.name), bucket.name
+        bucket = _shared_bucket(cleaned)
+        if bucket is not None:
+            return canonicalize_food_name(bucket), bucket
 
         source_key = canonicalize_food_name(cleaned)
         cached_translation = await self._get_cached_translation(source_key)
