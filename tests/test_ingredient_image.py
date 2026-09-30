@@ -83,7 +83,12 @@ def test_extract_generated_image_returns_none_when_absent(response):
 @pytest.mark.asyncio
 async def test_generate_ingredient_image_decodes_a_data_uri():
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert json.loads(request.content)["model"] == "recraft/recraft-v4.1-flash"
+        body = json.loads(request.content)
+        assert body["model"] == "recraft/recraft-v4.1-flash"
+        # Verified live: recraft/recraft-v4.1-flash 404s on OpenRouter the
+        # moment "text" is requested alongside "image" ("No endpoints found
+        # that support the requested output modalities: image, text").
+        assert body["modalities"] == ["image"]
         b64 = base64.b64encode(_PNG_1PX).decode()
         return httpx.Response(
             200,

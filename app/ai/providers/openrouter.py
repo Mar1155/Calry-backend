@@ -1076,7 +1076,12 @@ class OpenRouterProvider(BaseAIProvider):
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "modalities": ["image", "text"],
+            # Image-only, not ["image", "text"]: recraft/recraft-v4.1-flash is a
+            # pure image-generation endpoint on OpenRouter and 404s ("No
+            # endpoints found that support the requested output modalities:
+            # image, text") the moment "text" is requested alongside it.
+            # Verified live against the model on 2026-09-30.
+            "modalities": ["image"],
         }
         headers = {
             "Authorization": f"Bearer {self._get_api_key()}",
