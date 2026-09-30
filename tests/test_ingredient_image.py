@@ -402,6 +402,38 @@ async def test_generate_for_meal_one_bad_ingredient_never_stops_the_rest(db_sess
     assert by_name["Tofu"] == "https://cdn.example/tofu.png"
 
 
+@pytest.mark.asyncio
+async def test_task_tears_down_the_shared_client_and_engine_after_every_run(db_session):
+    """Regression test (live-observed 2026-09-30): each Celery task invocation
+    opens its own event loop via asyncio.run(). A shared httpx client or DB
+    engine left bound to that loop breaks the *next* task to touch it with
+    "Event loop is closed" — exactly what happened to the first ingredient of
+    a real meal in staging. Both must be torn down every time, success or not."""
+    from app.tasks import ingredient_images
+
+    fake_engine = AsyncMock()
+    with (
+        patch.object(ingredient_images, "_generate_for_meal", AsyncMock()) as generate,
+        patch("app.ai.providers.openrouter.close_shared_client", AsyncMock()) as close_client,
+        patch.object(ingredient_images, "engine", fake_engine),
+    ):
+        await ingredient_images._generate_for_meal_with_cleanup(1, 2)
+    generate.assert_awaited_once_with(1, 2)
+    close_client.assert_awaited_once()
+    fake_engine.dispose.assert_awaited_once()
+
+    fake_engine = AsyncMock()
+    with (
+        patch.object(ingredient_images, "_generate_for_meal", AsyncMock(side_effect=RuntimeError("boom"))),
+        patch("app.ai.providers.openrouter.close_shared_client", AsyncMock()) as close_client,
+        patch.object(ingredient_images, "engine", fake_engine),
+    ):
+        with pytest.raises(RuntimeError):
+            await ingredient_images._generate_for_meal_with_cleanup(1, 2)
+    close_client.assert_awaited_once()
+    fake_engine.dispose.assert_awaited_once()
+
+
 def test_enqueue_is_a_noop_when_disabled(monkeypatch):
     from app.tasks import ingredient_images
 

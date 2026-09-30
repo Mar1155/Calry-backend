@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from app.ai.services.ingredient_image_service import IngredientImageService
 from app.core.config import settings
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.models.meal import Meal
 from app.worker.celery_app import celery_app
 
@@ -36,12 +36,32 @@ def enqueue_ingredient_images(meal_id: int, *, user_id: int | None = None) -> No
 def generate_ingredient_images(self, meal_id: int, user_id: int | None = None) -> None:
     logger.info("event=ingredient_image_task_received meal_id=%s", meal_id)
     try:
-        asyncio.run(_generate_for_meal(meal_id, user_id))
+        asyncio.run(_generate_for_meal_with_cleanup(meal_id, user_id))
     except Exception:
         logger.exception("event=ingredient_image_task_failed meal_id=%s", meal_id)
         # The meal itself is unaffected either way; a retry only guards
         # against the meal row not being visible yet (see _process_and_save_meal).
         raise self.retry(countdown=5)
+
+
+async def _generate_for_meal_with_cleanup(meal_id: int, user_id: int | None) -> None:
+    """Mirrors _run_photo_analysis_with_cleanup (app.tasks.meal_analysis): each
+    Celery task invocation opens and closes its own event loop via
+    asyncio.run(). The shared OpenRouter httpx client and the SQLAlchemy
+    engine's pooled connections are lazily created on first use and bound to
+    whatever loop was current at that moment — reused as-is from a later
+    invocation, a request against either fails with "Event loop is closed"
+    (observed live in staging on 2026-09-30: the first ingredient of a meal
+    intermittently failed this way while the rest of the same run succeeded).
+    Tearing both down here forces the next invocation to create fresh ones on
+    its own live loop, whichever task that turns out to be."""
+    try:
+        await _generate_for_meal(meal_id, user_id)
+    finally:
+        from app.ai.providers.openrouter import close_shared_client
+
+        await close_shared_client()
+        await engine.dispose()
 
 
 async def _generate_for_meal(meal_id: int, user_id: int | None) -> None:
