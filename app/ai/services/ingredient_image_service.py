@@ -10,12 +10,14 @@ ingredient tries again.
 
 import hashlib
 import logging
+import re
 import time
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.density_table import lookup_food
 from app.ai.prompts.ingredient_image import INGREDIENT_IMAGE_PROMPT_VERSION
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.services.inference_logger import AIInferenceLogger
@@ -35,6 +37,53 @@ _EXTENSION_BY_CONTENT_TYPE = {
     "image/jpeg": "jpg",
     "image/webp": "webp",
 }
+
+_PARENTHETICAL_RE = re.compile(r"\([^)]*\)")
+
+# density_table buckets whose members can look visibly different enough that
+# sharing one illustration risks reading as wrong rather than "close enough"
+# (an apple and a banana; broccoli and a bell pepper). Excluded from bucket
+# sharing here — these keep a per-name cache entry like any unmatched
+# ingredient. Every other bucket (cheese, pasta, rice, oil, bread, legumes...)
+# is visually generic enough that one illustration per bucket is a fair
+# trade for a much higher cache-hit rate. Tune this set based on what looks
+# right in the app, not on food-density accuracy — that concern belongs to
+# density_table.py's own callers, not this one.
+_NO_BUCKET_SHARING = frozenset({"Fruit", "Cooked vegetables"})
+
+
+def _strip_parenthetical(name: str) -> str:
+    """Drops a clarifying aside ("Formaggio Grattugiato (Parmigiano/Grana)" ->
+    "Formaggio Grattugiato"): the model adds these to explain a guess, not to
+    name a different ingredient, and left in they only fragment the cache."""
+    stripped = _PARENTHETICAL_RE.sub(" ", name)
+    return " ".join(stripped.split()) or name
+
+
+def _cache_target(name: str) -> tuple[str, str]:
+    """Returns (cache_key, name_to_generate_from) for `name`.
+
+    Deliberately looser than the food-memory cache's plain
+    canonicalize_food_name: an illustration only needs to look plausibly
+    right, never calorie precision, so most real-world phrasings of the same
+    rough ingredient should share one image instead of each paying for its
+    own generation. Reuses density_table's curated, bilingual (English/
+    Italian) keyword buckets — e.g. "Pasta Di Semola Cotta", "Spaghetti" and
+    "Penne" all become the one "Cooked pasta" bucket — before falling back to
+    the plain per-name canonical key for anything the table doesn't
+    recognise, which keeps its own, unshared image.
+
+    Only English and Italian are covered by density_table's keyword lists
+    today, so the same real ingredient logged in Spanish, Chinese, Japanese
+    or Arabic still gets its own cache entry rather than sharing across
+    languages — the model's calorie estimate isn't affected either way, only
+    how often the illustration is reused.
+    """
+    cleaned = _strip_parenthetical(name)
+    bucket = lookup_food(cleaned)
+    if bucket is not None and bucket.name not in _NO_BUCKET_SHARING:
+        return canonicalize_food_name(bucket.name), bucket.name
+    return canonicalize_food_name(cleaned), cleaned
 
 
 def _asset_key(canonical: str, content_type: str) -> str:
@@ -63,8 +112,13 @@ class IngredientImageService:
 
     async def get_or_generate(self, name: str, *, user_id: int | None = None) -> str | None:
         """Returns an image URL for `name` — cached, freshly generated, or a
-        stale cached fallback — or None when nothing usable exists yet."""
-        canonical = canonicalize_food_name(name)
+        stale cached fallback — or None when nothing usable exists yet.
+
+        `name` is only ever used for the cache lookup and, when nothing
+        matches a shared bucket, as the literal generation prompt subject —
+        see _cache_target for how variant phrasings of the same ingredient
+        end up sharing one cached image."""
+        canonical, generation_name = _cache_target(name)
         if not canonical:
             return None
 
@@ -74,7 +128,7 @@ class IngredientImageService:
 
         started = time.perf_counter()
         try:
-            result = await self.provider.generate_ingredient_image(name)
+            result = await self.provider.generate_ingredient_image(generation_name)
         except Exception as exc:  # noqa: BLE001 — best-effort; a bad model day never blocks a meal
             logger.warning(
                 "event=ingredient_image_generation_failed canonical_key=%s error_type=%s error=%s",
@@ -115,7 +169,7 @@ class IngredientImageService:
             prompt_version=result.prompt_version,
             input_type=INGREDIENT_IMAGE_INPUT_TYPE,
             raw_input=name,
-            raw_output=f"canonical_key={canonical} url={uploaded['url']}",
+            raw_output=f"canonical_key={canonical} bucket={generation_name!r} url={uploaded['url']}",
             latency_ms=result.latency_ms,
             success=True,
             token_usage=result.token_usage,
@@ -131,7 +185,7 @@ class IngredientImageService:
 
         entry = IngredientImage(
             canonical_key=canonical,
-            display_name=name.strip(),
+            display_name=generation_name,
             image_url=uploaded["url"],
             storage_key=uploaded.get("key"),
             model_name=result.model_name,

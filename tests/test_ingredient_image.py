@@ -16,7 +16,11 @@ from app.ai.prompts.ingredient_image import (
 )
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.schemas.ingredient_image import IngredientImageResult
-from app.ai.services.ingredient_image_service import IngredientImageService
+from app.ai.services.ingredient_image_service import (
+    IngredientImageService,
+    _cache_target,
+    _strip_parenthetical,
+)
 from app.core.config import settings
 from app.core.text_normalization import canonicalize_food_name
 from app.models.inference import AIInferenceLog
@@ -26,6 +30,70 @@ from app.models.user import User
 _PNG_1PX = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
+
+# ---- cache-key bucketing (reduces regeneration of the "same" ingredient) --
+
+
+def test_strip_parenthetical_drops_a_clarifying_aside():
+    assert _strip_parenthetical("Formaggio Grattugiato (Parmigiano/Grana)") == "Formaggio Grattugiato"
+    assert _strip_parenthetical("Salsa (fatta in casa)") == "Salsa"
+    assert _strip_parenthetical("Basilico") == "Basilico"  # no parens: unchanged
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ("Pasta Di Semola Cotta", "Spaghetti", "Penne", "pasta"),
+        ("Formaggio Grattugiato (Parmigiano/Grana)", "Parmigiano Reggiano", "cheddar cheese", "mozzarella"),
+        ("Olio Extravergine Di Oliva", "olive oil", "olio"),
+        ("Riso", "risotto", "steamed rice"),
+    ],
+)
+def test_variant_phrasings_of_the_same_ingredient_share_one_cache_key(names):
+    keys = {_cache_target(n)[0] for n in names}
+    assert len(keys) == 1, f"expected one shared key, got {keys}"
+
+
+def test_bucketing_bridges_english_and_italian_for_the_same_ingredient():
+    # The user's actual worry: the same real ingredient, named differently by
+    # the model depending on the meal's output language, should still share
+    # one cached illustration.
+    assert _cache_target("olive oil")[0] == _cache_target("Olio Extravergine Di Oliva")[0]
+    assert _cache_target("grated cheese")[0] == _cache_target("Formaggio Grattugiato")[0]
+
+
+def test_visually_distinct_bucket_members_do_not_share_a_key():
+    # Fruit/vegetable buckets are excluded from sharing: an apple and a
+    # banana look different enough that reusing one icon would read as wrong.
+    assert _cache_target("apple")[0] != _cache_target("banana")[0]
+    assert _cache_target("broccoli")[0] != _cache_target("bell pepper")[0]
+
+
+def test_an_unmatched_ingredient_falls_back_to_its_own_canonical_name():
+    canonical, generation_name = _cache_target("rapa rossa")
+    assert canonical == canonicalize_food_name("rapa rossa")
+    assert generation_name == "rapa rossa"
+
+
+@pytest.mark.asyncio
+async def test_bucket_sharing_avoids_a_second_model_call(db_session):
+    """End-to-end: two meals name the same real ingredient differently; only
+    the first pays for a generation, and the model is asked for the bucket's
+    generic name, not either meal's specific phrasing."""
+    provider = OpenRouterProvider()
+    generate = AsyncMock(return_value=_result())
+    uploaded = {"url": "https://cdn.example/pasta.png", "storage": "local"}
+    with (
+        patch.object(provider, "generate_ingredient_image", generate),
+        patch("app.ai.services.ingredient_image_service.save_generated_asset", AsyncMock(return_value=uploaded)),
+    ):
+        service = IngredientImageService(db_session, provider)
+        first = await service.get_or_generate("Pasta Di Semola Cotta")
+        second = await service.get_or_generate("Penne al pomodoro")
+
+    assert first == second == uploaded["url"]
+    generate.assert_awaited_once_with("Cooked pasta")
+
 
 # ---- prompt --------------------------------------------------------------
 
@@ -278,8 +346,12 @@ async def test_get_or_generate_is_best_effort_on_model_failure(db_session):
         url = await service.get_or_generate("basilico")
     assert url is None
 
-    log = await db_session.scalar(select(AIInferenceLog).where(AIInferenceLog.input_type == "ingredient_image"))
-    assert log is not None and log.success is False and "model down" in log.error_message
+    log = await db_session.scalar(
+        select(AIInferenceLog)
+        .where(AIInferenceLog.input_type == "ingredient_image", AIInferenceLog.success.is_(False))
+        .order_by(AIInferenceLog.id.desc())
+    )
+    assert log is not None and "model down" in log.error_message
 
 
 @pytest.mark.asyncio
