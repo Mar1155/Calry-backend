@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.ai.schemas.food_detection import DetectedRegion
+
 
 class MealItemBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -124,6 +126,7 @@ class MealResponse(BaseModel):
     created_at: dt.datetime
     confirmed_at: dt.datetime | None = None
     items: list[MealItemResponse] = Field(..., min_length=1)
+    detected_regions: list[DetectedRegion] | None = None
     ai_summary: str | None = None
     refinement_changes: list[str] = []
 

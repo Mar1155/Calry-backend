@@ -183,6 +183,20 @@ class Settings(BaseSettings):
     AI_IMAGE_MAX_EDGE: int = 1536
     AI_IMAGE_JPEG_QUALITY: int = 85
 
+    # Food region detection (C28): a SEPARATE, cheaper vision call that only
+    # locates visible ingredients (box_2d) so the app can pin them on the photo
+    # while the main estimate streams. Kept out of the estimation prompt so
+    # localisation work can never degrade calorie accuracy. Best-effort: any
+    # failure just means no pins.
+    FOOD_DETECTION_ENABLED: bool = True
+    OPENROUTER_DETECTION_MODEL: str = "google/gemini-2.5-flash-lite"
+    FOOD_DETECTION_MAX_REGIONS: int = 8
+    FOOD_DETECTION_MAX_COMPLETION_TOKENS: int = 600
+    FOOD_DETECTION_TIMEOUT_SECONDS: float = 12.0
+    # How long persistence waits for a still-running detection after the
+    # estimate is ready. Pins are nice-to-have; the meal is never held longer.
+    FOOD_DETECTION_JOIN_GRACE_SECONDS: float = 2.0
+
     # Pre-inference food-memory cache (C3 / C19): serve confirmed repeat foods
     # deterministically without an LLM call.
     FOOD_MEMORY_CACHE_ENABLED: bool = True

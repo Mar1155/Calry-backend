@@ -83,6 +83,7 @@ async def _process_and_save_meal(
     estimation: MealEstimateResult,
     client_request_id: str | None = None,
     meal_category: str | None = None,
+    detected_regions: list[dict] | None = None,
 ) -> Meal:
     """Helper method to construct a Meal record with children and trigger summary sync."""
     meal_repo = MealRepository(db)
@@ -112,6 +113,7 @@ async def _process_and_save_meal(
         needs_clarification=estimation.needs_clarification,
         clarifying_question=estimation.clarifying_question,
         client_request_id=client_request_id,
+        detected_regions=detected_regions or None,
     )
     await meal_repo.create(meal)
     await db.flush()  # Assures meal.id is populated
@@ -963,6 +965,8 @@ async def stream_log_meal_via_photo(
         try:
             snapshot = await stream_bus.read_state(job_id)
             if snapshot:
+                if snapshot.get("regions"):
+                    yield protocol.line(snapshot["regions"])
                 if snapshot.get("meal_name"):
                     yield protocol.line(snapshot["meal_name"])
                     emitted_name = True

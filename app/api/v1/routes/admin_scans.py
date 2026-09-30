@@ -60,10 +60,12 @@ CHANNEL_INPUT_TYPES: dict[str, tuple[str, ...]] = {
 ESTIMATE_TYPES: tuple[str, ...] = tuple(t for types in CHANNEL_INPUT_TYPES.values() for t in types)
 REFINEMENT_TYPE = "meal_refinement"
 TRANSCRIPTION_TYPE = "voice_transcription"
-AUDITED_TYPES: tuple[str, ...] = (*ESTIMATE_TYPES, REFINEMENT_TYPE, TRANSCRIPTION_TYPE)
+DETECTION_TYPE = "photo_detection"
+AUDITED_TYPES: tuple[str, ...] = (*ESTIMATE_TYPES, REFINEMENT_TYPE, TRANSCRIPTION_TYPE, DETECTION_TYPE)
 PHOTO_TYPES = CHANNEL_INPUT_TYPES["photo"]
 _INPUT_TYPE_CHANNEL = {t: channel for channel, types in CHANNEL_INPUT_TYPES.items() for t in types}
 _INPUT_TYPE_CHANNEL[TRANSCRIPTION_TYPE] = "voice"
+_INPUT_TYPE_CHANNEL[DETECTION_TYPE] = "photo"
 
 # A confirmed meal whose calories the user moved by at least this much counts
 # as "corrected" — the strongest real-world signal the estimate was wrong.
@@ -83,6 +85,8 @@ def _kind(input_type: str) -> str:
         return "refinement"
     if input_type == TRANSCRIPTION_TYPE:
         return "transcription"
+    if input_type == DETECTION_TYPE:
+        return "detection"
     return "other"
 
 
@@ -112,7 +116,7 @@ def _input_text(log: AIInferenceLog) -> str | None:
     raw = log.raw_input or ""
     if log.input_type in PHOTO_TYPES:
         return _photo_text(raw)
-    if log.input_type == TRANSCRIPTION_TYPE:
+    if log.input_type in (TRANSCRIPTION_TYPE, DETECTION_TYPE):
         return None
     if log.input_type == REFINEMENT_TYPE:
         _, sep, refinement = raw.partition("User refinement: ")
@@ -298,6 +302,11 @@ def _scope_conditions(kind: ScanKind, channel: ScanChannel | None) -> list:
         if channel and channel != "voice":
             conditions.append(false())
         return conditions
+    if kind == "detection":
+        conditions = [AIInferenceLog.input_type == DETECTION_TYPE]
+        if channel and channel != "photo":
+            conditions.append(false())
+        return conditions
     if not channel:
         return [AIInferenceLog.input_type.in_(AUDITED_TYPES)]
     options = [
@@ -306,6 +315,8 @@ def _scope_conditions(kind: ScanKind, channel: ScanChannel | None) -> list:
     ]
     if channel == "voice":
         options.append(AIInferenceLog.input_type == TRANSCRIPTION_TYPE)
+    if channel == "photo":
+        options.append(AIInferenceLog.input_type == DETECTION_TYPE)
     return [or_(*options)]
 
 
@@ -744,6 +755,7 @@ async def get_scan(
                 clarifying_question=meal.clarifying_question,
                 has_image=bool(meal.image_url),
                 has_audio=bool(meal.audio_url),
+                detected_regions=meal.detected_regions,
                 created_at=meal.created_at,
                 confirmed_at=meal.confirmed_at,
                 items=_meal_items(meal),

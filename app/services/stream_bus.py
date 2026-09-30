@@ -62,6 +62,13 @@ def _state_key(job_id: str) -> str:
     return f"meal_stream:state:{job_id}"
 
 
+def _regions_key(job_id: str) -> str:
+    # Separate key (C28): detection publishes from a concurrent task, and the
+    # state snapshot is a non-atomic read-modify-write. Keeping regions apart
+    # means a regions publish can never overwrite an item folded in meanwhile.
+    return f"meal_stream:regions:{job_id}"
+
+
 async def publish(job_id: str, event: dict) -> None:
     """Fold ``event`` into the job snapshot, then publish it to the channel.
 
@@ -91,6 +98,9 @@ async def publish(job_id: str, event: dict) -> None:
 
 
 async def _update_state(r: aioredis.Redis, job_id: str, event: dict) -> None:
+    if event.get("type") == "regions":
+        await r.set(_regions_key(job_id), json.dumps(event, ensure_ascii=False, default=str), ex=STATE_TTL_SECONDS)
+        return
     key = _state_key(job_id)
     raw = await r.get(key)
     state = json.loads(raw) if raw else {"meal_name": None, "items": [], "terminal": None}
@@ -108,6 +118,10 @@ async def read_state(job_id: str) -> dict | None:
     r = get_redis()
     raw = await r.get(_state_key(job_id))
     state = json.loads(raw) if raw else None
+    raw_regions = await r.get(_regions_key(job_id))
+    if raw_regions:
+        state = state or {"meal_name": None, "items": [], "terminal": None}
+        state["regions"] = json.loads(raw_regions)
     logger.info(
         "event=meal_stream_bus_state_read job_id=%s found=%s item_count=%s terminal=%s",
         job_id,

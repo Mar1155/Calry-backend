@@ -3,10 +3,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.ai.schemas.food_detection import DetectedRegion
 from app.models.scan_review import SCAN_REVIEW_VERDICTS
 
 ScanChannel = Literal["text", "voice", "photo"]
-ScanKind = Literal["estimate", "refinement", "transcription", "all"]
+ScanKind = Literal["estimate", "refinement", "transcription", "detection", "all"]
 ScanStatusFilter = Literal[
     "ok",
     "failed",
@@ -157,6 +158,7 @@ class ScanMeal(BaseModel):
     clarifying_question: str | None
     has_image: bool
     has_audio: bool
+    detected_regions: list[DetectedRegion] | None = None
     created_at: dt.datetime
     confirmed_at: dt.datetime | None
     items: list[ScanMealItem]

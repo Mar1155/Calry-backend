@@ -8,6 +8,7 @@ from app.models.inference import AIInferenceLog
 from app.repositories.inference import AIInferenceLogRepository
 
 if TYPE_CHECKING:
+    from app.ai.schemas.food_detection import FoodDetectionResult
     from app.ai.schemas.meal_estimate import MealEstimateResult
 
 logger = logging.getLogger("app.ai.inference_logger")
@@ -57,6 +58,7 @@ class AIInferenceLogger:
         finish_reason: str | None = None,
         result: "MealEstimateResult | None" = None,
         meal_id: int | None = None,
+        detection: "FoodDetectionResult | None" = None,
     ) -> int | None:
         """Persist one call. Returns the log id, or None when logging failed.
 
@@ -89,6 +91,14 @@ class AIInferenceLogger:
                     finish_reason=finish_reason,
                     meal_id=meal_id,
                     **_quality_fields(result if success else None),
+                    **(
+                        {
+                            "item_count": len(detection.regions),
+                            "quality_json": {"regions": [r.model_dump() for r in detection.regions]},
+                        }
+                        if detection is not None and success
+                        else {}
+                    ),
                 )
                 await self.repo.create(log_entry)
             if result is not None and log_entry.id is not None:

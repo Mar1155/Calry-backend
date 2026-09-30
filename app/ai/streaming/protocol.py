@@ -5,6 +5,7 @@ Event types (client contract):
   status    {"type":"status","stage":"uploading|transcribing|processing"}
   meal_name {"type":"meal_name","meal_name": str}
   item      {"type":"item","index": int,"item": {...preview item...}}   # preview only
+  regions   {"type":"regions","regions": [{label,ymin,xmin,ymax,xmax}]}  # photo only, best-effort
   done      {"type":"done","meal": {...full persisted MealResponse...}}  # authoritative
   error     {"type":"error","code": str,"message": str}
 
@@ -44,3 +45,11 @@ def done(meal: dict) -> dict:
 
 def error(code: str, message: str) -> dict:
     return {"type": "error", "code": code, "message": message}
+
+
+def regions(detected: list[dict]) -> dict:
+    """Food regions located by the separate detection call (C28). Each region is
+    ``{label, ymin, xmin, ymax, xmax}`` normalised to 0-1 of the upright photo.
+    Best-effort and independent of `item` events: labels come from a different
+    model and need not match estimated ingredient names."""
+    return {"type": "regions", "regions": detected}

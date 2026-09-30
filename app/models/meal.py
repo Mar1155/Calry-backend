@@ -1,7 +1,18 @@
 import datetime as dt
 import math
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -42,6 +53,10 @@ class Meal(Base):
     needs_clarification: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     clarifying_question: Mapped[str | None] = mapped_column(Text, nullable=True)
     client_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Photo pins (C28): [{label, ymin, xmin, ymax, xmax}] normalised to 0-1 of
+    # the upright photo, from the separate detection call. Display-only — never
+    # an input to calories — and independent of the estimated item names.
+    detected_regions: Mapped[list | None] = mapped_column(JSON, nullable=True)
     confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
