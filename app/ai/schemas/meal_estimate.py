@@ -236,8 +236,9 @@ def _with_item_boxes(schema: dict) -> dict:
         "maxItems": 4,
         "items": {"type": "integer", "minimum": 0, "maximum": 1000},
         "description": (
-            "[ymin, xmin, ymax, xmax] of where this ingredient is visible in the photo, "
-            "normalised to 0-1000; null when it cannot be seen on its own."
+            "[ymin, xmin, ymax, xmax] around one representative visible piece of this "
+            "ingredient (not its whole spread), normalised to 0-1000; null when it cannot "
+            "be seen on its own."
         ),
     }
     item["required"] = [*item["required"], "box_2d"]

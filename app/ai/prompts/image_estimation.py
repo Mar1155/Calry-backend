@@ -2,7 +2,7 @@ from xml.sax.saxutils import escape
 
 from app.ai.prompts._shared import OUTPUT_CONTRACT
 
-IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v12_item_boxes"
+IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v13_item_pins"
 
 _FAT_LINE = '    "fat_g": number | null\n'
 assert _FAT_LINE in OUTPUT_CONTRACT
@@ -28,10 +28,13 @@ Item macros are for the full portion; weight and kcal/100g must use the
 same cooked/raw state. Use realistic uncertainty bounds. Ask for clarification
 only when no food or caloric drink can be identified. Never invent a brand,
 recipe, preparation, or exact portion.
-For each item, box_2d is a tight box around where that ingredient is visible in
-the photo: integers 0-1000 relative to image height (y) and width (x), with
-ymin < ymax and xmin < xmax. Use null when the ingredient cannot be seen on its
-own (cooking oil, a sauce under everything, a hidden filling). Boxes locate
+For each item, box_2d pins the ingredient on the photo: a tight box around one
+clearly visible, representative piece or cluster of it (one chicken strip, a
+patch of lettuce, the exposed edge of the bread), never its whole spread across
+the dish. Pick a different spot for each ingredient so pins do not overlap.
+Integers 0-1000 relative to image height (y) and width (x), with ymin < ymax
+and xmin < xmax. Use null when the ingredient cannot be seen on its own
+(cooking oil, a sauce under everything, a hidden filling). Boxes locate
 ingredients only; they never change weights or calories.
 </rules>"""
 
