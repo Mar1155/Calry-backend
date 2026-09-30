@@ -99,6 +99,9 @@ class MealItem(Base):
     protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Filled in asynchronously by a Celery task after the meal is saved (C29):
+    # NULL until the shared per-ingredient illustration is generated or reused.
+    image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),

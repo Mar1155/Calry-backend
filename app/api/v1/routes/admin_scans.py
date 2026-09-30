@@ -251,6 +251,7 @@ def _meal_items(meal: Meal) -> list[ScanMealItem]:
             protein_g=item.protein_g,
             carbs_g=item.carbs_g,
             fat_g=item.fat_g,
+            image_url=item.image_url,
         )
         for item in meal.items
     ]

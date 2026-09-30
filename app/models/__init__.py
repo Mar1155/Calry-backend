@@ -6,6 +6,7 @@ from app.models.burned_calories import BurnedCalories
 from app.models.daily_summary import DailySummary
 from app.models.food_memory import UserFoodMemory
 from app.models.inference import AIInferenceLog
+from app.models.ingredient_image import IngredientImage
 from app.models.insight import (
     DetectedPattern,
     InsightAnalyticsEvent,
@@ -48,6 +49,7 @@ __all__ = [
     "BurnedCalories",
     "DailySummary",
     "AIInferenceLog",
+    "IngredientImage",
     "ScanReview",
     "UserInsightVersion",
     "DetectedPattern",

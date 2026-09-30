@@ -116,6 +116,65 @@ async def _save_upload_s3(file: UploadFile, key: str) -> dict[str, str]:
     return {"url": _s3_public_url(key), "storage": "s3", "key": key}
 
 
+async def save_generated_asset(data: bytes, content_type: str, key: str) -> dict[str, str]:
+    """Uploads raw bytes (a generated image, not a user upload) under an exact
+    key rather than a random one, so a second write to the same key
+    overwrites — used to cache one image per canonical ingredient name."""
+    if settings.STORAGE_BACKEND == "s3":
+        return await _save_bytes_s3(data, content_type, key)
+    return await _save_bytes_local(data, key)
+
+
+async def _save_bytes_local(data: bytes, key: str) -> dict[str, str]:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    filename = Path(key).name
+    dest_path = UPLOAD_DIR / filename
+
+    def write_file() -> None:
+        with open(dest_path, "wb") as buffer:
+            buffer.write(data)
+
+    try:
+        await run_in_threadpool(write_file)
+    except OSError:
+        logger.exception("local asset write failed key=%s", key)
+        raise
+    return {"url": f"/static/uploads/{filename}", "storage": "local"}
+
+
+async def _save_bytes_s3(data: bytes, content_type: str, key: str) -> dict[str, str]:
+    if not settings.S3_BUCKET:
+        logger.error("s3 asset upload attempted without S3_BUCKET configured key=%s", key)
+        raise RuntimeError("S3_BUCKET is required when STORAGE_BACKEND=s3")
+
+    def upload() -> None:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        client = boto3.client(
+            "s3",
+            region_name=settings.S3_REGION,
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+        )
+        extra_args = {"ContentType": content_type}
+        if settings.S3_PUBLIC_READ:
+            extra_args["ACL"] = "public-read"
+        try:
+            client.put_object(Bucket=settings.S3_BUCKET, Key=key, Body=data, **extra_args)
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            code = error.get("Code", "Unknown")
+            message = error.get("Message", str(exc))
+            logger.error("s3 asset upload failed key=%s code=%s message=%s", key, code, message)
+            raise RuntimeError(f"S3 upload failed ({code}): {message}") from exc
+
+    await run_in_threadpool(upload)
+    logger.info("s3 asset upload succeeded key=%s", key)
+    return {"url": _s3_public_url(key), "storage": "s3", "key": key}
+
+
 def storage_key_from_url(url: str) -> str | None:
     """Resolve only URLs belonging to configured Calry storage."""
     if not url:

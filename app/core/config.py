@@ -197,6 +197,17 @@ class Settings(BaseSettings):
     # estimate is ready. Pins are nice-to-have; the meal is never held longer.
     FOOD_DETECTION_JOIN_GRACE_SECONDS: float = 2.0
 
+    # Ingredient image generation (C29): one small illustration per canonical
+    # ingredient name (e.g. "mozzarella"), generated once via a text-to-image
+    # model and cached forever by name — later meals with the same ingredient
+    # reuse the stored image instead of generating again. Runs in a Celery
+    # task after the meal is saved; never blocks meal logging, never affects
+    # the calorie estimate.
+    INGREDIENT_IMAGE_ENABLED: bool = True
+    OPENROUTER_INGREDIENT_IMAGE_MODEL: str = "recraft/recraft-v4.1-flash"
+    INGREDIENT_IMAGE_TIMEOUT_SECONDS: float = 30.0
+    INGREDIENT_IMAGE_MAX_RETRIES: int = 1
+
     # Pre-inference food-memory cache (C3 / C19): serve confirmed repeat foods
     # deterministically without an LLM call.
     FOOD_MEMORY_CACHE_ENABLED: bool = True

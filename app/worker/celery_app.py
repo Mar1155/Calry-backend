@@ -15,7 +15,12 @@ celery_app = Celery(
     "calry",
     broker=settings.REDIS_URL,
     backend=settings.CELERY_RESULT_BACKEND or settings.REDIS_URL,
-    include=["app.tasks.meal_analysis", "app.tasks.memory", "app.tasks.proactive_insights"],
+    include=[
+        "app.tasks.meal_analysis",
+        "app.tasks.memory",
+        "app.tasks.proactive_insights",
+        "app.tasks.ingredient_images",
+    ],
 )
 
 celery_app.conf.update(

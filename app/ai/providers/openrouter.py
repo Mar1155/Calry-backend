@@ -27,6 +27,10 @@ from app.ai.prompts.image_estimation import (
     IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
     build_image_meal_estimation_user_text,
 )
+from app.ai.prompts.ingredient_image import (
+    INGREDIENT_IMAGE_PROMPT_VERSION,
+    build_ingredient_image_prompt,
+)
 from app.ai.prompts.meal_completion import (
     MEAL_COMPLETION_PROMPT_VERSION,
     MEAL_COMPLETION_SYSTEM_PROMPT,
@@ -44,6 +48,7 @@ from app.ai.prompts.meal_refinement import (
 )
 from app.ai.providers.base import BaseAIProvider
 from app.ai.schemas.food_detection import FOOD_DETECTION_RESPONSE_SCHEMA, DetectedRegion, FoodDetectionResult
+from app.ai.schemas.ingredient_image import IngredientImageResult
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult, MealSuggestionItem
 from app.ai.schemas.meal_estimate import (
     MEAL_ESTIMATE_RESPONSE_SCHEMA,
@@ -1027,6 +1032,110 @@ class OpenRouterProvider(BaseAIProvider):
             token_usage=self._normalize_usage(usage),
             finish_reason=finish_reason,
         )
+
+    # ---- ingredient image generation (C29) -----------------------------------
+
+    @staticmethod
+    def _extract_generated_image(response_json: dict) -> tuple[str, dict | None] | None:
+        """Return (data-URI or http(s) URL, usage) for the first image an
+        OpenRouter image-generation model returned, or None. OpenRouter's
+        image-capable chat models attach images as `message.images` (a list of
+        ``{"type": "image_url", "image_url": {"url": ...}}`` entries); some
+        route the same shape inside `message.content` instead. Both are
+        checked so a routed model's exact convention doesn't matter."""
+        try:
+            message = response_json["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        usage = response_json.get("usage")
+
+        def first_url(entries: object) -> str | None:
+            if not isinstance(entries, list):
+                return None
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                image_url = entry.get("image_url")
+                url = image_url.get("url") if isinstance(image_url, dict) else entry.get("url")
+                if isinstance(url, str) and url:
+                    return url
+            return None
+
+        url = first_url(message.get("images")) or first_url(message.get("content"))
+        return (url, usage) if url else None
+
+    async def generate_ingredient_image(self, ingredient_name: str) -> IngredientImageResult:
+        """Generates one illustration for a single ingredient (C29). Every
+        call uses the same fixed style prompt; only the ingredient name
+        varies, so results across ingredients read as one coherent set.
+        Best-effort by design: raises on any failure, and the caller (the
+        cache service) treats that as "no image this time", never a reason
+        to fail the meal it was requested for."""
+        model = settings.OPENROUTER_INGREDIENT_IMAGE_MODEL
+        prompt = build_ingredient_image_prompt(ingredient_name)
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "modalities": ["image", "text"],
+        }
+        headers = {
+            "Authorization": f"Bearer {self._get_api_key()}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://calry.ai",
+            "X-Title": "Calry",
+        }
+        timeout = settings.INGREDIENT_IMAGE_TIMEOUT_SECONDS
+        max_retries = max(0, int(settings.INGREDIENT_IMAGE_MAX_RETRIES))
+        client = get_shared_client()
+
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                start_time = time.perf_counter()
+                response = await client.post(OPENROUTER_URL, json=payload, headers=headers, timeout=timeout)
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    await asyncio.sleep(self._retry_delay(attempt))
+                    continue
+                raise AIProviderError(details={"retryable": True, "reason": type(exc).__name__}) from exc
+
+            if response.status_code != 200:
+                if response.status_code in _RETRYABLE_STATUS_CODES and attempt < max_retries:
+                    await asyncio.sleep(self._retry_delay(attempt, self._retry_after_seconds(response)))
+                    continue
+                raise AIProviderError(
+                    f"Ingredient image generation failed (HTTP {response.status_code}).",
+                    details={"retryable": response.status_code in _RETRYABLE_STATUS_CODES},
+                )
+
+            extracted = self._extract_generated_image(response.json())
+            if extracted is None:
+                if attempt < max_retries:
+                    await asyncio.sleep(self._retry_delay(attempt))
+                    continue
+                raise AIInvalidResponseError("Ingredient image response contained no image.")
+            url, usage = extracted
+            if url.startswith("data:"):
+                header, _, encoded = url.partition(",")
+                content_type = header.removeprefix("data:").split(";", 1)[0] or "image/png"
+                image_bytes = base64.b64decode(encoded)
+            else:
+                image_res = await client.get(url, timeout=timeout)
+                image_res.raise_for_status()
+                content_type = image_res.headers.get("content-type", "image/png").split(";", 1)[0]
+                image_bytes = image_res.content
+            return IngredientImageResult(
+                image_bytes=image_bytes,
+                content_type=content_type,
+                model_name=model,
+                prompt_version=INGREDIENT_IMAGE_PROMPT_VERSION,
+                latency_ms=latency_ms,
+                token_usage=self._normalize_usage(usage),
+            )
+
+        raise AIProviderError("Ingredient image generation failed after retries.") from last_exc
 
     async def refine_meal_estimate(
         self,

@@ -157,6 +157,10 @@ async def _process_and_save_meal(
 
     enqueue_memory_distillation(user.id)
 
+    from app.tasks.ingredient_images import enqueue_ingredient_images
+
+    enqueue_ingredient_images(meal.id, user_id=user.id)
+
     # 4. Asynchronously retrieve the completed Meal with preloaded items to prevent lazyloading issues
     from sqlalchemy.future import select
     from sqlalchemy.orm import selectinload
@@ -1329,6 +1333,13 @@ async def update_meal(
     from app.tasks.memory import enqueue_memory_distillation
 
     enqueue_memory_distillation(current_user.id)
+
+    # A manual edit replaces every item row (see MealRepository.update), so
+    # new items always start without an image even if the old ones had one.
+    if "items" in payload.model_fields_set:
+        from app.tasks.ingredient_images import enqueue_ingredient_images
+
+        enqueue_ingredient_images(updated_meal.id, user_id=current_user.id)
 
     return updated_meal
 

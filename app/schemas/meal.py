@@ -34,6 +34,9 @@ class MealItemResponse(MealItemBase):
     id: int
     meal_id: int
     estimated_calories: int = Field(..., ge=0)
+    # Shared per-ingredient illustration (C29). Null until a background task
+    # generates or reuses one; never blocks meal logging.
+    image_url: str | None = None
     created_at: dt.datetime
 
 

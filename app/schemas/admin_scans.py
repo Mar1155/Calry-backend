@@ -136,6 +136,7 @@ class ScanMealItem(BaseModel):
     protein_g: float | None
     carbs_g: float | None
     fat_g: float | None
+    image_url: str | None = None
 
 
 class ScanMeal(BaseModel):
