@@ -223,7 +223,7 @@ async def test_get_or_generate_creates_and_uploads_on_a_cache_miss(db_session):
     assert url == uploaded["url"]
     save.assert_awaited_once()
     key = save.await_args.args[2]
-    assert key.startswith("ingredients/") and key.endswith(".png")
+    assert key.startswith("uploads/ingredients/") and key.endswith(".png")
 
     row = await db_session.scalar(
         select(IngredientImage).where(IngredientImage.canonical_key == canonicalize_food_name("Basilico fresco"))

@@ -41,9 +41,15 @@ def _asset_key(canonical: str, content_type: str) -> str:
     # sha1 of the canonical key, not the raw name: stable across languages/
     # unicode, filesystem- and S3-key-safe, and one name always maps to one
     # key regardless of how a particular meal spelled or capitalized it.
+    #
+    # Prefixed with uploads/, not a bare ingredients/ prefix: on this bucket,
+    # object ACLs are disabled (S3_PUBLIC_READ=false everywhere — see
+    # storage.py's _save_upload_s3 comment), so public read comes from an
+    # account-level bucket policy scoped to uploads/*. Verified live on
+    # 2026-09-30: a key outside that prefix uploads fine but 403s on fetch.
     digest = hashlib.sha1(canonical.encode("utf-8")).hexdigest()
     ext = _EXTENSION_BY_CONTENT_TYPE.get(content_type, "png")
-    return f"ingredients/{digest}.{ext}"
+    return f"uploads/ingredients/{digest}.{ext}"
 
 
 class IngredientImageService:
