@@ -88,3 +88,32 @@ async def test_stream_result_built_from_full_text_even_with_no_previews(db_sessi
     result = events[-1]["result"]
     assert result.meal_name == "Oatmeal bowl"
     assert len(result.items) == 2
+
+
+@pytest.mark.asyncio
+async def test_image_stream_failing_mid_answer_falls_back_to_a_full_estimate(db_session, monkeypatch):
+    # A provider error after part of the answer streamed must yield the
+    # non-streaming estimate, never a meal parsed from the fragment.
+    from app.ai.errors import AIProviderError
+
+    svc = AICalorieEstimationService(db_session)
+    provider = svc.providers["openrouter"]
+
+    async def failing_stream(*args, **kwargs):
+        yield {"delta": '{"meal_name":"Oatmeal b'}
+        raise AIProviderError(details={"retryable": True, "reason": "stream_error"})
+
+    async def full_estimate(*args, **kwargs):
+        return await provider._parse_and_build_meal(
+            _FULL_JSON, 10, None, source_type="photo", model="m", prompt_version="p", finish_reason="stop"
+        )
+
+    monkeypatch.setattr(provider, "stream_meal_from_image", failing_stream)
+    monkeypatch.setattr(provider, "estimate_meal_from_image", full_estimate)
+
+    events = [ev async for ev in svc.stream_estimate_from_image("https://example.com/a.jpg", user_id=None)]
+
+    result = events[-1]["result"]
+    assert events[-1]["type"] == "__complete__"
+    assert [item.name for item in result.items] == ["Oats", "Banana"]
+    assert result.degraded_extraction is False

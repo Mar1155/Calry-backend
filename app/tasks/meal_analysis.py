@@ -8,8 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.ai.errors import AIInvalidResponseError, AIProviderError, ImageAnalysisError
+from app.ai.schemas.food_detection import MAX_REGIONS, region_from_box
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
-from app.ai.services.food_detection_service import FoodDetectionService
 from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.db.session import SessionLocal, engine
@@ -125,18 +125,6 @@ async def _load_meal(db, meal_id: int) -> Meal | None:
 
 
 async def _run_photo_analysis(job_id: str) -> int | None:
-    """Runs the photo analysis and guarantees the parallel food-region
-    detection task (C28) never outlives it, whichever path returns."""
-    detection: dict = {}
-    try:
-        return await _run_photo_analysis_inner(job_id, detection)
-    finally:
-        task = detection.get("task")
-        if task is not None and not task.done():
-            task.cancel()
-
-
-async def _run_photo_analysis_inner(job_id: str, detection: dict) -> int | None:
     """Durable photo analysis. Runs the streaming estimator so partial items can
     be relayed live to a `/photo/stream` client via the Redis stream bus, while
     still persisting the meal + job row exactly as the poll path expects.
@@ -216,13 +204,6 @@ async def _run_photo_analysis_inner(job_id: str, detection: dict) -> int | None:
         user_context = await _build_user_context(db, user, job.locale or "en")
 
         await stream_bus.publish(job_id, protocol.status("processing"))
-        # C28: locate visible ingredients with the cheap detection model in
-        # parallel. It publishes its own `regions` event and never touches the
-        # DB session, so it cannot race the estimator or alter its numbers.
-        if settings.FOOD_DETECTION_ENABLED and job.image_url:
-            detection["task"] = asyncio.create_task(
-                FoodDetectionService().detect_and_publish(job.id, job.image_url, job.locale)
-            )
         analysis_started_at = time.perf_counter()
         preview_count = 0
         logger.info(
@@ -232,6 +213,10 @@ async def _run_photo_analysis_inner(job_id: str, detection: dict) -> int | None:
             settings.OPENROUTER_IMAGE_MODEL,
         )
         estimation = None
+        # Pins come from the estimate's own per-item boxes, so every pin names
+        # an ingredient the estimate counted. Re-sent cumulatively (the client
+        # replaces its pin list on each `regions` event) as items stream in.
+        live_regions: list[dict] = []
         async for ev in ai_service.stream_estimate_from_image(
             job.image_url,
             user_context=user_context,
@@ -257,7 +242,12 @@ async def _run_photo_analysis_inner(job_id: str, detection: dict) -> int | None:
                     ev.get("index"),
                     preview_count,
                 )
+                box = ev["item"].pop("box_2d", None) if ev.get("type") == "item" else None
                 await stream_bus.publish(job_id, ev)
+                region = region_from_box(ev["item"].get("name"), box) if box is not None else None
+                if region is not None and len(live_regions) < MAX_REGIONS:
+                    live_regions.append(region.model_dump())
+                    await stream_bus.publish(job_id, protocol.regions(live_regions))
 
             # Cancellation normally terminates this Celery task immediately.
             # This durable check also covers workers/pools that cannot terminate
@@ -276,16 +266,6 @@ async def _run_photo_analysis_inner(job_id: str, detection: dict) -> int | None:
             logger.info("event=meal_analysis_worker_cancelled job_id=%s phase=before_persistence", job.id)
             return None
 
-        detection_outcome = await FoodDetectionService.join(
-            detection.get("task"), settings.FOOD_DETECTION_JOIN_GRACE_SECONDS
-        )
-        detected_regions = None
-        if detection_outcome is not None:
-            log_id = await FoodDetectionService.log(db, user.id, detection_outcome)
-            if log_id is not None:
-                estimation.linked_inference_log_ids.append(log_id)
-            detected_regions = detection_outcome.regions_payload() or None
-
         raw_desc = estimation.meal_name.strip() or (job.text or "Meal photo")
         logger.info(
             "event=meal_analysis_worker_persistence_started job_id=%s item_count=%s",
@@ -302,7 +282,6 @@ async def _run_photo_analysis_inner(job_id: str, detection: dict) -> int | None:
             estimation=estimation,
             client_request_id=job.client_request_id,
             meal_category=job.meal_category,
-            detected_regions=detected_regions,
         )
 
         # Cancellation may land while _process_and_save_meal is flushing and

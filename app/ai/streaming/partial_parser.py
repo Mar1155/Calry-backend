@@ -229,7 +229,7 @@ class StreamingMealParser:
         if est is None and weight is not None and cal100 is not None:
             est = round(cal100 * weight / 100)
 
-        return {
+        preview = {
             "name": obj.get("name", ""),
             "quantity_estimate": obj.get("quantity_estimate")
             if isinstance(obj.get("quantity_estimate"), str)
@@ -241,3 +241,8 @@ class StreamingMealParser:
             "fat_g": num("fat_g"),
             "estimated_calories": int(est) if est is not None else None,
         }
+        # Photo estimates carry a per-item box; the photo worker turns it into
+        # a pin and strips it before the preview reaches the client.
+        if isinstance(obj.get("box_2d"), list):
+            preview["box_2d"] = obj["box_2d"]
+        return preview

@@ -168,7 +168,8 @@ class Settings(BaseSettings):
     # meal into one recovered fallback item (C26). Reasoning-capable budget
     # models can otherwise spend thousands of completion tokens thinking before
     # emitting JSON; AI_REASONING_EFFORT/AI_EXCLUDE_REASONING keep that in check.
-    AI_MAX_COMPLETION_TOKENS: int = 1600
+    # Photo items also carry a box_2d (~20 tokens each), hence the extra room.
+    AI_MAX_COMPLETION_TOKENS: int = 1900
     AI_TEMPERATURE: float = 0.1
     AI_REASONING_EFFORT: str = "minimal"
     AI_EXCLUDE_REASONING: bool = True
@@ -183,19 +184,10 @@ class Settings(BaseSettings):
     AI_IMAGE_MAX_EDGE: int = 1536
     AI_IMAGE_JPEG_QUALITY: int = 85
 
-    # Food region detection (C28): a SEPARATE, cheaper vision call that only
-    # locates visible ingredients (box_2d) so the app can pin them on the photo
-    # while the main estimate streams. Kept out of the estimation prompt so
-    # localisation work can never degrade calorie accuracy. Best-effort: any
-    # failure just means no pins.
-    FOOD_DETECTION_ENABLED: bool = True
+    # Cheap, fast model for short secondary calls (ingredient-name translation,
+    # C29). Named for the removed C28 photo-detection call; photo pins now come
+    # from the estimate's own per-item box_2d.
     OPENROUTER_DETECTION_MODEL: str = "google/gemini-2.5-flash-lite"
-    FOOD_DETECTION_MAX_REGIONS: int = 8
-    FOOD_DETECTION_MAX_COMPLETION_TOKENS: int = 600
-    FOOD_DETECTION_TIMEOUT_SECONDS: float = 12.0
-    # How long persistence waits for a still-running detection after the
-    # estimate is ready. Pins are nice-to-have; the meal is never held longer.
-    FOOD_DETECTION_JOIN_GRACE_SECONDS: float = 2.0
 
     # Ingredient image generation (C29): one small illustration per canonical
     # ingredient name (e.g. "mozzarella"), generated once via a text-to-image

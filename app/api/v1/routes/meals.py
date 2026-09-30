@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.ai.schemas.food_detection import regions_from_items
 from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.ai.services.inference_logger import AIInferenceLogger
@@ -88,6 +89,8 @@ async def _process_and_save_meal(
     """Helper method to construct a Meal record with children and trigger summary sync."""
     meal_repo = MealRepository(db)
     estimation = enforce_estimate_ingredient_invariants(estimation)
+    if detected_regions is None:
+        detected_regions = [r.model_dump() for r in regions_from_items(estimation.items)]
 
     # 1. Instantiate Core Meal entity with new AI pipeline fields
     meal = Meal(

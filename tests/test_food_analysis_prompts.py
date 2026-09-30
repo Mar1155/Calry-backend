@@ -17,7 +17,7 @@ from app.ai.schemas.meal_estimate import MEAL_ESTIMATE_RESPONSE_SCHEMA, MEAL_REF
 
 def test_prompt_versions_track_the_new_contract() -> None:
     assert TEXT_MEAL_ESTIMATION_PROMPT_VERSION == "text_meal_estimation_v9"
-    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v11_main_subject"
+    assert IMAGE_MEAL_ESTIMATION_PROMPT_VERSION == "image_meal_estimation_v12_item_boxes"
     assert MEAL_REFINEMENT_PROMPT_VERSION == "meal_refinement_v5"
 
 

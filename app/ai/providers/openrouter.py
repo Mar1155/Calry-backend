@@ -17,11 +17,6 @@ from app.ai.errors import (
     ImageAnalysisError,
     SpeechTranscriptionError,
 )
-from app.ai.prompts.food_detection import (
-    FOOD_DETECTION_PROMPT_VERSION,
-    FOOD_DETECTION_SYSTEM_PROMPT,
-    build_food_detection_user_text,
-)
 from app.ai.prompts.image_estimation import (
     IMAGE_MEAL_ESTIMATION_PROMPT_VERSION,
     IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
@@ -52,7 +47,6 @@ from app.ai.prompts.meal_refinement import (
     build_meal_refinement_user_prompt,
 )
 from app.ai.providers.base import BaseAIProvider
-from app.ai.schemas.food_detection import FOOD_DETECTION_RESPONSE_SCHEMA, DetectedRegion, FoodDetectionResult
 from app.ai.schemas.ingredient_image import IngredientImageResult
 from app.ai.schemas.ingredient_translation import (
     INGREDIENT_TRANSLATION_RESPONSE_SCHEMA,
@@ -60,6 +54,7 @@ from app.ai.schemas.ingredient_translation import (
 )
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult, MealSuggestionItem
 from app.ai.schemas.meal_estimate import (
+    IMAGE_MEAL_ESTIMATE_RESPONSE_SCHEMA,
     MEAL_ESTIMATE_RESPONSE_SCHEMA,
     MEAL_REFINEMENT_RESPONSE_SCHEMA,
     MealEstimateItem,
@@ -208,8 +203,8 @@ class OpenRouterProvider(BaseAIProvider):
         truncated meal estimate instead of silently trusting a JSON-repair
         recovery that may have fabricated a single fallback item.
 
-        The keyword overrides let a secondary, best-effort call (food region
-        detection, C28) use its own budget and fail fast instead of inheriting
+        The keyword overrides let a secondary, best-effort call (ingredient
+        name translation, C29) use its own budget and fail fast instead of inheriting
         the estimator's retries and timeout."""
         api_key = self._get_api_key()
 
@@ -374,6 +369,7 @@ class OpenRouterProvider(BaseAIProvider):
             parts: list[str] = []
             usage: dict | None = None
             finish_reason: str | None = None
+            stream_error: Any = None
             emitted_content = False
             try:
                 async with client.stream(
@@ -427,6 +423,11 @@ class OpenRouterProvider(BaseAIProvider):
                             continue
                         if isinstance(chunk.get("usage"), dict):
                             usage = chunk["usage"]
+                        if chunk.get("error"):
+                            # OpenRouter reports an upstream failure after the
+                            # 200 as an in-band error chunk (finish_reason
+                            # "error"); whatever text arrived is a fragment.
+                            stream_error = chunk["error"]
                         choices = chunk.get("choices") or []
                         if choices:
                             choice = choices[0]
@@ -440,6 +441,23 @@ class OpenRouterProvider(BaseAIProvider):
                                 finish_reason = choice["finish_reason"]
 
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
+                if stream_error is not None or finish_reason == "error":
+                    # Never hand a mid-stream provider failure to the parser as
+                    # if it were a finished answer: JSON recovery would turn the
+                    # fragment into a made-up one-item meal. Retry cleanly if
+                    # nothing reached the caller yet; otherwise raise retryable
+                    # so the caller falls back to a non-streaming estimate.
+                    logger.warning(
+                        "OpenRouter stream for model %s failed mid-stream after %sms: %s",
+                        model,
+                        latency_ms,
+                        str(stream_error)[:500],
+                    )
+                    if not emitted_content and attempt < max_retries:
+                        await asyncio.sleep(self._retry_delay(attempt))
+                        attempt += 1
+                        continue
+                    raise AIProviderError(details={"retryable": True, "reason": "stream_error"})
                 if finish_reason == "length":
                     logger.warning(
                         "OpenRouter stream for model %s hit finish_reason=length "
@@ -494,7 +512,7 @@ class OpenRouterProvider(BaseAIProvider):
             model=settings.OPENROUTER_IMAGE_MODEL,
             system_prompt=IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
             messages=messages,
-            response_format=self._response_format(MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
+            response_format=self._response_format(IMAGE_MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
         ):
             yield ev
 
@@ -542,6 +560,16 @@ class OpenRouterProvider(BaseAIProvider):
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _as_box(value: Any) -> list[float] | None:
+        """A 4-number box_2d as sent, or None. Range/area sanitising happens
+        where the box becomes a pin (region_from_box)."""
+        if not isinstance(value, list) or len(value) != 4:
+            return None
+        if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in value):
+            return None
+        return [float(v) for v in value]
+
     @classmethod
     def _dict_to_items(cls, parsed: dict[str, Any]) -> list[MealEstimateItem]:
         items = []
@@ -558,6 +586,7 @@ class OpenRouterProvider(BaseAIProvider):
                     carbs_g=item.get("carbs_g"),
                     fat_g=item.get("fat_g"),
                     estimated_calories=cls._as_int(item.get("estimated_calories")) or 0,
+                    box_2d=cls._as_box(item.get("box_2d")),
                 )
             )
         return items
@@ -785,7 +814,7 @@ class OpenRouterProvider(BaseAIProvider):
                 img = Image.open(BytesIO(image_bytes))
                 # C28: bake the EXIF orientation into the pixels. Re-encoding
                 # drops EXIF, so without this the model sees a sideways photo
-                # that the phone displays upright — and every detection box
+                # that the phone displays upright — and every item box_2d
                 # lands 90 degrees off.
                 rotated = img.getexif().get(0x0112, 1) not in (None, 1)
                 img = ImageOps.exif_transpose(img)
@@ -935,7 +964,7 @@ class OpenRouterProvider(BaseAIProvider):
             model=model,
             system_prompt=IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT,
             messages=messages,
-            response_format=self._response_format(MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
+            response_format=self._response_format(IMAGE_MEAL_ESTIMATE_RESPONSE_SCHEMA, "meal_estimate"),
         )
         return await self._parse_and_build_meal(
             raw_text,
@@ -947,101 +976,6 @@ class OpenRouterProvider(BaseAIProvider):
             finish_reason=finish_reason,
         )
 
-    # ---- food region detection (C28) -------------------------------------
-
-    @staticmethod
-    def _parse_detections(raw_text: str, max_regions: int) -> list[DetectedRegion]:
-        """Turn Gemini ``box_2d`` output into sanitised, normalised regions.
-
-        Never raises: malformed entries are dropped, so a sloppy response
-        yields fewer pins rather than a failure. Degenerate boxes (inverted,
-        near-empty, or covering almost the whole frame) carry no location
-        information and are dropped too."""
-        try:
-            parsed = json.loads(OpenRouterProvider._extract_json(raw_text or ""))
-        except (json.JSONDecodeError, TypeError):
-            return []
-        detections = parsed.get("detections") if isinstance(parsed, dict) else parsed
-        if not isinstance(detections, list):
-            return []
-
-        regions: list[DetectedRegion] = []
-        per_label: dict[str, int] = {}
-        for entry in detections:
-            if not isinstance(entry, dict):
-                continue
-            label = " ".join(str(entry.get("label") or "").split())[:60]
-            box = entry.get("box_2d")
-            if not label or not isinstance(box, list | tuple) or len(box) != 4:
-                continue
-            try:
-                ymin, xmin, ymax, xmax = (min(1000.0, max(0.0, float(v))) / 1000 for v in box)
-            except (TypeError, ValueError):
-                continue
-            if ymin > ymax:
-                ymin, ymax = ymax, ymin
-            if xmin > xmax:
-                xmin, xmax = xmax, xmin
-            area = (ymax - ymin) * (xmax - xmin)
-            if area < 0.0004 or area > 0.9:
-                continue
-            key = label.casefold()
-            if per_label.get(key, 0) >= 2:
-                continue
-            per_label[key] = per_label.get(key, 0) + 1
-            regions.append(
-                DetectedRegion(
-                    label=label,
-                    ymin=round(ymin, 4),
-                    xmin=round(xmin, 4),
-                    ymax=round(ymax, 4),
-                    xmax=round(xmax, 4),
-                )
-            )
-            if len(regions) >= max_regions:
-                break
-        return regions
-
-    async def detect_food_regions(self, image_url: str, locale: str | None = None) -> FoodDetectionResult:
-        """Locate visible ingredients with the cheap detection model. Uses the
-        same EXIF-upright, downscaled image as the estimator so boxes line up
-        with the photo the app shows."""
-        model = settings.OPENROUTER_DETECTION_MODEL
-        primary = (locale or "en").split("-")[0].split("_")[0].strip().lower()
-        language = _LANGUAGE_NAMES.get(primary, "English")
-        data_uri = await self._load_image_data_uri(image_url)
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": build_food_detection_user_text(language, settings.FOOD_DETECTION_MAX_REGIONS),
-                    },
-                    {"type": "image_url", "image_url": {"url": data_uri, "detail": "high"}},
-                ],
-            }
-        ]
-        raw_text, latency_ms, usage, finish_reason = await self._post_openrouter(
-            model=model,
-            system_prompt=FOOD_DETECTION_SYSTEM_PROMPT,
-            messages=messages,
-            response_format=self._response_format(FOOD_DETECTION_RESPONSE_SCHEMA, "food_detection"),
-            max_completion_tokens=settings.FOOD_DETECTION_MAX_COMPLETION_TOKENS,
-            max_retries=0,
-            timeout_seconds=settings.FOOD_DETECTION_TIMEOUT_SECONDS,
-            include_reasoning=False,
-        )
-        return FoodDetectionResult(
-            regions=self._parse_detections(raw_text, settings.FOOD_DETECTION_MAX_REGIONS),
-            model_name=model,
-            prompt_version=FOOD_DETECTION_PROMPT_VERSION,
-            raw_output=raw_text,
-            latency_ms=latency_ms,
-            token_usage=self._normalize_usage(usage),
-            finish_reason=finish_reason,
-        )
-
     # ---- ingredient name translation (C29 cache normalization) --------------
 
     async def translate_ingredient_name(self, name: str) -> IngredientTranslationResult:
@@ -1049,8 +983,8 @@ class OpenRouterProvider(BaseAIProvider):
         image cache can key on one language regardless of what language the
         meal estimate produced the name in. Raises on any failure — the
         caller treats that as "keep the original name", never a reason to
-        skip the image entirely. Uses the same cheap/fast model as food
-        region detection (C28): this is a short text-only call, not worth
+        skip the image entirely. Uses the cheap/fast OPENROUTER_DETECTION_MODEL
+        (named for the removed C28 detection call): this is a short text-only call, not worth
         the estimator's heavier model or retry budget."""
         model = settings.OPENROUTER_DETECTION_MODEL
         raw_text, latency_ms, usage, _ = await self._post_openrouter(

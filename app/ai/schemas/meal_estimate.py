@@ -1,3 +1,4 @@
+import copy
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -12,6 +13,10 @@ class MealEstimateItem(BaseModel):
     carbs_g: float | None = None
     fat_g: float | None = None
     estimated_calories: int = Field(default=0, ge=0)
+    # Photo only: where this ingredient sits in the image, Gemini-native
+    # [ymin, xmin, ymax, xmax] on 0-1000. Becomes the item's pin; never
+    # affects the numbers.
+    box_2d: list[float] | None = None
 
 
 class MealEstimateResult(BaseModel):
@@ -217,6 +222,29 @@ MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = {
         "clarifying_question",
     ],
 }
+
+
+def _with_item_boxes(schema: dict) -> dict:
+    """The estimate schema plus a per-item box_2d, for the photo estimate: the
+    same model that names an ingredient also locates it, so every photo pin
+    matches an estimated item by construction."""
+    schema = copy.deepcopy(schema)
+    item = schema["properties"]["items"]["items"]
+    item["properties"]["box_2d"] = {
+        "type": ["array", "null"],
+        "minItems": 4,
+        "maxItems": 4,
+        "items": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "description": (
+            "[ymin, xmin, ymax, xmax] of where this ingredient is visible in the photo, "
+            "normalised to 0-1000; null when it cannot be seen on its own."
+        ),
+    }
+    item["required"] = [*item["required"], "box_2d"]
+    return schema
+
+
+IMAGE_MEAL_ESTIMATE_RESPONSE_SCHEMA: dict = _with_item_boxes(MEAL_ESTIMATE_RESPONSE_SCHEMA)
 
 
 MEAL_REFINEMENT_RESPONSE_SCHEMA: dict = {

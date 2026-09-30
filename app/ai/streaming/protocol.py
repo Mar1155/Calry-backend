@@ -5,7 +5,7 @@ Event types (client contract):
   status    {"type":"status","stage":"uploading|transcribing|processing"}
   meal_name {"type":"meal_name","meal_name": str}
   item      {"type":"item","index": int,"item": {...preview item...}}   # preview only
-  regions   {"type":"regions","regions": [{label,ymin,xmin,ymax,xmax}]}  # photo only, best-effort
+  regions   {"type":"regions","regions": [{label,ymin,xmin,ymax,xmax}]}  # photo only, cumulative
   done      {"type":"done","meal": {...full persisted MealResponse...}}  # authoritative
   error     {"type":"error","code": str,"message": str}
 
@@ -48,8 +48,8 @@ def error(code: str, message: str) -> dict:
 
 
 def regions(detected: list[dict]) -> dict:
-    """Food regions located by the separate detection call (C28). Each region is
-    ``{label, ymin, xmin, ymax, xmax}`` normalised to 0-1 of the upright photo.
-    Best-effort and independent of `item` events: labels come from a different
-    model and need not match estimated ingredient names."""
+    """Photo pins built from the estimate's own per-item boxes. Each region is
+    ``{label, ymin, xmin, ymax, xmax}`` normalised to 0-1 of the upright photo,
+    labelled with the item's name. Each event carries every pin so far, so the
+    client replaces its list rather than appending."""
     return {"type": "regions", "regions": detected}
