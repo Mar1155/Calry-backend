@@ -87,6 +87,9 @@ class MealUpdate(BaseModel):
 
     meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     is_confirmed: bool | None = None
+    # Moves the meal onto another (past or current) day, keeping its time of
+    # day — how a meal logged while viewing a past day lands on that day.
+    logged_date: dt.date | None = None
     meal_name: str | None = Field(default=None, max_length=255)
     estimated_min_calories: int | None = Field(default=None, ge=0)
     estimated_max_calories: int | None = Field(default=None, ge=0)

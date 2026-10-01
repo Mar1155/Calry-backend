@@ -1276,10 +1276,22 @@ async def update_meal(
     await ensure_history_date_access(meal.created_at.date(), current_user, db)
 
     previous_category = meal.meal_category
+    previous_date = meal.created_at.date()
+    target_date = payload.logged_date
+    if target_date is not None and target_date != previous_date:
+        if target_date > dt.date.today():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="A meal cannot be moved to a future date.",
+            )
+        await ensure_history_date_access(target_date, current_user, db)
+        meal.created_at = dt.datetime.combine(target_date, meal.created_at.timetz())
 
     # Perform repository updates. Ingredient quantity/density determine totals.
     try:
-        updated_meal = await meal_repo.update(meal, payload)
+        updated_meal = await meal_repo.update(
+            meal, payload.model_dump(exclude_unset=True, exclude={"logged_date"})
+        )
     except InvalidMealIngredients as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1304,10 +1316,12 @@ async def update_meal(
         except Exception as e:
             logger.error(f"Failed to update food memory on meal confirmation: {e}")
 
-    # Recalculate summary balance for this specific historical meal date
+    # Recalculate summary balance for this meal's day (and the day it left).
     try:
         summary_service = SummaryService(db)
         await summary_service.sync_daily_summary(current_user.id, updated_meal.created_at.date())
+        if updated_meal.created_at.date() != previous_date:
+            await summary_service.sync_daily_summary(current_user.id, previous_date)
     except Exception as e:
         logger.error(f"Failed to synchronize daily summary during meal adjustment: {e}")
 
@@ -1333,6 +1347,12 @@ async def update_meal(
         *events,
         affected_date=updated_meal.created_at.date(),
     )
+    if updated_meal.created_at.date() != previous_date:
+        await InsightVersionService(db).record(
+            current_user.id,
+            DomainEvent.MEAL_UPDATED,
+            affected_date=previous_date,
+        )
     from app.tasks.memory import enqueue_memory_distillation
 
     enqueue_memory_distillation(current_user.id)
