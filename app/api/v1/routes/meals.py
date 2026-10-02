@@ -1,7 +1,9 @@
+import asyncio
 import datetime as dt
 import json
 import logging
 import time
+from collections.abc import AsyncIterator, Callable
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -657,6 +659,235 @@ async def log_meal_via_voice(
     return meal
 
 
+# Text/voice analyses run in the API process, detached from the request that
+# started them (see _durable_inline_stream): a dropped connection never
+# cancels the analysis, and a reconnect with the same client_request_id
+# re-attaches to it. The owner TTL only guards against a process dying
+# mid-run; a normal run releases it as soon as it ends.
+_INLINE_OWNER_TTL_SECONDS = 300
+_INLINE_RELAY_DEADLINE_SECONDS = 180
+_inline_runs: set[asyncio.Task] = set()
+
+InlineWork = Callable[[AsyncSession], AsyncIterator[dict]]
+
+
+async def _text_analysis_events(
+    db: AsyncSession, user: User, payload: MealCreateText, locale: str
+) -> AsyncIterator[dict]:
+    """status -> meal_name -> item* -> done (or a single error event)."""
+    try:
+        existing = await _find_existing_by_request_id(db, user.id, payload.client_request_id)
+        if existing is not None:
+            yield protocol.done(_serialize_meal(existing))
+            return
+
+        ai_service = AICalorieEstimationService(db)
+        user_context = await _build_user_context(db, user, locale)
+        yield protocol.status("processing")
+
+        estimation: MealEstimateResult | None = None
+        async for ev in ai_service.stream_estimate_from_text(
+            payload.text,
+            user_context=user_context,
+            user_id=user.id,
+            additional_context=payload.additional_context,
+        ):
+            if ev.get("type") == "__complete__":
+                estimation = ev["result"]
+            else:
+                yield ev
+
+        if estimation is None:
+            raise RuntimeError("stream produced no result")
+
+        meal = await _process_and_save_meal(
+            db=db,
+            user=user,
+            source_type="text",
+            original_input=payload.text,
+            image_url=None,
+            audio_url=None,
+            estimation=estimation,
+            client_request_id=payload.client_request_id,
+            meal_category=payload.meal_category,
+        )
+        await db.commit()
+        yield protocol.done(_serialize_meal(meal))
+    except Exception:  # noqa: BLE001 — surface as a protocol error, never a 500 mid-stream
+        logger.exception("Text meal stream failed")
+        await db.rollback()
+        yield protocol.error("stream_failed", "AI inference failed. Please try again.")
+
+
+async def _voice_analysis_events(
+    db: AsyncSession, user: User, payload: MealCreateVoice, locale: str
+) -> AsyncIterator[dict]:
+    """status(transcribing) -> status(processing) -> meal_name -> item* -> done."""
+    try:
+        existing = await _find_existing_by_request_id(db, user.id, payload.client_request_id)
+        if existing is not None:
+            yield protocol.done(_serialize_meal(existing))
+            return
+
+        ai_service = AICalorieEstimationService(db)
+        user_context = await _build_user_context(db, user, locale)
+
+        yield protocol.status("transcribing")
+        transcription = await ai_service.speech_service.transcribe_audio(
+            audio_url=payload.audio_url,
+            user_id=user.id,
+        )
+        transcript = transcription.transcript
+
+        yield protocol.status("processing")
+        estimation: MealEstimateResult | None = None
+        async for ev in ai_service.stream_estimate_from_text(
+            transcript,
+            user_context=user_context,
+            user_id=user.id,
+            is_voice=True,
+            channel="voice",
+            transcription_confidence=transcription.confidence,
+            additional_context=payload.additional_context,
+        ):
+            if ev.get("type") == "__complete__":
+                estimation = ev["result"]
+            else:
+                yield ev
+
+        if estimation is None:
+            raise RuntimeError("stream produced no result")
+        if transcription.inference_log_id is not None:
+            estimation.linked_inference_log_ids.append(transcription.inference_log_id)
+
+        meal = await _process_and_save_meal(
+            db=db,
+            user=user,
+            source_type="voice",
+            original_input=transcript,
+            image_url=None,
+            audio_url=payload.audio_url,
+            estimation=estimation,
+            client_request_id=payload.client_request_id,
+            meal_category=payload.meal_category,
+        )
+        await db.commit()
+        yield protocol.done(_serialize_meal(meal))
+    except Exception:  # noqa: BLE001
+        logger.exception("Voice meal stream failed")
+        await db.rollback()
+        yield protocol.error("stream_failed", "AI inference failed. Please try again.")
+
+
+async def _run_inline_analysis(job_id: str, work: InlineWork) -> None:
+    """The detached run: publishes every event to the bus, then releases
+    ownership so a retry after a failure can start a fresh run."""
+    try:
+        async with SessionLocal() as db:
+            async for ev in work(db):
+                await stream_bus.publish(job_id, ev)
+    except Exception:  # noqa: BLE001 — the relay must always get a terminal event
+        logger.exception("event=inline_meal_analysis_failed job_id=%s", job_id)
+        await stream_bus.publish(job_id, protocol.error("stream_failed", "AI inference failed. Please try again."))
+    finally:
+        try:
+            await stream_bus.release(job_id)
+        except Exception:  # noqa: BLE001 — the TTL frees it anyway
+            logger.warning("event=inline_meal_analysis_release_failed job_id=%s", job_id)
+
+
+async def _relay_inline(job_id: str, pubsub, user_id: int, client_request_id: str) -> AsyncIterator[str]:
+    """Replays the run's snapshot, then tails it live until a terminal event.
+    Heartbeats keep slow connections open; the saved meal is the fallback
+    once the snapshot has expired."""
+    max_index = -1
+    emitted_name = False
+    snapshot = await stream_bus.read_state(job_id)
+    if snapshot:
+        if snapshot.get("meal_name"):
+            emitted_name = True
+            yield protocol.line(snapshot["meal_name"])
+        for it in snapshot.get("items", []):
+            if it.get("index", -1) > max_index:
+                max_index = it["index"]
+                yield protocol.line(it)
+        if snapshot.get("terminal"):
+            yield protocol.line(snapshot["terminal"])
+            return
+
+    deadline = time.monotonic() + _INLINE_RELAY_DEADLINE_SECONDS
+    while True:
+        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=5.0)
+        if msg is None:
+            async with SessionLocal() as db:
+                saved = await _find_existing_by_request_id(db, user_id, client_request_id)
+            if saved is not None:
+                yield protocol.line(protocol.done(_serialize_meal(saved)))
+                return
+            if time.monotonic() > deadline:
+                yield protocol.line(
+                    protocol.error("timeout", "Analysis is taking longer than expected. Check back shortly.")
+                )
+                return
+            yield protocol.line(protocol.status("processing"))
+            continue
+        try:
+            ev = json.loads(msg["data"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+        etype = ev.get("type")
+        if etype == "meal_name":
+            if not emitted_name:
+                emitted_name = True
+                yield protocol.line(ev)
+        elif etype == "item":
+            if ev.get("index", -1) > max_index:
+                max_index = ev["index"]
+                yield protocol.line(ev)
+        elif etype in ("done", "error"):
+            yield protocol.line(ev)
+            return
+        else:
+            yield protocol.line(ev)
+
+
+async def _durable_inline_stream(user: User, client_request_id: str | None, work: InlineWork) -> AsyncIterator[str]:
+    """Streams ``work`` so that the analysis outlives the connection.
+
+    Without a request id, or when Redis is unavailable, it runs inside the
+    request as before (a disconnect then cancels it)."""
+    if client_request_id:
+        job_id = f"inline:{user.id}:{client_request_id}"
+        try:
+            # Subscribe before anything can publish, so no event is missed.
+            pubsub = await stream_bus.subscribe(job_id)
+        except Exception:  # noqa: BLE001
+            logger.warning("event=inline_meal_stream_bus_unavailable job_id=%s", job_id)
+            pubsub = None
+        if pubsub is not None:
+            try:
+                if await stream_bus.claim(job_id, _INLINE_OWNER_TTL_SECONDS):
+                    await stream_bus.reset_state(job_id)
+                    task = asyncio.create_task(_run_inline_analysis(job_id, work))
+                    _inline_runs.add(task)
+                    task.add_done_callback(_inline_runs.discard)
+                else:
+                    logger.info("event=inline_meal_stream_reattached job_id=%s", job_id)
+                async for line in _relay_inline(job_id, pubsub, user.id, client_request_id):
+                    yield line
+            finally:
+                try:
+                    await pubsub.unsubscribe()
+                    await pubsub.aclose()
+                except Exception:  # noqa: BLE001
+                    pass
+            return
+
+    async with SessionLocal() as db:
+        async for ev in work(db):
+            yield protocol.line(ev)
+
+
 @router.post("/text/stream")
 async def stream_log_meal_via_text(
     payload: MealCreateText,
@@ -666,56 +897,20 @@ async def stream_log_meal_via_text(
     """Streams a text meal analysis as NDJSON: status -> meal_name -> item* -> done.
 
     The final `done` event carries the persisted MealResponse; the meal is only
-    written to the DB once the full estimate is validated. A client disconnect
-    mid-stream cancels the generator and persists nothing.
+    written to the DB once the full estimate is validated. The analysis keeps
+    running if the client disconnects; reconnecting with the same
+    client_request_id resumes the stream.
     """
-
-    async def gen():
-        async with SessionLocal() as db:
-            try:
-                existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
-                if existing is not None:
-                    yield protocol.line(protocol.done(_serialize_meal(existing)))
-                    return
-
-                ai_service = AICalorieEstimationService(db)
-                user_context = await _build_user_context(db, current_user, _primary_locale(accept_language))
-                yield protocol.line(protocol.status("processing"))
-
-                estimation: MealEstimateResult | None = None
-                async for ev in ai_service.stream_estimate_from_text(
-                    payload.text,
-                    user_context=user_context,
-                    user_id=current_user.id,
-                    additional_context=payload.additional_context,
-                ):
-                    if ev.get("type") == "__complete__":
-                        estimation = ev["result"]
-                    else:
-                        yield protocol.line(ev)
-
-                if estimation is None:
-                    raise RuntimeError("stream produced no result")
-
-                meal = await _process_and_save_meal(
-                    db=db,
-                    user=current_user,
-                    source_type="text",
-                    original_input=payload.text,
-                    image_url=None,
-                    audio_url=None,
-                    estimation=estimation,
-                    client_request_id=payload.client_request_id,
-                    meal_category=payload.meal_category,
-                )
-                await db.commit()
-                yield protocol.line(protocol.done(_serialize_meal(meal)))
-            except Exception:  # noqa: BLE001 — surface as a protocol error, never a 500 mid-stream
-                logger.exception("Text meal stream failed")
-                await db.rollback()
-                yield protocol.line(protocol.error("stream_failed", "AI inference failed. Please try again."))
-
-    return StreamingResponse(gen(), media_type=protocol.NDJSON_MEDIA_TYPE, headers=_STREAM_HEADERS)
+    locale = _primary_locale(accept_language)
+    return StreamingResponse(
+        _durable_inline_stream(
+            current_user,
+            payload.client_request_id,
+            lambda db: _text_analysis_events(db, current_user, payload, locale),
+        ),
+        media_type=protocol.NDJSON_MEDIA_TYPE,
+        headers=_STREAM_HEADERS,
+    )
 
 
 @router.post("/voice/stream")
@@ -726,66 +921,18 @@ async def stream_log_meal_via_voice(
 ) -> StreamingResponse:
     """Streams a voice meal analysis: status(transcribing) -> status(processing)
     -> meal_name -> item* -> done. Transcription runs first, then the transcript
-    flows through the same streaming text pipeline."""
-
-    async def gen():
-        async with SessionLocal() as db:
-            try:
-                existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
-                if existing is not None:
-                    yield protocol.line(protocol.done(_serialize_meal(existing)))
-                    return
-
-                ai_service = AICalorieEstimationService(db)
-                user_context = await _build_user_context(db, current_user, _primary_locale(accept_language))
-
-                yield protocol.line(protocol.status("transcribing"))
-                transcription = await ai_service.speech_service.transcribe_audio(
-                    audio_url=payload.audio_url,
-                    user_id=current_user.id,
-                )
-                transcript = transcription.transcript
-
-                yield protocol.line(protocol.status("processing"))
-                estimation: MealEstimateResult | None = None
-                async for ev in ai_service.stream_estimate_from_text(
-                    transcript,
-                    user_context=user_context,
-                    user_id=current_user.id,
-                    is_voice=True,
-                    channel="voice",
-                    transcription_confidence=transcription.confidence,
-                    additional_context=payload.additional_context,
-                ):
-                    if ev.get("type") == "__complete__":
-                        estimation = ev["result"]
-                    else:
-                        yield protocol.line(ev)
-
-                if estimation is None:
-                    raise RuntimeError("stream produced no result")
-                if transcription.inference_log_id is not None:
-                    estimation.linked_inference_log_ids.append(transcription.inference_log_id)
-
-                meal = await _process_and_save_meal(
-                    db=db,
-                    user=current_user,
-                    source_type="voice",
-                    original_input=transcript,
-                    image_url=None,
-                    audio_url=payload.audio_url,
-                    estimation=estimation,
-                    client_request_id=payload.client_request_id,
-                    meal_category=payload.meal_category,
-                )
-                await db.commit()
-                yield protocol.line(protocol.done(_serialize_meal(meal)))
-            except Exception:  # noqa: BLE001
-                logger.exception("Voice meal stream failed")
-                await db.rollback()
-                yield protocol.line(protocol.error("stream_failed", "AI inference failed. Please try again."))
-
-    return StreamingResponse(gen(), media_type=protocol.NDJSON_MEDIA_TYPE, headers=_STREAM_HEADERS)
+    flows through the same streaming text pipeline. Like text, it survives a
+    dropped connection."""
+    locale = _primary_locale(accept_language)
+    return StreamingResponse(
+        _durable_inline_stream(
+            current_user,
+            payload.client_request_id,
+            lambda db: _voice_analysis_events(db, current_user, payload, locale),
+        ),
+        media_type=protocol.NDJSON_MEDIA_TYPE,
+        headers=_STREAM_HEADERS,
+    )
 
 
 _PHOTO_STREAM_DEADLINE_SECONDS = 180

@@ -1,4 +1,4 @@
-"""Cross-process relay for photo meal-analysis streaming.
+"""Cross-process relay for meal-analysis streaming.
 
 The photo path runs analysis in a Celery worker (the durable executor) while a
 `/photo/stream` request in the API process relays partial results to the client
@@ -13,6 +13,12 @@ live. The two processes never share memory, so they rendezvous through Redis:
 
 Snapshots carry a TTL; the relay falls back to the durable DB job row when the
 snapshot has expired (see the `/photo/stream` route).
+
+Text and voice analyses run in the API process instead, detached from the
+request (see ``_durable_inline_stream`` in the meals routes): ``claim`` makes
+exactly one process own a run per ``client_request_id``, so a client that
+reconnects re-attaches to the analysis already in flight instead of starting
+a second one.
 """
 
 from __future__ import annotations
@@ -60,6 +66,10 @@ def _chan(job_id: str) -> str:
 
 def _state_key(job_id: str) -> str:
     return f"meal_stream:state:{job_id}"
+
+
+def _owner_key(job_id: str) -> str:
+    return f"meal_stream:owner:{job_id}"
 
 
 def _regions_key(job_id: str) -> str:
@@ -139,3 +149,19 @@ async def subscribe(job_id: str):
     await pubsub.subscribe(_chan(job_id))
     logger.info("event=meal_stream_bus_subscribed job_id=%s", job_id)
     return pubsub
+
+
+async def claim(job_id: str, ttl_seconds: int) -> bool:
+    """Atomically take ownership of running ``job_id``. True for exactly one
+    caller until ``release`` or the TTL (a crash-safety net) expires."""
+    return bool(await get_redis().set(_owner_key(job_id), "1", nx=True, ex=ttl_seconds))
+
+
+async def release(job_id: str) -> None:
+    await get_redis().delete(_owner_key(job_id))
+
+
+async def reset_state(job_id: str) -> None:
+    """Forget a previous run's snapshot (e.g. a failed attempt being retried
+    under the same request id), so the new run's relay never replays it."""
+    await get_redis().delete(_state_key(job_id), _regions_key(job_id))
