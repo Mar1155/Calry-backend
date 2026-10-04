@@ -1,7 +1,8 @@
 import datetime as dt
 import logging
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -9,10 +10,12 @@ from sqlalchemy import select
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.insights.versioning import DomainEvent, InsightVersionService
+from app.models.admin import UserDeletionJob
 from app.models.user import User
 from app.models.meal import Meal
 from app.repositories.user import UserRepository
 from app.schemas.user import UserResponse, UserUpdate
+from app.services.admin_deletion import build_preview_snapshot, initial_steps, process_deletion_job
 from app.services.summary import SummaryService
 from app.services.calorie_target_service import CalorieTargetService
 
@@ -154,3 +157,35 @@ async def delete_fcm_token(
 ) -> None:
     current_user.fcm_token = None
     await db.flush()
+
+
+@router.delete("/me", status_code=status.HTTP_202_ACCEPTED)
+async def delete_current_account(
+    background: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Permanently deletes the caller's account and all associated data.
+
+    Reuses the retryable deletion saga (storage, database, RevenueCat,
+    Firebase identity). The account is locked immediately; the client should
+    sign out locally once this returns.
+    """
+    snapshot = await build_preview_snapshot(db, current_user)
+    current_user.deletion_in_progress = True
+    job = UserDeletionJob(
+        target_user_id=current_user.id,
+        target_email=current_user.email,
+        target_firebase_uid=current_user.firebase_uid,
+        target_revenuecat_app_user_id=current_user.revenuecat_app_user_id,
+        requested_by_admin_uid=current_user.firebase_uid,
+        requested_by_admin_email=None,
+        reason="user_request",
+        idempotency_key=uuid.uuid4().hex,
+        preview_snapshot_json=snapshot,
+        steps_json=initial_steps(),
+    )
+    db.add(job)
+    await db.commit()
+    background.add_task(process_deletion_job, job.id)
+    return {"job_id": job.id, "status": job.status}
