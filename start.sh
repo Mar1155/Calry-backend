@@ -12,17 +12,13 @@ if [ "${CALRY_PROCESS:-api}" = "worker" ]; then
 fi
 
 echo "==> Applying database migrations"
-attempt=1
-max_attempts=5
-until alembic -c "$APP_ROOT/alembic.ini" upgrade head; do
-  if [ "$attempt" -ge "$max_attempts" ]; then
-    echo "==> Migrations failed after ${max_attempts} attempts, giving up"
-    exit 1
-  fi
-  echo "==> Migration attempt ${attempt} failed, retrying in 3s (likely a cold-start filesystem race)"
-  attempt=$((attempt + 1))
-  sleep 3
-done
+echo "==> DEBUG APP_ROOT=$APP_ROOT PWD=$(pwd) WHOAMI=$(whoami)"
+echo "==> DEBUG ls -la:"
+ls -la "$APP_ROOT" 2>&1
+echo "==> DEBUG alembic.ini: exists=$([ -f "$APP_ROOT/alembic.ini" ] && echo yes || echo no) size=$(wc -c < "$APP_ROOT/alembic.ini" 2>&1) lines=$(wc -l < "$APP_ROOT/alembic.ini" 2>&1)"
+echo "==> DEBUG grep script_location: $(grep -c script_location "$APP_ROOT/alembic.ini" 2>&1)"
+echo "==> DEBUG alembic version: $(alembic --version 2>&1)"
+alembic -c "$APP_ROOT/alembic.ini" upgrade head
 
 echo "==> Starting Uvicorn on 0.0.0.0:${PORT:-8000}"
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
