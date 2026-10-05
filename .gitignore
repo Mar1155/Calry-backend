@@ -181,5 +181,3 @@ service-account.json
 *.db
 *.sqlite
 *.sqlite3
-
-alembic.ini
