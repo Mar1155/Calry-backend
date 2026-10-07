@@ -561,7 +561,7 @@ async def test_diary_api_lists_and_marks_owned_insight_read(client: AsyncClient,
         "/api/v1/premium/sync",
         json={
             "is_premium": True,
-            "entitlement": "Calry Pro",
+            "entitlement": "Calory Pro",
             "expires_at": "2030-01-01T00:00:00Z",
             "revenuecat_app_user_id": "proactive_diary_test",
         },
@@ -623,7 +623,7 @@ async def test_diary_api_lists_and_marks_owned_insight_read(client: AsyncClient,
     other_headers = {"Authorization": "Bearer mock_token_feedback_other_user"}
     await client.get("/api/v1/users/me", headers=other_headers)
     await client.post("/api/v1/premium/sync", headers=other_headers, json={
-        "is_premium": True, "entitlement": "Calry Pro", "expires_at": "2030-01-01T00:00:00Z",
+        "is_premium": True, "entitlement": "Calory Pro", "expires_at": "2030-01-01T00:00:00Z",
         "revenuecat_app_user_id": "feedback_other_user",
     })
     denied = await client.patch(feedback_url, headers=other_headers, json={"helpful": True})

@@ -56,5 +56,5 @@ async def ensure_history_date_access(
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Calry Pro is required to access history older than 7 days.",
+        detail="Calory Pro is required to access history older than 7 days.",
     )

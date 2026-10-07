@@ -150,7 +150,7 @@ class PromoCodeService:
         await self.db.commit()
 
         logger.info("promo_code_redeemed user_id=%s promo_code_id=%s", user_id, promo.id)
-        return self._response(user, redeemed=True, message="Calry Pro is now active on your account.")
+        return self._response(user, redeemed=True, message="Calory Pro is now active on your account.")
 
     async def _enforce_attempt_limit(self, user_id: int) -> None:
         cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=settings.PROMO_CODE_ATTEMPT_WINDOW_MINUTES)

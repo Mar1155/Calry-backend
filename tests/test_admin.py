@@ -382,17 +382,17 @@ async def test_restricted_user_is_blocked_by_every_authenticated_api(client, db_
 @pytest.mark.asyncio
 async def test_promotional_revoke_preserves_store_entitlement(client, db_session, admin_target, monkeypatch):
     admin_target.is_premium = True
-    admin_target.premium_entitlement = "Calry Pro"
+    admin_target.premium_entitlement = "Calory Pro"
     admin_target.premium_store = "promotional"
     await db_session.flush()
 
     async def fake_revoke(self, app_user_id: str, entitlement_id: str) -> dict:
         assert app_user_id == admin_target.revenuecat_app_user_id
-        assert entitlement_id == "Calry Pro"
+        assert entitlement_id == "Calory Pro"
         return {
             "subscriber": {
                 "entitlements": {
-                    "Calry Pro": {
+                    "Calory Pro": {
                         "expires_date": "2099-01-01T00:00:00Z",
                         "product_identifier": "calry_monthly",
                     }
