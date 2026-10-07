@@ -14,7 +14,7 @@ def _promotional_subscriber() -> dict:
     return {
         "subscriber": {
             "entitlements": {
-                "Calory Pro": {
+                "Calry Pro": {
                     "expires_date": None,
                     "product_identifier": "rc_promo_calry_pro_lifetime",
                 }
