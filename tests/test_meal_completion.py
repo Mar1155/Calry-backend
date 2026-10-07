@@ -81,7 +81,7 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
         headers=headers,
         json={
             "is_premium": True,
-            "entitlement": "Calry Pro",
+            "entitlement": "pro_subscription",
             "expires_at": "2030-01-01T00:00:00Z",
             "revenuecat_app_user_id": "completion_test_uid",
         },
@@ -137,7 +137,7 @@ async def test_meal_completion_passes_and_enforces_user_constraints(
         headers=headers,
         json={
             "is_premium": True,
-            "entitlement": "Calry Pro",
+            "entitlement": "pro_subscription",
             "expires_at": "2030-01-01T00:00:00Z",
             "revenuecat_app_user_id": "completion_constraints",
         },
@@ -185,7 +185,7 @@ async def test_meal_review_uses_only_owned_confirmed_category_entries(
         headers=headers,
         json={
             "is_premium": True,
-            "entitlement": "Calry Pro",
+            "entitlement": "pro_subscription",
             "expires_at": "2030-01-01T00:00:00Z",
             "revenuecat_app_user_id": "meal_review",
         },
@@ -240,7 +240,7 @@ async def test_meal_completion_guardrail(client: AsyncClient, db_session: AsyncS
         headers=headers,
         json={
             "is_premium": True,
-            "entitlement": "Calry Pro",
+            "entitlement": "pro_subscription",
             "expires_at": "2030-01-01T00:00:00Z",
             "revenuecat_app_user_id": "completion_guardrail_test_uid",
         },
@@ -294,7 +294,7 @@ async def test_meal_completion_clamps_negative_remaining_calories(
         headers=headers,
         json={
             "is_premium": True,
-            "entitlement": "Calry Pro",
+            "entitlement": "pro_subscription",
             "expires_at": "2030-01-01T00:00:00Z",
             "revenuecat_app_user_id": "completion_over_reference_uid",
         },
@@ -332,7 +332,7 @@ async def test_meal_completion_rejects_unusable_ai_output(client: AsyncClient, d
         headers=headers,
         json={
             "is_premium": True,
-            "entitlement": "Calry Pro",
+            "entitlement": "pro_subscription",
             "expires_at": "2030-01-01T00:00:00Z",
             "revenuecat_app_user_id": "completion_invalid_ai_uid",
         },
