@@ -1,6 +1,7 @@
 from app.models.admin import AdminAuditLog, UserDeletionJob
 from app.models.ai_usage import UserAiUsage
 from app.models.app_setting import AppSetting
+from app.models.barcode_product import BarcodeProduct
 from app.models.base import Base
 from app.models.burned_calories import BurnedCalories
 from app.models.daily_summary import DailySummary
@@ -45,6 +46,7 @@ __all__ = [
     "MealItem",
     "MealRevision",
     "MealAnalysisJob",
+    "BarcodeProduct",
     "UserAiUsage",
     "PromoCode",
     "PromoCodeRedemption",

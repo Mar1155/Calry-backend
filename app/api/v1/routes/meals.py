@@ -36,6 +36,8 @@ from app.models.user import User
 from app.repositories.food_memory import FoodMemoryRepository
 from app.repositories.meal import MealRepository
 from app.schemas.meal import (
+    BarcodeProductResponse,
+    MealCreateBarcode,
     MealCreatePhoto,
     MealCreateText,
     MealCreateVoice,
@@ -47,6 +49,12 @@ from app.schemas.meal import (
     MealUpdate,
 )
 from app.services import stream_bus
+from app.services.barcode_lookup_service import (
+    BarcodeLookupService,
+    BarcodeProductNotFoundError,
+    InvalidBarcodeFormatError,
+    to_barcode_response,
+)
 from app.services.meal_invariants import (
     InvalidMealIngredients,
     enforce_estimate_ingredient_invariants,
@@ -416,6 +424,79 @@ async def log_meal_via_text(
         meal_category=payload.meal_category,
     )
     return meal
+
+
+@router.get("/barcode/{code}", response_model=BarcodeProductResponse)
+async def lookup_barcode_product(
+    code: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
+) -> BarcodeProductResponse:
+    """Looks up packaged food nutrition by EAN/UPC barcode (PostgreSQL cache + Open Food Facts v2)."""
+    _ = current_user
+    locale = _primary_locale(accept_language)
+    service = BarcodeLookupService(db)
+    try:
+        product = await service.lookup_product(code, locale=locale)
+    except InvalidBarcodeFormatError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INVALID_BARCODE_FORMAT", "message": str(exc)},
+        ) from exc
+    except BarcodeProductNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "BARCODE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    return to_barcode_response(product, locale=locale)
+
+
+@router.post("/barcode", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
+async def log_meal_via_barcode(
+    payload: MealCreateBarcode,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
+) -> Meal:
+    """Logs a pending meal from a packaged-food barcode without consuming AI credits."""
+    existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+    if existing is not None:
+        return existing
+
+    locale = _primary_locale(accept_language)
+    service = BarcodeLookupService(db)
+    try:
+        product = await service.lookup_product(payload.code, locale=locale)
+    except InvalidBarcodeFormatError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INVALID_BARCODE_FORMAT", "message": str(exc)},
+        ) from exc
+    except BarcodeProductNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "BARCODE_NOT_FOUND", "message": str(exc)},
+        ) from exc
+
+    estimation = service.build_meal_estimate(
+        product,
+        weight_grams=payload.weight_grams,
+        locale=locale,
+    )
+    meal = await _process_and_save_meal(
+        db=db,
+        user=current_user,
+        source_type="barcode",
+        original_input=f"barcode:{product.code}",
+        image_url=product.image_url,
+        audio_url=None,
+        estimation=estimation,
+        client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
+    )
+    return meal
+
 
 
 @router.post("/photo", response_model=MealResponse, status_code=status.HTTP_201_CREATED)

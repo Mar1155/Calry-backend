@@ -77,6 +77,31 @@ class MealCreateVoice(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=64)
 
 
+class BarcodeProductResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    code: str
+    product_name: str
+    brand: str | None = None
+    image_url: str | None = None
+    calories_per_100g: float = Field(..., ge=0, le=900)
+    protein_per_100g: float = Field(default=0.0, ge=0)
+    carbs_per_100g: float = Field(default=0.0, ge=0)
+    fat_per_100g: float = Field(default=0.0, ge=0)
+    serving_size_label: str | None = None
+    serving_weight_grams: int | None = None
+    package_weight_grams: int | None = None
+    default_weight_grams: int = Field(default=100, gt=0)
+    nutriscore_grade: str | None = None
+
+
+class MealCreateBarcode(BaseModel):
+    code: str = Field(..., min_length=8, max_length=32)
+    weight_grams: int | None = Field(default=None, gt=0, le=5000)
+    meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
+    client_request_id: str | None = Field(default=None, max_length=64)
+
+
 class MealRefineRequest(BaseModel):
     user_refinement: str = Field(..., min_length=2, max_length=2000)
     refinement_type: Literal["text", "voice"] = "text"
@@ -109,7 +134,7 @@ class MealResponse(BaseModel):
 
     id: int
     user_id: int
-    source_type: Literal["text", "voice", "photo"]
+    source_type: Literal["text", "voice", "photo", "barcode"]
     original_input: str
     image_url: str | None = None
     audio_url: str | None = None
