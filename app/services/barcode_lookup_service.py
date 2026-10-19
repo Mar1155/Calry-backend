@@ -356,6 +356,7 @@ class BarcodeLookupService:
             carbs_g=carbs_g,
             fat_g=fat_g,
             estimated_calories=est_calories,
+            image_url=product.image_url,
         )
 
         return MealEstimateResult(

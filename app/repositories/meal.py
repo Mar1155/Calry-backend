@@ -76,6 +76,11 @@ class MealRepository(BaseRepository[Meal]):
             )
             if not normalized_items:
                 raise InvalidMealIngredients("A meal must contain at least one ingredient.")
+            existing_images = {
+                item.name.strip().lower(): item.image_url
+                for item in db_obj.items
+                if item.name and item.image_url
+            }
             # Clear existing items
             for item in list(db_obj.items):
                 await self.db.delete(item)
@@ -84,6 +89,11 @@ class MealRepository(BaseRepository[Meal]):
 
             # Add new items
             for item_data in normalized_items:
+                preserved_image_url = (
+                    item_data.get("image_url")
+                    or existing_images.get(str(item_data["name"]).strip().lower())
+                    or (db_obj.image_url if db_obj.source_type == "barcode" else None)
+                )
                 self.db.add(
                     MealItem(
                         meal_id=db_obj.id,
@@ -94,6 +104,7 @@ class MealRepository(BaseRepository[Meal]):
                         protein_g=item_data.get("protein_g"),
                         carbs_g=item_data.get("carbs_g"),
                         fat_g=item_data.get("fat_g"),
+                        image_url=preserved_image_url,
                     )
                 )
             await self.db.flush()

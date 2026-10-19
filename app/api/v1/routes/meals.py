@@ -146,6 +146,7 @@ async def _process_and_save_meal(
             protein_g=item.protein_g,
             carbs_g=item.carbs_g,
             fat_g=item.fat_g,
+            image_url=item.image_url,
         )
         db.add(meal_item)
 
@@ -174,9 +175,10 @@ async def _process_and_save_meal(
 
     enqueue_memory_distillation(user.id)
 
-    from app.tasks.ingredient_images import enqueue_ingredient_images
+    if source_type != "barcode":
+        from app.tasks.ingredient_images import enqueue_ingredient_images
 
-    enqueue_ingredient_images(meal.id, user_id=user.id)
+        enqueue_ingredient_images(meal.id, user_id=user.id)
 
     # 4. Asynchronously retrieve the completed Meal with preloaded items to prevent lazyloading issues
     from sqlalchemy.future import select
@@ -1664,7 +1666,7 @@ async def update_meal(
 
     # A manual edit replaces every item row (see MealRepository.update), so
     # new items always start without an image even if the old ones had one.
-    if "items" in payload.model_fields_set:
+    if "items" in payload.model_fields_set and updated_meal.source_type != "barcode":
         from app.tasks.ingredient_images import enqueue_ingredient_images
 
         enqueue_ingredient_images(updated_meal.id, user_id=current_user.id)

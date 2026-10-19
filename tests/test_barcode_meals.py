@@ -92,14 +92,58 @@ async def test_barcode_log_creates_meal_and_does_not_consume_ai_quota(client: As
 
     assert resp.status_code == 201
     meal = resp.json()
+    expected_off_img = SAMPLE_OFF_BARILLA_SPAGHETTI["image_front_url"]
     assert meal["source_type"] == "barcode"
     assert meal["meal_name"] == "Spaghetti n.5 (Barilla)"
     assert meal["meal_category"] == "lunch"
+    assert meal["image_url"] == expected_off_img
     # 85g * 359 kcal / 100g = 305.15 -> 305 kcal
     assert meal["estimated_calories"] == 305
     assert len(meal["items"]) == 1
     assert meal["items"][0]["weight_grams"] == 85
     assert meal["items"][0]["calories_per_100g"] == 359.0
+    assert meal["items"][0]["image_url"] == expected_off_img
+
+    # Confirming the meal via PATCH (which replaces items) preserves the Open Food Facts image_url
+    patch_resp = await client.patch(
+        f"/api/v1/meals/{meal['id']}",
+        json={
+            "is_confirmed": True,
+            "items": [
+                {
+                    "name": meal["items"][0]["name"],
+                    "quantity_estimate": "100 g",
+                    "weight_grams": 100,
+                    "calories_per_100g": 359.0,
+                    "protein_g": 13.0,
+                    "carbs_g": 70.9,
+                    "fat_g": 2.0,
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert patch_resp.status_code == 200
+    patched_meal = patch_resp.json()
+    assert patched_meal["image_url"] == expected_off_img
+    assert patched_meal["items"][0]["image_url"] == expected_off_img
+
+    # Product without an Open Food Facts image keeps image_url=None (so client shows standard barcode icon)
+    no_img_product = {**SAMPLE_OFF_BARILLA_SPAGHETTI, "code": "8076800195099", "image_front_url": None}
+    with patch(
+        "app.services.barcode_lookup_service.BarcodeLookupService._fetch_open_food_facts",
+        new_callable=AsyncMock,
+        return_value=no_img_product,
+    ):
+        no_img_resp = await client.post(
+            "/api/v1/meals/barcode",
+            json={"code": "8076800195099", "weight_grams": 100},
+            headers=headers,
+        )
+    assert no_img_resp.status_code == 201
+    no_img_meal = no_img_resp.json()
+    assert no_img_meal["image_url"] is None
+    assert no_img_meal["items"][0]["image_url"] is None
 
     # AI quota must remain untouched
     quota_after = (await client.get("/api/v1/premium/ai-quota", headers=headers)).json()

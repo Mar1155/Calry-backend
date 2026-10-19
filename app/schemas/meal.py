@@ -14,6 +14,7 @@ class MealItemBase(BaseModel):
     protein_g: float | None = Field(default=None)
     carbs_g: float | None = Field(default=None)
     fat_g: float | None = Field(default=None)
+    image_url: str | None = Field(default=None, max_length=1024)
 
     @field_validator("name")
     @classmethod

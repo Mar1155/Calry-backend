@@ -13,6 +13,7 @@ class MealEstimateItem(BaseModel):
     carbs_g: float | None = None
     fat_g: float | None = None
     estimated_calories: int = Field(default=0, ge=0)
+    image_url: str | None = None
     # Photo only: where this ingredient sits in the image, Gemini-native
     # [ymin, xmin, ymax, xmax] on 0-1000. Becomes the item's pin; never
     # affects the numbers.
