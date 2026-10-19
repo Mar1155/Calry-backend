@@ -21,9 +21,13 @@ from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.dependencies.premium import (
+    check_and_consume_ai_credit,
     ensure_history_date_access,
+    ensure_pro_feature,
     free_history_cutoff,
     has_premium_access,
+    new_ai_request_key,
+    refund_ai_credit,
 )
 from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.meal import Meal, MealItem, MealRevision
@@ -359,6 +363,11 @@ def _meal_response_dict(meal: Meal, estimation: MealEstimateResult) -> dict:
 _STREAM_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
+def photo_job_request_key(job: MealAnalysisJob) -> str:
+    """The quota key a photo job was charged under (see check_and_consume_ai_credit)."""
+    return job.client_request_id or job.id
+
+
 def _serialize_meal(meal: Meal) -> dict:
     """Full MealResponse contract as a JSON-ready dict (for the `done` event)."""
     return MealResponse.model_validate(meal).model_dump(mode="json")
@@ -422,6 +431,9 @@ async def log_meal_via_photo(
     if existing is not None:
         return existing
 
+    request_key = payload.client_request_id or new_ai_request_key()
+    await check_and_consume_ai_credit(current_user, db, source_type="photo", request_key=request_key)
+
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
@@ -432,13 +444,20 @@ async def log_meal_via_photo(
     )
 
     # 2. Fetch calorie estimation using Multimodal Vision AI
-    estimation = await ai_service.estimate_from_image(
-        image_url=payload.image_url,
-        optional_hint=payload.text,
-        user_context=user_context,
-        user_id=current_user.id,
-        additional_context=payload.additional_context,
-    )
+    try:
+        estimation = await ai_service.estimate_from_image(
+            image_url=payload.image_url,
+            optional_hint=payload.text,
+            user_context=user_context,
+            user_id=current_user.id,
+            additional_context=payload.additional_context,
+        )
+    except Exception:
+        # Read before rollback: it expires the loaded user.
+        user_id = current_user.id
+        await db.rollback()
+        await refund_ai_credit(db, user_id, request_key)
+        raise
 
     # 3. Build and commit entities
     raw_desc = estimation.meal_name.strip() or (payload.text or "Meal photo")
@@ -472,7 +491,16 @@ async def start_photo_analysis(
         )
 
     existing_meal = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+    job_id = new_ai_request_key()
+    if existing_meal is None:
+        await check_and_consume_ai_credit(
+            current_user,
+            db,
+            source_type="photo",
+            request_key=payload.client_request_id or job_id,
+        )
     job = MealAnalysisJob(
+        id=job_id,
         user_id=current_user.id,
         status="completed" if existing_meal is not None else "queued",
         source_type="photo",
@@ -522,6 +550,7 @@ async def start_photo_analysis(
             job.status = "failed"
             job.error_message = str(exc)
             await db.commit()
+            await refund_ai_credit(db, current_user.id, photo_job_request_key(job))
             logger.error(
                 "event=meal_analysis_queue_failure_persisted transport=poll job_id=%s user_id=%s job_status=%s",
                 job.id,
@@ -594,13 +623,16 @@ async def cancel_photo_analysis(
         job.meal_id = None
         job.completed_at = dt.datetime.now(dt.UTC)
         await db.commit()
+        await refund_ai_credit(db, current_user.id, photo_job_request_key(job))
         return
 
     job.status = "cancelled"
     job.error_message = None
     job.completed_at = dt.datetime.now(dt.UTC)
     task_id = job.celery_task_id
+    request_key = photo_job_request_key(job)
     await db.commit()
+    await refund_ai_credit(db, current_user.id, request_key)
 
     if task_id:
         from app.worker.celery_app import celery_app
@@ -627,6 +659,9 @@ async def log_meal_via_voice(
     if existing is not None:
         return existing
 
+    request_key = payload.client_request_id or new_ai_request_key()
+    await check_and_consume_ai_credit(current_user, db, source_type="voice", request_key=request_key)
+
     ai_service = AICalorieEstimationService(db)
 
     # 1. Build user context
@@ -637,12 +672,19 @@ async def log_meal_via_voice(
     )
 
     # 2. Transcribe voice note and estimate caloric components
-    transcript, estimation = await ai_service.estimate_from_voice(
-        audio_url=payload.audio_url,
-        user_context=user_context,
-        user_id=current_user.id,
-        additional_context=payload.additional_context,
-    )
+    try:
+        transcript, estimation = await ai_service.estimate_from_voice(
+            audio_url=payload.audio_url,
+            user_context=user_context,
+            user_id=current_user.id,
+            additional_context=payload.additional_context,
+        )
+    except Exception:
+        # Read before rollback: it expires the loaded user.
+        user_id = current_user.id
+        await db.rollback()
+        await refund_ai_credit(db, user_id, request_key)
+        raise
 
     # 3. Build and commit entities
     meal = await _process_and_save_meal(
@@ -720,7 +762,7 @@ async def _text_analysis_events(
 
 
 async def _voice_analysis_events(
-    db: AsyncSession, user: User, payload: MealCreateVoice, locale: str
+    db: AsyncSession, user: User, payload: MealCreateVoice, locale: str, request_key: str | None = None
 ) -> AsyncIterator[dict]:
     """status(transcribing) -> status(processing) -> meal_name -> item* -> done."""
     try:
@@ -775,7 +817,12 @@ async def _voice_analysis_events(
         yield protocol.done(_serialize_meal(meal))
     except Exception:  # noqa: BLE001
         logger.exception("Voice meal stream failed")
+        user_id = user.id
         await db.rollback()
+        try:
+            await refund_ai_credit(db, user_id, request_key)
+        except Exception:  # noqa: BLE001 — a failed refund must not hide the error event
+            logger.exception("event=ai_credit_refund_failed user_id=%s", user_id)
         yield protocol.error("stream_failed", "AI inference failed. Please try again.")
 
 
@@ -917,18 +964,25 @@ async def stream_log_meal_via_text(
 async def stream_log_meal_via_voice(
     payload: MealCreateVoice,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default="en"),
 ) -> StreamingResponse:
     """Streams a voice meal analysis: status(transcribing) -> status(processing)
     -> meal_name -> item* -> done. Transcription runs first, then the transcript
     flows through the same streaming text pipeline. Like text, it survives a
-    dropped connection."""
+    dropped connection.
+
+    The free-tier quota is checked before streaming starts, so an exhausted
+    quota is a plain HTTP 403 rather than an in-stream error."""
     locale = _primary_locale(accept_language)
+    request_key = payload.client_request_id or new_ai_request_key()
+    if await _find_existing_by_request_id(db, current_user.id, payload.client_request_id) is None:
+        await check_and_consume_ai_credit(current_user, db, source_type="voice", request_key=request_key)
     return StreamingResponse(
         _durable_inline_stream(
             current_user,
             payload.client_request_id,
-            lambda db: _voice_analysis_events(db, current_user, payload, locale),
+            lambda db: _voice_analysis_events(db, current_user, payload, locale, request_key),
         ),
         media_type=protocol.NDJSON_MEDIA_TYPE,
         headers=_STREAM_HEADERS,
@@ -985,6 +1039,7 @@ async def _photo_job_probe(job_id: str, user_id: int) -> tuple[dict | None, dict
 async def stream_log_meal_via_photo(
     payload: MealCreatePhoto,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default="en"),
 ) -> StreamingResponse:
     """Streams a photo meal analysis as NDJSON while the durable Celery worker
@@ -994,7 +1049,24 @@ async def stream_log_meal_via_photo(
     Reconnect/fallback: the existing `POST /photo/analysis` + `GET .../{id}`
     poll pair remains the durable path — a client can always fall back to it,
     and this relay itself consults the DB job row as a safety net.
+
+    The free-tier quota is checked before streaming starts (HTTP 403
+    AI_QUOTA_EXCEEDED); a resumed request is not charged again.
     """
+    new_job_id = new_ai_request_key()
+    # A request that already has a job (running, done or failed) or a meal is
+    # replayed below without a new analysis, so it is never charged again.
+    is_replay = (
+        await _find_existing_analysis_by_request_id(db, current_user.id, payload.client_request_id) is not None
+        or await _find_existing_by_request_id(db, current_user.id, payload.client_request_id) is not None
+    )
+    if not is_replay:
+        await check_and_consume_ai_credit(
+            current_user,
+            db,
+            source_type="photo",
+            request_key=payload.client_request_id or new_job_id,
+        )
 
     async def gen():
         stream_started_at = time.monotonic()
@@ -1022,6 +1094,7 @@ async def stream_log_meal_via_photo(
             reused_job = job is not None
             if job is None:
                 job = MealAnalysisJob(
+                    id=new_job_id,
                     user_id=current_user.id,
                     status="queued",
                     source_type="photo",
@@ -1067,6 +1140,7 @@ async def stream_log_meal_via_photo(
                     job.status = "failed"
                     job.error_message = str(exc)
                     await db.commit()
+                    await refund_ai_credit(db, current_user.id, photo_job_request_key(job))
                     logger.error(
                         "event=meal_analysis_queue_failure_persisted transport=stream job_id=%s user_id=%s "
                         "job_status=%s",
@@ -1305,7 +1379,10 @@ async def refine_meal_estimate(
     db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default="en"),
 ) -> dict:
-    """Conversationally revises an existing AI meal estimate without saving it to the meal."""
+    """Conversationally revises an existing AI meal estimate without saving it to the meal.
+
+    Calory Pro only: free accounts adjust grams and ingredients manually."""
+    await ensure_pro_feature(current_user, db, "ai_refine")
     meal_repo = MealRepository(db)
     meal = await meal_repo.get(id)
 

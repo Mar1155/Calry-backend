@@ -535,6 +535,12 @@ async def test_meal_correction_tracking(client: AsyncClient, db_session, mock_es
 async def test_refine_meal_returns_unsaved_revision(client: AsyncClient, db_session, mock_estimation_result) -> None:
     headers = {"Authorization": "Bearer mock_token_refine_test"}
     await client.get("/api/v1/users/me", headers=headers)
+    # AI refinement is a Calory Pro feature.
+    await client.post(
+        "/api/v1/premium/sync",
+        json={"is_premium": True, "revenuecat_app_user_id": "refine_test_uid"},
+        headers=headers,
+    )
 
     with patch(
         "app.api.v1.routes.meals.AICalorieEstimationService.estimate_from_text",

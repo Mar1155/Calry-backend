@@ -95,3 +95,12 @@ class MemoryBeliefsResponse(BaseModel):
 class MemoryActionResponse(BaseModel):
     ok: bool
     detail: str
+
+
+class MemorySummaryResponse(BaseModel):
+    """Free accounts get the count and a teaser; Pro gets the beliefs too."""
+
+    total_beliefs_count: int
+    sample_teaser: str
+    is_locked: bool
+    beliefs: list[MemoryBeliefResponse] = Field(default_factory=list)

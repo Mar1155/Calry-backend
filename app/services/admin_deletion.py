@@ -1,5 +1,4 @@
 from __future__ import annotations
-from app.models.onboarding_event import OnboardingEvent
 
 import asyncio
 import datetime as dt
@@ -16,6 +15,7 @@ from app.core.config import settings
 from app.core.security import init_firebase
 from app.db.session import SessionLocal
 from app.models.admin import AdminAuditLog, UserDeletionJob
+from app.models.ai_usage import UserAiUsage
 from app.models.burned_calories import BurnedCalories
 from app.models.daily_summary import DailySummary
 from app.models.food_memory import UserFoodMemory
@@ -23,6 +23,7 @@ from app.models.inference import AIInferenceLog
 from app.models.insight import DetectedPattern, InsightSnapshot, UserInsightVersion
 from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
+from app.models.onboarding_event import OnboardingEvent
 from app.models.promo_code import PromoCodeAttempt, PromoCodeRedemption
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.scan_review import ScanReview
@@ -215,6 +216,7 @@ async def _delete_database_records(db: AsyncSession, job: UserDeletionJob) -> bo
         delete(DetectedPattern).where(DetectedPattern.user_id == user_id),
         delete(UserInsightVersion).where(UserInsightVersion.user_id == user_id),
         delete(MealAnalysisJob).where(MealAnalysisJob.user_id == user_id),
+        delete(UserAiUsage).where(UserAiUsage.user_id == user_id),
         delete(MealRevision).where(MealRevision.user_id == user_id),
         delete(MealItem).where(MealItem.meal_id.in_(meal_ids)),
         delete(Meal).where(Meal.user_id == user_id),

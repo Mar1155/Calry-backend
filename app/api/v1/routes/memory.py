@@ -12,8 +12,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
-from app.dependencies.premium import require_premium_user
+from app.dependencies.premium import has_premium_access, require_premium_user
 from app.memory import narrator
 from app.memory.repository import MemoryRepository
 from app.memory.service import MemoryService
@@ -29,6 +30,7 @@ from app.schemas.memory import (
     MemoryLatestResponse,
     MemoryMomentResponse,
     MemoryRevisionResponse,
+    MemorySummaryResponse,
     MemoryTimelineChapter,
     MemoryTimelineResponse,
     MemoryWhy,
@@ -143,6 +145,38 @@ async def _load_moment_with_why(repo: MemoryRepository, moment: MemoryMoment, lo
     belief = await repo.get_belief(moment.belief_id, moment.user_id) if moment.belief_id else None
     evidence = await repo.list_evidence(moment.belief_id) if moment.belief_id else []
     return _moment_response(moment, _why_for_moment(moment, belief, evidence), locale)
+
+
+_SUMMARY_TEASER = {
+    "en": "Food preferences and habits detected",
+    "it": "Preferenze alimentari e abitudini rilevate",
+    "es": "Preferencias alimentarias y hábitos detectados",
+    "zh": "已识别的饮食偏好和习惯",
+    "ja": "検出された食の好みと習慣",
+    "ar": "تم رصد التفضيلات الغذائية والعادات",
+}
+
+
+@router.get("/summary", response_model=MemorySummaryResponse)
+async def get_memory_summary(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: Annotated[str | None, Header()] = None,
+) -> MemorySummaryResponse:
+    """Available to every account: free users see how much Calry has learned
+    (a count, never the content); Pro users get the active beliefs."""
+    locale = _primary_locale(accept_language)
+    teaser = _SUMMARY_TEASER.get(locale, _SUMMARY_TEASER["en"])
+    is_pro = await has_premium_access(current_user, db)
+    if not settings.MEMORY_ENABLED:
+        return MemorySummaryResponse(total_beliefs_count=0, sample_teaser=teaser, is_locked=not is_pro)
+    beliefs = await MemoryRepository(db).list_beliefs(current_user.id)
+    return MemorySummaryResponse(
+        total_beliefs_count=len(beliefs),
+        sample_teaser=teaser,
+        is_locked=not is_pro,
+        beliefs=[_belief_response(belief, locale) for belief in beliefs] if is_pro else [],
+    )
 
 
 @router.get("/latest", response_model=MemoryLatestResponse)

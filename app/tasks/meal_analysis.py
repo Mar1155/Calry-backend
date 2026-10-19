@@ -13,6 +13,7 @@ from app.ai.services.calorie_estimation_service import AICalorieEstimationServic
 from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.db.session import SessionLocal, engine
+from app.dependencies.premium import refund_ai_credit
 from app.models.meal import Meal
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.user import User
@@ -372,6 +373,9 @@ async def _mark_job_failed(job_id: str, error: str) -> None:
                 job.error_message = error[:2000]
                 terminal_event = protocol.error("analysis_failed", "Photo analysis failed. Please try again.")
             await db.commit()
+            if job.status == "failed":
+                # The analysis produced no meal: give the free credit back.
+                await refund_ai_credit(db, job.user_id, job.client_request_id or job.id)
 
             logger.error(
                 "event=meal_analysis_worker_failure_persisted job_id=%s status=%s attempts=%s terminal=%s",

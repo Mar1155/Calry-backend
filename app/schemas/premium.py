@@ -27,3 +27,13 @@ class PromoCodeRedeemRequest(BaseModel):
 class PromoCodeRedeemResponse(PremiumStatusResponse):
     redeemed: bool
     message: str
+
+
+class AiQuotaResponse(BaseModel):
+    """Today's free AI analyses (photo and voice). ``unlimited`` for Pro."""
+
+    unlimited: bool
+    limit: int | None = None
+    used: int
+    remaining: int | None = None
+    reset_at: dt.datetime

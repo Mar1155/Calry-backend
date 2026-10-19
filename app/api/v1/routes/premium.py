@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
+from app.dependencies.premium import get_ai_quota_status
 from app.models.user import User
 from app.schemas.premium import (
+    AiQuotaResponse,
     PremiumStatusResponse,
     PremiumSyncRequest,
     PromoCodeRedeemRequest,
@@ -56,6 +58,22 @@ async def get_premium_status(
     """Retrieves current cached user subscription details from backend database."""
     service = PremiumService(db)
     return await service.get_premium_status(current_user)
+
+
+@router.get("/ai-quota", response_model=AiQuotaResponse)
+async def get_ai_quota(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AiQuotaResponse:
+    """Today's AI analysis allowance, so the app can show it before a scan."""
+    quota = await get_ai_quota_status(current_user, db)
+    return AiQuotaResponse(
+        unlimited=quota.unlimited,
+        limit=quota.limit,
+        used=quota.used,
+        remaining=quota.remaining,
+        reset_at=quota.reset_at,
+    )
 
 
 @router.post("/refresh", response_model=PremiumStatusResponse)

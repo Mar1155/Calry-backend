@@ -1,5 +1,5 @@
-from app.models.onboarding_event import OnboardingEvent
 from app.models.admin import AdminAuditLog, UserDeletionJob
+from app.models.ai_usage import UserAiUsage
 from app.models.app_setting import AppSetting
 from app.models.base import Base
 from app.models.burned_calories import BurnedCalories
@@ -28,6 +28,7 @@ from app.models.memory import (
     MemoryNarrative,
     MemorySuppression,
 )
+from app.models.onboarding_event import OnboardingEvent
 from app.models.promo_code import PromoCode, PromoCodeAttempt, PromoCodeRedemption
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.scan_review import ScanReview
@@ -44,6 +45,7 @@ __all__ = [
     "MealItem",
     "MealRevision",
     "MealAnalysisJob",
+    "UserAiUsage",
     "PromoCode",
     "PromoCodeRedemption",
     "PromoCodeAttempt",
