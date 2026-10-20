@@ -2,6 +2,12 @@ from abc import ABC, abstractmethod
 
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult
 from app.ai.schemas.meal_estimate import MealEstimateResult, SpeechTranscriptionResult, UserContext
+from app.ai.schemas.meal_review import (
+    DayReviewRequest,
+    DayReviewResult,
+    MealOccasionReviewRequest,
+    MealOccasionReviewResult,
+)
 
 
 class BaseAIProvider(ABC):
@@ -62,4 +68,24 @@ class BaseAIProvider(ABC):
         user_context: UserContext | None = None,
     ) -> MealCompletionResult:
         """Suggests meals/recipes to complete the remaining calorie target."""
+        pass
+
+    @abstractmethod
+    async def review_meal_occasion(
+        self,
+        review_req: MealOccasionReviewRequest,
+        user_context: UserContext | None = None,
+        locale: str = "en",
+    ) -> MealOccasionReviewResult:
+        """Reflects on one already-logged meal occasion (breakfast/lunch/dinner/snack)."""
+        pass
+
+    @abstractmethod
+    async def review_day(
+        self,
+        review_req: DayReviewRequest,
+        user_context: UserContext | None = None,
+        locale: str = "en",
+    ) -> DayReviewResult:
+        """Reflects on the whole day's logged meals, peak-end style."""
         pass

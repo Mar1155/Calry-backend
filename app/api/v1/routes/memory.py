@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
-from app.dependencies.premium import has_premium_access, require_premium_user
+from app.dependencies.premium import has_verified_premium_access, require_premium_user
 from app.memory import narrator
 from app.memory.repository import MemoryRepository
 from app.memory.service import MemoryService
@@ -167,7 +167,9 @@ async def get_memory_summary(
     (a count, never the content); Pro users get the active beliefs."""
     locale = _primary_locale(accept_language)
     teaser = _SUMMARY_TEASER.get(locale, _SUMMARY_TEASER["en"])
-    is_pro = await has_premium_access(current_user, db)
+    # Verified, not cached: the app reads this right after launch or a
+    # purchase, before the webhook may have updated the cache.
+    is_pro = await has_verified_premium_access(current_user, db)
     if not settings.MEMORY_ENABLED:
         return MemorySummaryResponse(total_beliefs_count=0, sample_teaser=teaser, is_locked=not is_pro)
     beliefs = await MemoryRepository(db).list_beliefs(current_user.id)

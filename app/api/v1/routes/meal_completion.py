@@ -7,13 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.schemas.meal_completion import MealCompletionRequest
 from app.ai.schemas.meal_estimate import UserContext
+from app.ai.schemas.meal_review import DayReviewMealFact, DayReviewRequest, MealOccasionReviewRequest
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.dependencies.db import get_db
 from app.dependencies.premium import require_premium_user
 from app.models.user import User
 from app.repositories.meal import MealRepository
 from app.schemas.meal_completion import MealCompletionPreferences, MealCompletionResponse, MealSuggestionResponse
-from app.schemas.meal_review import MealOccasionReviewResponse, MealReviewEvidence
+from app.schemas.meal_review import DayReviewMeal, DayReviewResponse, MealOccasionReviewResponse, MealReviewEvidence
 from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.meal_completion")
@@ -125,9 +126,195 @@ _REVIEW_COPY = {
 }
 
 
+_DAY_REVIEW_COPY = {
+    "en": {
+        "headline_one": "You logged {count} meal today, {calories} kcal so far.",
+        "headline_many": "You logged {count} meals today, {calories} kcal so far.",
+        "standout": "{meal} was the largest entry today at {calories} kcal.",
+        "macro": "Most recorded macro energy today comes from {macro}.",
+        "mixed": "Today's recorded macros are fairly mixed.",
+        "tip": "If you want more variety tomorrow, try a food group not already represented today.",
+        "coverage": "Based only on confirmed meals logged today; portions remain estimates.",
+    },
+    "it": {
+        "headline_one": "Hai registrato {count} pasto oggi, {calories} kcal finora.",
+        "headline_many": "Hai registrato {count} pasti oggi, {calories} kcal finora.",
+        "standout": "{meal} è stata la voce più corposa di oggi, con {calories} kcal.",
+        "macro": "La maggior parte dei macronutrienti di oggi proviene da {macro}.",
+        "mixed": "I macronutrienti di oggi sono distribuiti in modo abbastanza vario.",
+        "tip": "Se vuoi più varietà domani, prova un gruppo alimentare non ancora presente oggi.",
+        "coverage": "Basato solo sui pasti confermati registrati oggi; le porzioni restano stime.",
+    },
+    "es": {
+        "headline_one": "Registraste {count} comida hoy, {calories} kcal hasta ahora.",
+        "headline_many": "Registraste {count} comidas hoy, {calories} kcal hasta ahora.",
+        "standout": "{meal} fue la entrada más grande de hoy, con {calories} kcal.",
+        "macro": "La mayor parte de los macronutrientes de hoy procede de {macro}.",
+        "mixed": "Los macronutrientes de hoy están bastante repartidos.",
+        "tip": "Si quieres más variedad mañana, prueba un grupo de alimentos que hoy no aparezca.",
+        "coverage": "Basado solo en comidas confirmadas registradas hoy; las porciones siguen siendo estimaciones.",
+    },
+    "zh": {
+        "headline_one": "你今天记录了 {count} 餐，目前共 {calories} 千卡。",
+        "headline_many": "你今天记录了 {count} 餐，目前共 {calories} 千卡。",
+        "standout": "{meal}是今天份量最大的一餐，{calories} 千卡。",
+        "macro": "今天记录的宏量营养中，{macro}占比最高。",
+        "mixed": "今天记录的宏量营养分布较均衡。",
+        "tip": "如果明天想增加多样性，可以尝试今天没有的一类食物。",
+        "coverage": "仅基于今天已确认的记录；份量仍是估算值。",
+    },
+    "ja": {
+        "headline_one": "今日は{count}件の食事を記録し、現在{calories} kcalです。",
+        "headline_many": "今日は{count}件の食事を記録し、現在{calories} kcalです。",
+        "standout": "今日最も量が多かったのは{meal}で、{calories} kcalでした。",
+        "macro": "今日記録上もっとも多い栄養素は{macro}です。",
+        "mixed": "今日記録された栄養素は比較的分散しています。",
+        "tip": "明日さらに多様にしたい場合は、今日にない食品群を加えてみてください。",
+        "coverage": "今日確認済みの記録だけに基づきます。量は推定値です。",
+    },
+    "ar": {
+        "headline_one": "سجلت {count} وجبة اليوم، بإجمالي {calories} سعرة حتى الآن.",
+        "headline_many": "سجلت {count} وجبات اليوم، بإجمالي {calories} سعرة حتى الآن.",
+        "standout": "كانت {meal} أكبر عنصر اليوم بـ {calories} سعرة.",
+        "macro": "أكبر حصة من المغذيات اليوم تأتي من {macro}.",
+        "mixed": "المغذيات المسجلة اليوم موزعة بصورة متنوعة نسبيًا.",
+        "tip": "للمزيد من التنوع غدًا، جرّب مجموعة طعام غير موجودة اليوم.",
+        "coverage": "يعتمد فقط على الوجبات المؤكدة المسجلة اليوم؛ وتبقى الحصص تقديرية.",
+    },
+}
+
+_MACRO_TAGS = {
+    "protein": "protein-rich",
+    "carbohydrates": "carb-forward",
+    "fat": "fat-forward",
+}
+
+
 def _language(accept_language: str | None) -> str:
     primary = (accept_language or "en").split(",", 1)[0].split("-", 1)[0].strip().lower()
     return primary if primary in _REVIEW_COPY else "en"
+
+
+def _meal_macros(meals: list) -> tuple[dict[str, float], bool, str | None]:
+    macros = {
+        "protein": sum(meal.total_protein_g or 0 for meal in meals),
+        "carbohydrates": sum(meal.total_carbs_g or 0 for meal in meals),
+        "fat": sum(meal.total_fat_g or 0 for meal in meals),
+    }
+    known_macros = sum(macros.values()) > 0
+    macro_energy = {
+        "protein": macros["protein"] * 4,
+        "carbohydrates": macros["carbohydrates"] * 4,
+        "fat": macros["fat"] * 9,
+    }
+    dominant = max(macro_energy, key=macro_energy.get) if known_macros else None
+    return macros, known_macros, dominant
+
+
+@router.get("/review/day", response_model=DayReviewResponse)
+async def review_day(
+    current_user: User = Depends(require_premium_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
+) -> DayReviewResponse:
+    today = dt.date.today()
+    meal_repo = MealRepository(db)
+    meals = [
+        meal
+        for meal in await meal_repo.get_user_meals_on_date(current_user.id, today)
+        if meal.confirmed_calories is not None
+    ]
+    if not meals:
+        raise HTTPException(status_code=404, detail="No confirmed meals to review.")
+
+    meals.sort(key=lambda meal: meal.id)
+    signature = "|".join(
+        f"{meal.id}:{meal.confirmed_calories}:{meal.updated_at.isoformat() if meal.updated_at else ''}"
+        for meal in meals
+    )
+    fingerprint = hashlib.sha256(signature.encode()).hexdigest()[:24]
+    total_calories = sum(meal.confirmed_calories or 0 for meal in meals)
+    macros, known_macros, dominant = _meal_macros(meals)
+    lang = _language(accept_language)
+    copy = _DAY_REVIEW_COPY.get(lang, _DAY_REVIEW_COPY["en"])
+    labels = _EVIDENCE_LABELS[lang]
+    localized_macro = labels.get(dominant or "", "")
+    category_labels = _CATEGORY_LABELS[lang]
+
+    summary_service = SummaryService(db)
+    summary = await summary_service.sync_daily_summary(current_user.id, today)
+
+    largest_meal = max(meals, key=lambda meal: meal.confirmed_calories or 0)
+    fallback_headline_key = "headline_one" if len(meals) == 1 else "headline_many"
+    fallback_headline = copy[fallback_headline_key].format(count=len(meals), calories=total_calories)
+    fallback_standout = copy["standout"].format(
+        meal=largest_meal.meal_name or category_labels.get(largest_meal.meal_category, largest_meal.meal_category),
+        calories=largest_meal.confirmed_calories or 0,
+    )
+    fallback_balance = copy["macro"].format(macro=localized_macro) if known_macros else copy["mixed"]
+    fallback_tip = copy["tip"]
+    coverage_note = copy["coverage"]
+
+    headline, standout, balance_note, tip = fallback_headline, fallback_standout, fallback_balance, fallback_tip
+    try:
+        user_context = await _build_user_context(db, current_user, accept_language)
+        target_protein, target_carbs, target_fat = _macro_targets(current_user)
+        ai_service = AICalorieEstimationService(db)
+        ai_result = await ai_service.review_day(
+            DayReviewRequest(
+                meals=[
+                    DayReviewMealFact(
+                        name=meal.meal_name or category_labels.get(meal.meal_category, meal.meal_category),
+                        category=meal.meal_category,
+                        calories=meal.confirmed_calories or 0,
+                    )
+                    for meal in meals
+                ],
+                consumed_calories=summary.consumed_calories,
+                daily_goal=current_user.daily_calorie_goal,
+                remaining_calories=summary.remaining_calories,
+                protein_g=macros["protein"] if known_macros else None,
+                carbs_g=macros["carbohydrates"] if known_macros else None,
+                fat_g=macros["fat"] if known_macros else None,
+                target_protein_g=target_protein,
+                target_carbs_g=target_carbs,
+                target_fat_g=target_fat,
+            ),
+            user_context=user_context,
+            locale=lang,
+            user_id=current_user.id,
+        )
+        headline = ai_result.headline or fallback_headline
+        standout = ai_result.standout or fallback_standout
+        balance_note = ai_result.balance_note or fallback_balance
+        tip = ai_result.tomorrow_tip if ai_result.tomorrow_tip is not None else fallback_tip
+    except Exception as e:
+        logger.warning("AI day review failed, using deterministic fallback: %s", e)
+
+    return DayReviewResponse(
+        date=today.isoformat(),
+        fingerprint=fingerprint,
+        meal_count=len(meals),
+        consumed_calories=summary.consumed_calories,
+        daily_goal=current_user.daily_calorie_goal,
+        remaining_calories=summary.remaining_calories,
+        protein_g=macros["protein"] if known_macros else None,
+        carbs_g=macros["carbohydrates"] if known_macros else None,
+        fat_g=macros["fat"] if known_macros else None,
+        headline=headline,
+        standout=standout,
+        balance_note=balance_note,
+        tomorrow_tip=tip,
+        coverage_note=coverage_note,
+        meals=[
+            DayReviewMeal(
+                name=meal.meal_name or category_labels.get(meal.meal_category, meal.meal_category),
+                category=meal.meal_category,
+                calories=meal.confirmed_calories or 0,
+            )
+            for meal in meals
+        ],
+    )
 
 
 @router.get("/review/{category}", response_model=MealOccasionReviewResponse)
@@ -139,9 +326,11 @@ async def review_meal_occasion(
 ) -> MealOccasionReviewResponse:
     if category not in {"breakfast", "lunch", "dinner", "snack"}:
         raise HTTPException(status_code=422, detail="Unsupported meal category.")
+    today = dt.date.today()
+    meal_repo = MealRepository(db)
     meals = [
         meal
-        for meal in await MealRepository(db).get_user_meals_on_date(current_user.id, dt.date.today())
+        for meal in await meal_repo.get_user_meals_on_date(current_user.id, today)
         if meal.meal_category == category and meal.confirmed_calories is not None
     ]
     if not meals:
@@ -155,26 +344,13 @@ async def review_meal_occasion(
     )
     fingerprint = hashlib.sha256(signature.encode()).hexdigest()[:24]
     total_calories = sum(meal.confirmed_calories or 0 for meal in meals)
-    macros = {
-        "protein": sum(meal.total_protein_g or 0 for meal in meals),
-        "carbohydrates": sum(meal.total_carbs_g or 0 for meal in meals),
-        "fat": sum(meal.total_fat_g or 0 for meal in meals),
-    }
+    macros, known_macros, dominant = _meal_macros(meals)
     lang = _language(accept_language)
     copy = _REVIEW_COPY[lang]
     label = _CATEGORY_LABELS[lang][category]
-    known_macros = sum(macros.values()) > 0
-    macro_energy = {
-        "protein": macros["protein"] * 4,
-        "carbohydrates": macros["carbohydrates"] * 4,
-        "fat": macros["fat"] * 9,
-    }
-    dominant = max(macro_energy, key=macro_energy.get) if known_macros else None
     labels = _EVIDENCE_LABELS[lang]
     localized_macro = labels.get(dominant or "", "")
-    opening = copy["one"] if len(meals) == 1 else copy["many"]
-    observation = opening.format(category=label, count=len(meals))
-    observation += " " + (copy["macro"].format(macro=localized_macro) if known_macros else copy["mixed"])
+
     evidence = [
         MealReviewEvidence(label=labels["energy"], value=f"{total_calories} kcal"),
         MealReviewEvidence(label=labels["entries"], value=str(len(meals))),
@@ -185,6 +361,49 @@ async def review_meal_occasion(
             for name, value in macros.items()
             if value > 0
         )
+    coverage_note = copy["coverage"].format(category=label)
+
+    # Deterministic fallback copy (used if the AI call fails).
+    opening = copy["one"] if len(meals) == 1 else copy["many"]
+    fallback_headline = opening.format(category=label, count=len(meals))
+    fallback_balance = copy["macro"].format(macro=localized_macro) if known_macros else copy["mixed"]
+    fallback_suggestion = (
+        copy["suggestion"] if len({item.name.lower() for meal in meals for item in meal.items}) < 4 else None
+    )
+    fallback_tags = [_MACRO_TAGS[dominant]] if dominant else []
+
+    headline, balance_note, suggestion, tags = fallback_headline, fallback_balance, fallback_suggestion, fallback_tags
+    try:
+        summary_service = SummaryService(db)
+        summary = await summary_service.sync_daily_summary(current_user.id, today)
+        user_context = await _build_user_context(db, current_user, accept_language)
+        target_protein, target_carbs, target_fat = _macro_targets(current_user)
+        ai_service = AICalorieEstimationService(db)
+        ai_result = await ai_service.review_meal_occasion(
+            MealOccasionReviewRequest(
+                category=category,
+                meal_names=[meal.meal_name for meal in meals if meal.meal_name],
+                total_calories=total_calories,
+                protein_g=macros["protein"] if known_macros else None,
+                carbs_g=macros["carbohydrates"] if known_macros else None,
+                fat_g=macros["fat"] if known_macros else None,
+                target_protein_g=target_protein,
+                target_carbs_g=target_carbs,
+                target_fat_g=target_fat,
+                remaining_calories=summary.remaining_calories,
+                daily_goal=current_user.daily_calorie_goal,
+            ),
+            user_context=user_context,
+            locale=lang,
+            user_id=current_user.id,
+        )
+        headline = ai_result.headline or fallback_headline
+        balance_note = ai_result.balance_note or fallback_balance
+        suggestion = ai_result.suggestion if ai_result.suggestion is not None else fallback_suggestion
+        tags = ai_result.tags or fallback_tags
+    except Exception as e:
+        logger.warning("AI meal occasion review failed, using deterministic fallback: %s", e)
+
     return MealOccasionReviewResponse(
         category=category,
         meal_ids=meal_ids,
@@ -194,11 +413,11 @@ async def review_meal_occasion(
         protein_g=macros["protein"] if known_macros else None,
         carbs_g=macros["carbohydrates"] if known_macros else None,
         fat_g=macros["fat"] if known_macros else None,
-        observation=observation,
-        suggestion=copy["suggestion"]
-        if len({item.name.lower() for meal in meals for item in meal.items}) < 4
-        else None,
-        coverage_note=copy["coverage"].format(category=label),
+        headline=headline,
+        balance_note=balance_note,
+        suggestion=suggestion,
+        tags=tags,
+        coverage_note=coverage_note,
         evidence=evidence,
     )
 

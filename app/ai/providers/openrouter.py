@@ -46,6 +46,12 @@ from app.ai.prompts.meal_refinement import (
     MEAL_REFINEMENT_SYSTEM_PROMPT,
     build_meal_refinement_user_prompt,
 )
+from app.ai.prompts.meal_review import (
+    DAY_REVIEW_PROMPT_VERSION,
+    DAY_REVIEW_SYSTEM_PROMPT,
+    MEAL_OCCASION_REVIEW_PROMPT_VERSION,
+    MEAL_OCCASION_REVIEW_SYSTEM_PROMPT,
+)
 from app.ai.providers.base import BaseAIProvider
 from app.ai.schemas.ingredient_image import IngredientImageResult
 from app.ai.schemas.ingredient_translation import (
@@ -61,6 +67,12 @@ from app.ai.schemas.meal_estimate import (
     MealEstimateResult,
     SpeechTranscriptionResult,
     UserContext,
+)
+from app.ai.schemas.meal_review import (
+    DayReviewRequest,
+    DayReviewResult,
+    MealOccasionReviewRequest,
+    MealOccasionReviewResult,
 )
 from app.core.config import settings
 
@@ -1419,6 +1431,151 @@ class OpenRouterProvider(BaseAIProvider):
             macro_balance_note=parsed.get("macro_balance_note", ""),
             model_name=model,
             prompt_version=MEAL_COMPLETION_PROMPT_VERSION,
+            raw_output=raw_text,
+            latency_ms=latency_ms,
+            token_usage=self._normalize_usage(usage),
+        )
+
+    def _output_language(self, locale_or_context: UserContext | str | None) -> str:
+        locale = locale_or_context.locale if isinstance(locale_or_context, UserContext) else locale_or_context
+        if not locale:
+            return "English"
+        primary = locale.split("-")[0].split("_")[0].strip().lower()
+        return _LANGUAGE_NAMES.get(primary, "English")
+
+    async def review_meal_occasion(
+        self,
+        review_req: MealOccasionReviewRequest,
+        user_context: UserContext | None = None,
+        locale: str = "en",
+    ) -> MealOccasionReviewResult:
+        model = settings.OPENROUTER_TEXT_MODEL
+        context_str = self._build_user_context(user_context, leading_blank=True)
+
+        def _target(value: float | None) -> str:
+            return f"{value:g}g" if value is not None else "not set"
+
+        req_info = (
+            f"Meal Occasion: {review_req.category}\n"
+            f"Entries: {', '.join(review_req.meal_names) if review_req.meal_names else 'none named'}\n"
+            f"Total Calories: {review_req.total_calories} kcal\n"
+            f"Protein: {review_req.protein_g:g}g (target: {_target(review_req.target_protein_g)})\n"
+            if review_req.protein_g is not None
+            else (
+                f"Meal Occasion: {review_req.category}\n"
+                f"Entries: {', '.join(review_req.meal_names) if review_req.meal_names else 'none named'}\n"
+                f"Total Calories: {review_req.total_calories} kcal\n"
+                "Macros: not recorded for this meal\n"
+            )
+        )
+        if review_req.protein_g is not None:
+            req_info += (
+                f"Carbohydrates: {review_req.carbs_g:g}g (target: {_target(review_req.target_carbs_g)})\n"
+                f"Fat: {review_req.fat_g:g}g (target: {_target(review_req.target_fat_g)})\n"
+            )
+        if review_req.remaining_calories is not None and review_req.daily_goal is not None:
+            req_info += (
+                f"Remaining Calories Today (after this meal): {review_req.remaining_calories} kcal "
+                f"out of a {review_req.daily_goal} kcal daily reference\n"
+            )
+
+        output_lang = self._output_language(user_context) if user_context else self._output_language(locale)
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    f"Reflect on this already-logged meal occasion:\n{req_info}{context_str}\n\n"
+                    f"Write all free-text fields (headline, balance_note, suggestion, tags) in this language: "
+                    f"{output_lang}."
+                ),
+            }
+        ]
+
+        raw_text, latency_ms, usage, _ = await self._post_openrouter(
+            model=model,
+            system_prompt=MEAL_OCCASION_REVIEW_SYSTEM_PROMPT,
+            messages=messages,
+            response_format={"type": "json_object"},
+        )
+        try:
+            parsed = json.loads(self._extract_json(raw_text))
+        except json.JSONDecodeError as e:
+            parsed = await self._repair_json(raw_text, str(e), MealOccasionReviewResult)
+
+        tags = [tag for tag in (parsed.get("tags") or []) if isinstance(tag, str) and tag.strip()][:3]
+        return MealOccasionReviewResult(
+            headline=parsed.get("headline", "") or "",
+            balance_note=parsed.get("balance_note", "") or "",
+            suggestion=parsed.get("suggestion") or None,
+            tags=tags,
+            model_name=model,
+            prompt_version=MEAL_OCCASION_REVIEW_PROMPT_VERSION,
+            raw_output=raw_text,
+            latency_ms=latency_ms,
+            token_usage=self._normalize_usage(usage),
+        )
+
+    async def review_day(
+        self,
+        review_req: DayReviewRequest,
+        user_context: UserContext | None = None,
+        locale: str = "en",
+    ) -> DayReviewResult:
+        model = settings.OPENROUTER_TEXT_MODEL
+        context_str = self._build_user_context(user_context, leading_blank=True)
+
+        def _target(value: float | None) -> str:
+            return f"{value:g}g" if value is not None else "not set"
+
+        meals_lines = (
+            "\n".join(f"- {meal.name} ({meal.category}): {meal.calories} kcal" for meal in review_req.meals)
+            or "- none named"
+        )
+        req_info = (
+            f"Meals logged today:\n{meals_lines}\n\n"
+            f"Consumed Calories: {review_req.consumed_calories} kcal\n"
+            f"Daily Calorie Goal: {review_req.daily_goal} kcal\n"
+            f"Remaining Calories: {review_req.remaining_calories} kcal\n"
+        )
+        if review_req.protein_g is not None:
+            req_info += (
+                f"Protein: {review_req.protein_g:g}g (target: {_target(review_req.target_protein_g)})\n"
+                f"Carbohydrates: {review_req.carbs_g:g}g (target: {_target(review_req.target_carbs_g)})\n"
+                f"Fat: {review_req.fat_g:g}g (target: {_target(review_req.target_fat_g)})\n"
+            )
+        else:
+            req_info += "Macros: not recorded today\n"
+
+        output_lang = self._output_language(user_context) if user_context else self._output_language(locale)
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    f"Reflect on today's logged meals:\n{req_info}{context_str}\n\n"
+                    f"Write all free-text fields (headline, standout, balance_note, tomorrow_tip) in this language: "
+                    f"{output_lang}."
+                ),
+            }
+        ]
+
+        raw_text, latency_ms, usage, _ = await self._post_openrouter(
+            model=model,
+            system_prompt=DAY_REVIEW_SYSTEM_PROMPT,
+            messages=messages,
+            response_format={"type": "json_object"},
+        )
+        try:
+            parsed = json.loads(self._extract_json(raw_text))
+        except json.JSONDecodeError as e:
+            parsed = await self._repair_json(raw_text, str(e), DayReviewResult)
+
+        return DayReviewResult(
+            headline=parsed.get("headline", "") or "",
+            standout=parsed.get("standout", "") or "",
+            balance_note=parsed.get("balance_note", "") or "",
+            tomorrow_tip=parsed.get("tomorrow_tip") or None,
+            model_name=model,
+            prompt_version=DAY_REVIEW_PROMPT_VERSION,
             raw_output=raw_text,
             latency_ms=latency_ms,
             token_usage=self._normalize_usage(usage),

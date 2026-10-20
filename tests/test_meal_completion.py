@@ -216,12 +216,62 @@ async def test_meal_review_uses_only_owned_confirmed_category_entries(
     assert body["category"] == "lunch"
     assert body["meal_ids"] == [meal.id]
     assert body["total_calories"] == 620
-    assert "pranzo" in body["observation"]
+    assert "pranzo" in body["headline"]
     assert body["fingerprint"]
     assert len(body["evidence"]) >= 4
 
     empty = await client.get("/api/v1/meals/review/dinner", headers=headers)
     assert empty.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_day_review_aggregates_todays_confirmed_meals(client: AsyncClient, db_session: AsyncSession) -> None:
+    headers = {
+        "Authorization": "Bearer mock_token_day_review",
+        "Accept-Language": "it",
+    }
+    profile = await client.get("/api/v1/users/me", headers=headers)
+    user_id = profile.json()["id"]
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "pro_subscription",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "day_review",
+        },
+    )
+
+    missing = await client.get("/api/v1/meals/review/day", headers=headers)
+    assert missing.status_code == 404
+
+    meal = Meal(
+        user_id=user_id,
+        source_type="text",
+        original_input="pasta e pollo",
+        meal_name="Pasta e pollo",
+        meal_category="lunch",
+        estimated_calories=620,
+        confirmed_calories=620,
+        total_protein_g=42,
+        total_carbs_g=70,
+        total_fat_g=18,
+        created_at=dt.datetime.now(dt.UTC),
+    )
+    db_session.add(meal)
+    await db_session.commit()
+
+    response = await client.get("/api/v1/meals/review/day", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meal_count"] == 1
+    assert body["consumed_calories"] == 620
+    assert body["headline"]
+    assert body["standout"]
+    assert body["balance_note"]
+    assert body["fingerprint"]
+    assert body["meals"][0]["name"] == "Pasta e pollo"
 
 
 @pytest.mark.asyncio

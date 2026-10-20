@@ -87,7 +87,7 @@ async def ensure_history_date_access(
     db: AsyncSession,
 ) -> None:
     """Free accounts may read and edit today plus the previous six days."""
-    if date_value >= free_history_cutoff() or await has_premium_access(user, db):
+    if date_value >= free_history_cutoff() or await has_verified_premium_access(user, db):
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
