@@ -21,8 +21,8 @@ class Settings(BaseSettings):
 
     # Sentry error/performance monitoring. Unset in dev to keep local runs quiet.
     SENTRY_DSN: str | None = None
-    SENTRY_TRACES_SAMPLE_RATE: float = 1.0
-    SENTRY_PROFILE_SESSION_SAMPLE_RATE: float = 1.0
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    SENTRY_PROFILE_SESSION_SAMPLE_RATE: float = 0.01
 
     # CORS — comma-separated allowed origins, or "*" for all.
     # In production set an explicit list (e.g. "https://app.calry.ai") to allow

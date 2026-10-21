@@ -10,6 +10,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.public.legal import router as legal_router
 from app.api.v1.routes.admin import router as admin_router
@@ -86,6 +88,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class SelectiveGZipMiddleware:
+    """GZip JSON responses, but never NDJSON streams or binary media.
+
+    Starlette's GZipMiddleware only exempts ``text/event-stream``. Compressing the
+    ``/stream`` meal analysis routes would buffer events and break incremental
+    delivery; photos and audio are already compressed.
+    """
+
+    _SKIP_SUFFIXES = ("/stream", "/media")
+    _SKIP_PREFIXES = ("/static",)
+
+    def __init__(self, app: ASGIApp, minimum_size: int = 1024, compresslevel: int = 6) -> None:
+        self.app = app
+        self.gzip = GZipMiddleware(app, minimum_size=minimum_size, compresslevel=compresslevel)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if not path or path.endswith(self._SKIP_SUFFIXES) or path.startswith(self._SKIP_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+        await self.gzip(scope, receive, send)
+
+
+app.add_middleware(SelectiveGZipMiddleware)
 
 
 # Mount static files directory

@@ -28,6 +28,8 @@ class Meal(Base):
         # are allowed, so legacy/keyless logs are unaffected.
         UniqueConstraint("user_id", "client_request_id", name="uq_meal_user_request"),
         Index("ix_meals_user_local_date", "user_id", "local_date"),
+        # Timeline query: WHERE user_id = ? ORDER BY created_at DESC (scanned backward).
+        Index("ix_meals_user_created_at", "user_id", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
