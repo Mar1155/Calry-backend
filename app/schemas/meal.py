@@ -156,6 +156,8 @@ class MealResponse(BaseModel):
     needs_clarification: bool = False
     clarifying_question: str | None = None
     created_at: dt.datetime
+    # Diary day in the user's timezone at logging time; use it for per-day grouping.
+    local_date: dt.date | None = None
     confirmed_at: dt.datetime | None = None
     items: list[MealItemResponse] = Field(..., min_length=1)
     detected_regions: list[DetectedRegion] | None = None

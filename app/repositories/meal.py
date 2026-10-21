@@ -29,27 +29,27 @@ class MealRepository(BaseRepository[Meal]):
         return None
 
     async def get_by_user(
-        self, user_id: int, skip: int = 0, limit: int = 50, cutoff_date: dt.datetime | None = None
+        self, user_id: int, skip: int = 0, limit: int = 50, cutoff_date: dt.date | None = None
     ) -> list[Meal]:
-        """Fetches a user's logged meals in descending order of creation (most recent first)."""
+        """Fetches a user's logged meals in descending order of creation (most recent first).
+
+        ``cutoff_date`` is the first visible day of the user's calendar.
+        """
         stmt = select(Meal).where(Meal.user_id == user_id)
         if cutoff_date is not None:
-            stmt = stmt.where(Meal.created_at >= cutoff_date)
+            stmt = stmt.where(Meal.local_date >= cutoff_date)
         stmt = stmt.order_by(desc(Meal.created_at)).offset(skip).limit(limit)
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def get_user_meals_on_date(self, user_id: int, date_val: dt.date) -> list[Meal]:
-        """Gets all meals logged by a user on a specific calendar date.
+        """Gets all meals logged on one day of the user's calendar.
 
         Used primarily for calculating dynamic daily summaries.
         """
-        start_dt = dt.datetime.combine(date_val, dt.time.min).replace(tzinfo=dt.UTC)
-        end_dt = dt.datetime.combine(date_val, dt.time.max).replace(tzinfo=dt.UTC)
         stmt = select(Meal).where(
             Meal.user_id == user_id,
-            Meal.created_at >= start_dt,
-            Meal.created_at <= end_dt,
+            Meal.local_date == date_val,
         )
         result = await self.db.execute(stmt)
         return list(result.scalars().all())

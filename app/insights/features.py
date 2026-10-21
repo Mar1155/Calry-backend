@@ -107,7 +107,8 @@ class FeatureExtractor:
         corrections: list[CorrectionFeatures] = []
 
         for meal in meals:
-            meal_date = cls._date(meal.created_at)
+            # The diary day the meal was logged on, in the user's timezone.
+            meal_date = getattr(meal, "local_date", None) or cls._date(meal.created_at)
             if not start_date <= meal_date <= end_date:
                 continue
             meals_by_date.setdefault(meal_date, []).append(meal)

@@ -25,3 +25,5 @@ class BurnedCaloriesResponse(BaseModel):
     activity_name: str | None = None
     calories: int
     created_at: dt.datetime
+    # Diary day in the user's timezone; use it for per-day grouping.
+    local_date: dt.date | None = None

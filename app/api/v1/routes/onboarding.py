@@ -1,9 +1,10 @@
 import datetime as dt
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_time import client_today
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.insights.versioning import DomainEvent, InsightVersionService
@@ -80,13 +81,13 @@ async def complete_onboarding(payload: CompleteOnboardingRequest, current_user: 
     current_user.onboarding_journey_id = payload.journey_id
     db.add(current_user)
     await db.flush()
-    await SummaryService(db).sync_daily_summary(current_user.id, dt.date.today())
+    await SummaryService(db).sync_daily_summary(current_user.id, client_today())
     await InsightVersionService(db).record(
         current_user.id,
         DomainEvent.PROFILE_CHANGED,
         DomainEvent.TARGET_CHANGED,
         DomainEvent.WEIGHT_UPDATED,
-        affected_date=dt.date.today(),
+        affected_date=client_today(),
     )
     return {"status": "completed", "daily_calorie_goal": current_user.daily_calorie_goal, "goal_type": current_user.goal_type, "activity_level": current_user.activity_level, "target_pace": current_user.target_pace, "calorie_target_source": current_user.calorie_target_source, "onboarding_completed_at": current_user.onboarding_completed_at}
 
@@ -105,8 +106,10 @@ async def mark_offer_handled(current_user: User = Depends(get_current_user), db:
 # completion assertions. Business outcomes come from users/meals/RevenueCat.
 from collections import OrderedDict
 from time import monotonic
+
 from fastapi import Request
 from sqlalchemy import delete
+
 from app.models.onboarding_event import OnboardingEvent
 from app.schemas.onboarding_event import OnboardingEventBatch
 

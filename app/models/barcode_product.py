@@ -1,6 +1,6 @@
 import datetime as dt
 
-from sqlalchemy import CheckConstraint, DateTime, Float, Integer, JSON, String
+from sqlalchemy import JSON, CheckConstraint, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base

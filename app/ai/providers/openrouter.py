@@ -85,6 +85,8 @@ _LANGUAGE_NAMES = {
     "zh": "Chinese",
     "ja": "Japanese",
     "ar": "Arabic",
+    "de": "German",
+    "fr": "French",
 }
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"

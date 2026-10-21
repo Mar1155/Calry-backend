@@ -8,6 +8,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_time import client_today
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.ai_usage import UserAiUsage
@@ -78,7 +79,7 @@ async def require_premium_user(
 
 
 def free_history_cutoff(today: dt.date | None = None) -> dt.date:
-    return (today or dt.date.today()) - dt.timedelta(days=FREE_HISTORY_DAYS - 1)
+    return (today or client_today()) - dt.timedelta(days=FREE_HISTORY_DAYS - 1)
 
 
 async def ensure_history_date_access(
@@ -105,6 +106,8 @@ class AiQuotaStatus:
 
 
 def _ai_usage_today() -> dt.date:
+    # Deliberately UTC, unlike diary days: a quota keyed on the device zone
+    # could be refilled by switching timezones. The app shows reset_at locally.
     return dt.datetime.now(dt.UTC).date()
 
 

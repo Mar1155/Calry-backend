@@ -219,7 +219,8 @@ class CandidateFactory:
         for meal in meals:
             name = (getattr(meal, "meal_name", None) or "").strip()
             if name:
-                normalized.append((name.casefold(), name, meal.created_at.date()))
+                day = getattr(meal, "local_date", None) or meal.created_at.date()
+                normalized.append((name.casefold(), name, day))
         counts = Counter(key for key, _, _ in normalized)
         if not counts:
             return None

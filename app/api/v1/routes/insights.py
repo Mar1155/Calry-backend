@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.ai.providers.openrouter import OpenRouterProvider
+from app.core.client_time import client_today
 from app.core.config import settings
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
@@ -239,8 +240,6 @@ async def _load_features(
     end_date: dt.date,
 ) -> tuple[FeatureSnapshot, list[Meal]]:
     start_date = end_date - dt.timedelta(days=period_days - 1)
-    start_datetime = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.UTC)
-    end_datetime = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
 
     summary_result = await db.execute(
         select(DailySummary).where(
@@ -252,8 +251,8 @@ async def _load_features(
     meal_result = await db.execute(
         select(Meal).where(
             Meal.user_id == user.id,
-            Meal.created_at >= start_datetime,
-            Meal.created_at < end_datetime,
+            Meal.local_date >= start_date,
+            Meal.local_date <= end_date,
         )
     )
     summaries = list(summary_result.scalars().all())
@@ -279,7 +278,7 @@ async def get_weekly_report(
     accept_language: Annotated[str | None, Header()] = None,
 ) -> WeeklyReportResponse:
     """Returns deterministic weekly metrics plus one voiced verified pattern."""
-    snapshot, meals = await _load_features(db, current_user, period_days=7, end_date=dt.date.today())
+    snapshot, meals = await _load_features(db, current_user, period_days=7, end_date=client_today())
     logged_days = snapshot.logged_days
 
     meal_names = [meal.meal_name for meal in meals if meal.meal_name]
@@ -312,7 +311,7 @@ async def get_pattern_insights(
     accept_language: Annotated[str | None, Header()] = None,
 ) -> PatternInsightsResponse:
     """Voices at most four patterns already verified by deterministic detectors."""
-    snapshot, _ = await _load_features(db, current_user, period_days=30, end_date=dt.date.today())
+    snapshot, _ = await _load_features(db, current_user, period_days=30, end_date=client_today())
     verified_patterns = InsightEngine().generate(snapshot, limit=4)
     insights = await OpenRouterProvider().generate_pattern_insights(
         verified_patterns,

@@ -7,6 +7,7 @@ from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.client_time import client_today
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.daily_summary import DailySummary
@@ -42,7 +43,7 @@ async def get_streak(
 
     logged_dates = sorted({s.date for s in summaries}, reverse=True)
 
-    today = dt.date.today()
+    today = client_today()
     yesterday = today - dt.timedelta(days=1)
 
     # Current streak: consecutive days ending today or yesterday

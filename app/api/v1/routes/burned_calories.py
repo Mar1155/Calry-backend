@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_time import client_today, current_timezone
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.dependencies.premium import ensure_history_date_access
@@ -23,9 +24,9 @@ router = APIRouter()
 
 
 def logged_moment(day: dt.date) -> dt.datetime:
-    """Timestamp for an entry logged onto ``day`` after the fact. Days are UTC
-    calendar days (see get_user_burned_on_date), so midday keeps it inside."""
-    return dt.datetime.combine(day, dt.time(12, 0), tzinfo=dt.UTC)
+    """Timestamp for an entry logged onto ``day`` after the fact: midday on the
+    user's clock, which no DST transition skips or repeats."""
+    return dt.datetime.combine(day, dt.time(12, 0), tzinfo=current_timezone()).astimezone(dt.UTC)
 
 
 async def _sync_day(db: AsyncSession, user_id: int, day: dt.date, event: DomainEvent) -> None:
@@ -40,7 +41,7 @@ async def _owned_entry(db: AsyncSession, entry_id: int, user: User) -> BurnedCal
     entry = await BurnedCaloriesRepository(db).get(entry_id)
     if entry is None or entry.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found.")
-    await ensure_history_date_access(entry.created_at.date(), user, db)
+    await ensure_history_date_access(entry.local_date, user, db)
     return entry
 
 
@@ -65,17 +66,18 @@ async def log_energy_expenditure(
         calories=payload.calories,
     )
     if payload.date is not None:
-        if payload.date > dt.date.today():
+        if payload.date > client_today():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Activity cannot be logged on a future date.",
             )
         await ensure_history_date_access(payload.date, current_user, db)
         entry.created_at = logged_moment(payload.date)
+        entry.local_date = payload.date
     await BurnedCaloriesRepository(db).create(entry)
     await db.flush()
 
-    await _sync_day(db, current_user.id, entry.created_at.date(), DomainEvent.ACTIVITY_LOGGED)
+    await _sync_day(db, current_user.id, entry.local_date, DomainEvent.ACTIVITY_LOGGED)
     return entry
 
 
@@ -114,7 +116,7 @@ async def update_burned_calories(
     for field, value in changes.items():
         setattr(entry, field, value)
     await db.flush()
-    await _sync_day(db, current_user.id, entry.created_at.date(), DomainEvent.ACTIVITY_LOGGED)
+    await _sync_day(db, current_user.id, entry.local_date, DomainEvent.ACTIVITY_LOGGED)
     return entry
 
 
@@ -126,7 +128,7 @@ async def delete_burned_calories(
 ) -> None:
     """Removes an activity entry on any day; resyncs that day's summary."""
     entry = await _owned_entry(db, entry_id, current_user)
-    day = entry.created_at.date()
+    day = entry.local_date
     await db.delete(entry)
     await db.flush()
     await _sync_day(db, current_user.id, day, DomainEvent.ACTIVITY_DELETED)

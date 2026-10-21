@@ -196,7 +196,7 @@ async def log_from_memory(
     # Sync daily summary
     try:
         summary_service = SummaryService(db)
-        await summary_service.sync_daily_summary(current_user.id, meal.created_at.date())
+        await summary_service.sync_daily_summary(current_user.id, meal.local_date)
     except Exception as e:
         logger.error(f"Failed to sync daily summary on memory log: {e}")
 

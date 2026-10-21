@@ -58,7 +58,7 @@ class OnboardingEventInput(BaseModel):
         Literal["welcome", "goal", "formula", "age", "height", "weight", "activity", "target", "account", "offer"]
         | None
     ) = None
-    locale: Literal["en", "it", "es", "zh", "ja", "ar"]
+    locale: Literal["en", "it", "es", "zh", "ja", "ar", "de", "fr"]
     platform: Literal["ios", "android", "macos", "windows", "linux", "fuchsia", "web"]
     session_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     onboarding_version: int | None = Field(default=None, ge=1, le=100)

@@ -50,7 +50,7 @@ def _primary_locale(accept_language: str | None) -> str:
     if not accept_language:
         return "en"
     primary = accept_language.split(",")[0].split("-")[0].split("_")[0].strip().lower()
-    return primary if primary in {"en", "it", "es", "zh", "ja", "ar"} else "en"
+    return primary if primary in {"en", "it", "es", "zh", "ja", "ar", "de", "fr"} else "en"
 
 
 def _why_from_evidence(belief: MemoryBelief | None, evidence: list[MemoryEvidence]) -> MemoryWhy:
@@ -154,6 +154,8 @@ _SUMMARY_TEASER = {
     "zh": "已识别的饮食偏好和习惯",
     "ja": "検出された食の好みと習慣",
     "ar": "تم رصد التفضيلات الغذائية والعادات",
+    "de": "Erkannte Essensvorlieben und Gewohnheiten",
+    "fr": "Préférences alimentaires et habitudes détectées",
 }
 
 

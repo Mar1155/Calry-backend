@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts.insights import STORY_VERBALIZATION_PROMPT_VERSION
 from app.ai.providers.openrouter import OpenRouterProvider
+from app.core.client_time import client_today
 from app.core.config import settings
 from app.insights.comparison import PatternChange, PatternComparer, payload_hash
 from app.insights.detectors import PatternDetector
@@ -85,8 +86,6 @@ class InsightSnapshotService:
         raise ValueError(f"Unsupported insight scope: {scope}")
 
     async def _load_features(self, user: User, start: dt.date, end: dt.date) -> FeatureSnapshot:
-        start_datetime = dt.datetime.combine(start, dt.time.min, tzinfo=dt.UTC)
-        end_datetime = dt.datetime.combine(end + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
         summaries_result = await self.db.execute(
             select(DailySummary).where(
                 DailySummary.user_id == user.id,
@@ -97,8 +96,8 @@ class InsightSnapshotService:
         meals_result = await self.db.execute(
             select(Meal).where(
                 Meal.user_id == user.id,
-                Meal.created_at >= start_datetime,
-                Meal.created_at < end_datetime,
+                Meal.local_date >= start,
+                Meal.local_date <= end,
             )
         )
         return FeatureExtractor.extract(
@@ -197,7 +196,7 @@ class InsightSnapshotService:
         today: dt.date | None = None,
     ) -> InsightStoriesResponse:
         locale = self._locale(locale)
-        today = today or dt.date.today()
+        today = today or client_today()
         start, end = self._period(scope, today, period_start)
         all_versions = await InsightVersionService(self.db).current(user.id)
         relevant_versions = self._relevant_versions(all_versions)

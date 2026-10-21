@@ -9,6 +9,7 @@ from sqlalchemy import desc, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_time import UTC_ZONE, local_date, parse_timezone
 from app.core.config import settings
 from app.insights.detectors import PatternDetector
 from app.insights.features import FeatureExtractor, FeatureSnapshot
@@ -200,8 +201,6 @@ class ProactiveInsightService:
         self, user: User, *, end_date: dt.date, period_days: int
     ) -> tuple[FeatureSnapshot, list[Meal]]:
         start_date = end_date - dt.timedelta(days=period_days - 1)
-        start_at = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.UTC)
-        end_at = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
         summaries = list(
             (
                 await self.db.scalars(
@@ -218,8 +217,8 @@ class ProactiveInsightService:
                 await self.db.scalars(
                     select(Meal).where(
                         Meal.user_id == user.id,
-                        Meal.created_at >= start_at,
-                        Meal.created_at < end_at,
+                        Meal.local_date >= start_date,
+                        Meal.local_date <= end_date,
                     )
                 )
             ).all()
@@ -251,7 +250,8 @@ class ProactiveInsightService:
         elif event.trigger in PERIODIC_TRIGGERS and event.affected_date is not None:
             end_date = event.affected_date
         else:
-            end_date = dt.date.today()
+            # Event-driven runs: "today" on the user's own calendar.
+            end_date = local_date(now, parse_timezone(user.timezone) or UTC_ZONE)
         period_days = self._period_days(event.trigger)
         snapshot, meals = await self._load_features(user, end_date=end_date, period_days=period_days)
         domains = self._event_domains(event.trigger)
@@ -575,7 +575,9 @@ class ProactiveInsightService:
         }
         event_ids: list[str] = []
         for user in users:
-            timezone = preferences.get(user.id).timezone if user.id in preferences else "UTC"
+            # The zone the app last reported wins over the notification
+            # preference, which defaults to UTC until that screen is opened.
+            timezone = user.timezone or (preferences[user.id].timezone if user.id in preferences else "UTC")
             try:
                 local = now.astimezone(ZoneInfo(timezone))
             except ZoneInfoNotFoundError:

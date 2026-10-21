@@ -5,9 +5,11 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -16,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.local_day import track_local_date
 
 
 class Meal(Base):
@@ -24,6 +27,7 @@ class Meal(Base):
         # Idempotency (C13): a client request id is unique per user. Multiple NULLs
         # are allowed, so legacy/keyless logs are unaffected.
         UniqueConstraint("user_id", "client_request_id", name="uq_meal_user_request"),
+        Index("ix_meals_user_local_date", "user_id", "local_date"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -63,6 +67,9 @@ class Meal(Base):
         default=lambda: dt.datetime.now(dt.UTC),
         nullable=False,
     )
+    # The user's calendar day for this meal, fixed in their timezone when it
+    # was logged (see app.core.client_time). Every per-day view filters on it.
+    local_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),
@@ -140,3 +147,6 @@ class MealRevision(Base):
 
     meal: Mapped["Meal"] = relationship("Meal")
     user: Mapped["User"] = relationship("User")
+
+
+track_local_date(Meal)

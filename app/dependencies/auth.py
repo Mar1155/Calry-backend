@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_time import TIMEZONE_HEADER, UTC_ZONE, parse_timezone, set_timezone
 from app.core.exceptions import AuthException, CalryException
 from app.core.security import verify_firebase_token
 from app.dependencies.db import get_db
@@ -15,7 +16,7 @@ from app.repositories.user import UserRepository
 # Initialize standard Bearer HTTP verification scheme
 security = HTTPBearer(auto_error=True)
 
-_SUPPORTED_LOCALES = frozenset({"en", "it", "es", "zh", "ja", "ar"})
+_SUPPORTED_LOCALES = frozenset({"en", "it", "es", "zh", "ja", "ar", "de", "fr"})
 
 
 def _preferred_locale(accept_language: str | None) -> str:
@@ -27,10 +28,20 @@ def _preferred_locale(accept_language: str | None) -> str:
     return "en"
 
 
+def _activate_client_timezone(user: User, header_value: str | None) -> None:
+    """Use the zone the app reports, else the last one it reported, else UTC."""
+    reported = parse_timezone(header_value)
+    if reported is not None and user.timezone != reported.key:
+        # Remembered for background jobs; flushed with the request's session.
+        user.timezone = reported.key
+    set_timezone(reported or parse_timezone(user.timezone) or UTC_ZONE)
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(security),
     db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default=None),
+    client_timezone: str | None = Header(default=None, alias=TIMEZONE_HEADER),
 ) -> User:
     """FastAPI dependency to retrieve the authenticated user.
 
@@ -40,6 +51,8 @@ async def get_current_user(
        token shape, so no provider-specific handling is needed here.
     3. Looks up the corresponding user record in the local database.
     4. Auto-creates a new user profile on the fly if this is their first login.
+    5. Activates the device's timezone for the request, so "today" and every
+       per-day view follow the user's calendar instead of the server clock.
     """
     token = credentials.credentials
     if not token:
@@ -109,6 +122,8 @@ async def get_current_user(
             )
             await user_repo.create(user)
             await db.flush()
+
+    _activate_client_timezone(user, client_timezone)
 
     if user.access_status != "active":
         expires_at = user.access_restriction_expires_at

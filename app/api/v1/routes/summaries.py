@@ -3,6 +3,7 @@ import datetime as dt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_time import client_today
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.dependencies.premium import (
@@ -31,7 +32,7 @@ async def log_water(
     The count never goes below zero. Water is a lightweight awareness counter,
     not a tracked goal, so there is no target or validation beyond sane deltas.
     """
-    today = dt.date.today()
+    today = client_today()
     summary_service = SummaryService(db)
 
     summary = await summary_service.sync_daily_summary(current_user.id, today)
@@ -57,7 +58,7 @@ async def get_today_summary(
     Runs a dynamic sync operation to ensure that calorie tallies align exactly with all
     logged meals and active energy expenditures registered today.
     """
-    today = dt.date.today()
+    today = client_today()
     summary_service = SummaryService(db)
 
     # Perform runtime consolidation of today's calorie logs
@@ -72,7 +73,7 @@ async def get_summary_for_date(
     db: AsyncSession = Depends(get_db),
 ) -> DailySummary:
     """Returns an up-to-date summary for one accessible calendar day."""
-    if date_val > dt.date.today():
+    if date_val > client_today():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Future daily summaries are unavailable.",

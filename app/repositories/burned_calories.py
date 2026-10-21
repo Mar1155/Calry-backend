@@ -27,13 +27,10 @@ class BurnedCaloriesRepository(BaseRepository[BurnedCalories]):
         return list(result.scalars().all())
 
     async def get_user_burned_on_date(self, user_id: int, date_val: dt.date) -> list[BurnedCalories]:
-        """Gets all burned calories entries registered on a specific calendar date."""
-        start_dt = dt.datetime.combine(date_val, dt.time.min).replace(tzinfo=dt.UTC)
-        end_dt = dt.datetime.combine(date_val, dt.time.max).replace(tzinfo=dt.UTC)
+        """Gets all burned calories entries on one day of the user's calendar."""
         stmt = select(BurnedCalories).where(
             BurnedCalories.user_id == user_id,
-            BurnedCalories.created_at >= start_dt,
-            BurnedCalories.created_at <= end_dt,
+            BurnedCalories.local_date == date_val,
         )
         result = await self.db.execute(stmt)
         return list(result.scalars().all())

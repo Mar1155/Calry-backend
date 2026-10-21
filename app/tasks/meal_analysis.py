@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.ai.errors import AIInvalidResponseError, AIProviderError, ImageAnalysisError
 from app.ai.schemas.food_detection import MAX_REGIONS, region_from_box
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
+from app.core.client_time import UTC_ZONE, parse_timezone, set_timezone
 from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.db.session import SessionLocal, engine
@@ -173,6 +174,8 @@ async def _run_photo_analysis(job_id: str) -> int | None:
         user = await db.get(User, job.user_id)
         if user is None:
             raise RuntimeError("Analysis user not found")
+        # The worker has no request: use the zone the app last reported.
+        set_timezone(parse_timezone(user.timezone) or UTC_ZONE)
 
         job.status = "processing"
         job.attempts += 1
@@ -283,6 +286,7 @@ async def _run_photo_analysis(job_id: str) -> int | None:
             estimation=estimation,
             client_request_id=job.client_request_id,
             meal_category=job.meal_category,
+            logged_at=job.created_at,
         )
 
         # Cancellation may land while _process_and_save_meal is flushing and
@@ -290,7 +294,7 @@ async def _run_photo_analysis(job_id: str) -> int | None:
         # completed or leave the just-created unconfirmed meal behind.
         await db.refresh(job, attribute_names=["status"])
         if job.status == "cancelled":
-            meal_date = meal.created_at.date()
+            meal_date = meal.local_date
             await db.delete(meal)
             await db.flush()
             from app.insights.versioning import DomainEvent, InsightVersionService

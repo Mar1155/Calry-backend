@@ -4,20 +4,21 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_time import client_today
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.insights.versioning import DomainEvent, InsightVersionService
 from app.models.admin import UserDeletionJob
-from app.models.user import User
 from app.models.meal import Meal
+from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.user import UserResponse, UserUpdate
 from app.services.admin_deletion import build_preview_snapshot, initial_steps, process_deletion_job
-from app.services.summary import SummaryService
 from app.services.calorie_target_service import CalorieTargetService
+from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.users")
 router = APIRouter()
@@ -98,7 +99,7 @@ async def update_user_profile(
     # If the user adjusted their daily target calories, trigger today's summary sync
     if profile_update.daily_calorie_goal is not None and profile_update.daily_calorie_goal != original_goal:
         try:
-            today = dt.date.today()
+            today = client_today()
             summary_service = SummaryService(db)
             await summary_service.sync_daily_summary(updated_user.id, today)
             logger.info(f"Recalculated summary for user_id={updated_user.id} following calorie goal update.")
@@ -125,7 +126,7 @@ async def update_user_profile(
     if changed_fields - target_fields - {"weight_kg"}:
         events.append(DomainEvent.PROFILE_CHANGED)
     if events:
-        await InsightVersionService(db).record(updated_user.id, *events, affected_date=dt.date.today())
+        await InsightVersionService(db).record(updated_user.id, *events, affected_date=client_today())
 
     return await read_current_user_profile(updated_user, db)
 

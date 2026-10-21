@@ -20,7 +20,7 @@ _DIGITS_ONLY_RE = re.compile(r"\D+")
 _GRAMS_IN_TEXT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:g|gr|grammi|grams|ml)\b", re.IGNORECASE)
 _CACHE_TTL = dt.timedelta(days=30)
 _OFF_TIMEOUT_SECONDS = 4.5
-_SUPPORTED_LOCALES = ("en", "it", "es", "zh", "ja", "ar")
+_SUPPORTED_LOCALES = ("en", "it", "es", "zh", "ja", "ar", "de", "fr")
 
 
 class InvalidBarcodeFormatError(ValueError):

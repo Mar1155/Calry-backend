@@ -107,6 +107,7 @@ async def test_delete_meal_does_not_report_success_when_commit_fails() -> None:
         id=42,
         user_id=7,
         created_at=dt.datetime(2026, 7, 16, tzinfo=dt.UTC),
+        local_date=dt.date(2026, 7, 16),
     )
     user = SimpleNamespace(id=7)
     db = AsyncMock(spec=AsyncSession)

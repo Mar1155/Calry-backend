@@ -11,7 +11,7 @@ from typing import Any
 PROMPT_VERSION = "memory_template_v1"
 MODEL_VERSION = "template"
 
-_SUPPORTED_LOCALES = {"en", "it", "es", "zh", "ja", "ar"}
+_SUPPORTED_LOCALES = {"en", "it", "es", "zh", "ja", "ar", "de", "fr"}
 
 _SCOPE_LABELS = {
     "overall": "your meals",

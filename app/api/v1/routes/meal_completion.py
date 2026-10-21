@@ -1,4 +1,3 @@
-import datetime as dt
 import hashlib
 import logging
 
@@ -9,6 +8,7 @@ from app.ai.schemas.meal_completion import MealCompletionRequest
 from app.ai.schemas.meal_estimate import UserContext
 from app.ai.schemas.meal_review import DayReviewMealFact, DayReviewRequest, MealOccasionReviewRequest
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
+from app.core.client_time import client_today
 from app.dependencies.db import get_db
 from app.dependencies.premium import require_premium_user
 from app.models.user import User
@@ -27,6 +27,8 @@ _CATEGORY_LABELS = {
     "zh": {"breakfast": "早餐", "lunch": "午餐", "dinner": "晚餐", "snack": "加餐"},
     "ja": {"breakfast": "朝食", "lunch": "昼食", "dinner": "夕食", "snack": "間食"},
     "ar": {"breakfast": "الإفطار", "lunch": "الغداء", "dinner": "العشاء", "snack": "الوجبة الخفيفة"},
+    "de": {"breakfast": "Frühstück", "lunch": "Mittagessen", "dinner": "Abendessen", "snack": "Snack"},
+    "fr": {"breakfast": "petit-déjeuner", "lunch": "déjeuner", "dinner": "dîner", "snack": "collation"},
 }
 
 _EVIDENCE_LABELS = {
@@ -71,6 +73,20 @@ _EVIDENCE_LABELS = {
         "protein": "البروتين",
         "carbohydrates": "الكربوهيدرات",
         "fat": "الدهون",
+    },
+    "de": {
+        "energy": "Erfasste Energie",
+        "entries": "Einträge",
+        "protein": "Protein",
+        "carbohydrates": "Kohlenhydrate",
+        "fat": "Fett",
+    },
+    "fr": {
+        "energy": "Énergie enregistrée",
+        "entries": "Entrées",
+        "protein": "Protéines",
+        "carbohydrates": "Glucides",
+        "fat": "Lipides",
     },
 }
 
@@ -122,6 +138,22 @@ _REVIEW_COPY = {
         "mixed": "المغذيات المسجلة موزعة بصورة متنوعة نسبيًا.",
         "suggestion": "للمزيد من التنوع لاحقًا، أضف طعامًا من مجموعة غير موجودة في السجل الحالي.",
         "coverage": "يعتمد على العناصر المؤكدة المسجلة في {category} فقط؛ وتبقى الحصص تقديرية.",
+    },
+    "de": {
+        "one": "Für {category} ist ein Eintrag erfasst.",
+        "many": "Für {category} sind {count} Einträge erfasst.",
+        "macro": "Die meiste erfasste Makro-Energie stammt aus {macro}.",
+        "mixed": "Die erfassten Makros sind in dieser Mahlzeit recht ausgewogen verteilt.",
+        "suggestion": "Wenn du beim nächsten Mal mehr Abwechslung möchtest, füge ein Lebensmittel aus einer Gruppe hinzu, die hier noch fehlt.",
+        "coverage": "Nur auf Basis der bestätigten Einträge für {category}; Portionen bleiben Schätzungen.",
+    },
+    "fr": {
+        "one": "Ce repas ({category}) contient une entrée enregistrée.",
+        "many": "Ce repas ({category}) regroupe {count} entrées enregistrées.",
+        "macro": "Macro dominante dans ce repas : {macro}.",
+        "mixed": "Les macros enregistrées sont plutôt équilibrées dans ce repas.",
+        "suggestion": "Pour plus de variété la prochaine fois, ajoute un aliment d’un groupe qui n’est pas encore représenté.",
+        "coverage": "Basé uniquement sur les éléments confirmés de ce repas ({category}) ; les portions restent des estimations.",
     },
 }
 
@@ -181,6 +213,24 @@ _DAY_REVIEW_COPY = {
         "tip": "للمزيد من التنوع غدًا، جرّب مجموعة طعام غير موجودة اليوم.",
         "coverage": "يعتمد فقط على الوجبات المؤكدة المسجلة اليوم؛ وتبقى الحصص تقديرية.",
     },
+    "de": {
+        "headline_one": "Du hast heute {count} Mahlzeit erfasst, bisher {calories} kcal.",
+        "headline_many": "Du hast heute {count} Mahlzeiten erfasst, bisher {calories} kcal.",
+        "standout": "{meal} war heute der größte Eintrag mit {calories} kcal.",
+        "macro": "Die meiste erfasste Makro-Energie stammt heute aus {macro}.",
+        "mixed": "Die heute erfassten Makros sind recht ausgewogen verteilt.",
+        "tip": "Wenn du morgen mehr Abwechslung möchtest, probiere eine Lebensmittelgruppe, die heute noch fehlt.",
+        "coverage": "Nur auf Basis der heute bestätigten Mahlzeiten; Portionen bleiben Schätzungen.",
+    },
+    "fr": {
+        "headline_one": "Tu as enregistré {count} repas aujourd’hui, {calories} kcal pour l’instant.",
+        "headline_many": "Tu as enregistré {count} repas aujourd’hui, {calories} kcal pour l’instant.",
+        "standout": "{meal} a été l’entrée la plus importante aujourd’hui, avec {calories} kcal.",
+        "macro": "Macro dominante aujourd’hui : {macro}.",
+        "mixed": "Les macros enregistrées aujourd’hui sont plutôt équilibrées.",
+        "tip": "Pour plus de variété demain, essaie un groupe d’aliments qui n’apparaît pas encore aujourd’hui.",
+        "coverage": "Basé uniquement sur les repas confirmés aujourd’hui ; les portions restent des estimations.",
+    },
 }
 
 _MACRO_TAGS = {
@@ -217,7 +267,7 @@ async def review_day(
     db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default="en"),
 ) -> DayReviewResponse:
-    today = dt.date.today()
+    today = client_today()
     meal_repo = MealRepository(db)
     meals = [
         meal
@@ -326,7 +376,7 @@ async def review_meal_occasion(
 ) -> MealOccasionReviewResponse:
     if category not in {"breakfast", "lunch", "dinner", "snack"}:
         raise HTTPException(status_code=422, detail="Unsupported meal category.")
-    today = dt.date.today()
+    today = client_today()
     meal_repo = MealRepository(db)
     meals = [
         meal
@@ -447,6 +497,14 @@ GUARDRAIL_MSG = {
         "summary": "سجلت {consumed} سعرة من مرجع اليوم البالغ {goal} سعرة. يتبقى لديك {remaining} سعرة.",
         "note": "لا تحتاج إلى اقتراح وجبة إضافية الآن.",
     },
+    "de": {
+        "summary": "Du hast {consumed} kcal von deinem heutigen Richtwert von {goal} kcal erfasst. Dir bleiben {remaining} kcal.",
+        "note": "Im Moment ist kein weiterer Mahlzeitenvorschlag nötig.",
+    },
+    "fr": {
+        "summary": "Tu as enregistré {consumed} kcal sur la référence de {goal} kcal d’aujourd’hui. Il te reste {remaining} kcal.",
+        "note": "Aucune autre suggestion de repas n’est nécessaire pour le moment.",
+    },
 }
 
 
@@ -507,14 +565,14 @@ async def suggest_daily_completion(
     accept_language: str | None = Header(default="en"),
 ) -> MealCompletionResponse:
     """Suggests meals/recipes to complete the remaining calorie target for today."""
-    today = dt.date.today()
+    today = client_today()
     preferences = preferences or MealCompletionPreferences()
 
     # Extract primary language code
     lang = "en"
     if accept_language:
         primary = accept_language.split(",")[0].split("-")[0].strip().lower()
-        if primary in ["en", "it", "es", "zh", "ja", "ar"]:
+        if primary in ["en", "it", "es", "zh", "ja", "ar", "de", "fr"]:
             lang = primary
 
     # 1. Fetch / Sync today's summary

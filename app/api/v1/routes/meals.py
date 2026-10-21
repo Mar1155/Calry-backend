@@ -16,6 +16,7 @@ from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.ai.services.inference_logger import AIInferenceLogger
 from app.ai.streaming import protocol
+from app.core.client_time import client_now, client_today, current_timezone, moved_to_day
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user
@@ -67,7 +68,8 @@ router = APIRouter()
 
 
 def _time_based_meal_category(now: dt.datetime | None = None) -> str:
-    hour = (now or dt.datetime.now(dt.UTC)).hour
+    """Category from the hour on the user's clock (not the server's)."""
+    hour = (now or client_now()).hour
     if 5 <= hour < 11:
         return "breakfast"
     if 11 <= hour < 16:
@@ -79,13 +81,17 @@ def _time_based_meal_category(now: dt.datetime | None = None) -> str:
     return "snack"
 
 
-def _resolve_meal_category(explicit_category: str | None, estimation: MealEstimateResult) -> str:
+def _resolve_meal_category(
+    explicit_category: str | None,
+    estimation: MealEstimateResult,
+    logged_at_local: dt.datetime | None = None,
+) -> str:
     """Manual choice wins; an uncertain AI label never overrides the clock."""
     if explicit_category:
         return explicit_category
     if estimation.meal_category_suggestion is not None and estimation.meal_category_confidence in {"medium", "high"}:
         return estimation.meal_category_suggestion
-    return _time_based_meal_category()
+    return _time_based_meal_category(logged_at_local)
 
 
 async def _process_and_save_meal(
@@ -99,8 +105,18 @@ async def _process_and_save_meal(
     client_request_id: str | None = None,
     meal_category: str | None = None,
     detected_regions: list[dict] | None = None,
+    logged_at: dt.datetime | None = None,
 ) -> Meal:
-    """Helper method to construct a Meal record with children and trigger summary sync."""
+    """Helper method to construct a Meal record with children and trigger summary sync.
+
+    ``logged_at`` is when the user logged the meal, if earlier than now (a
+    queued photo analysis may finish after midnight); its day and hour on the
+    user's clock decide the meal's diary day and default category.
+    """
+    logged_at = logged_at or dt.datetime.now(dt.UTC)
+    if logged_at.tzinfo is None:  # SQLite returns naive UTC
+        logged_at = logged_at.replace(tzinfo=dt.UTC)
+    logged_at_local = logged_at.astimezone(current_timezone())
     meal_repo = MealRepository(db)
     estimation = enforce_estimate_ingredient_invariants(estimation)
     if detected_regions is None:
@@ -114,7 +130,8 @@ async def _process_and_save_meal(
         image_url=image_url,
         audio_url=audio_url,
         meal_name=estimation.meal_name,
-        meal_category=_resolve_meal_category(meal_category, estimation),
+        meal_category=_resolve_meal_category(meal_category, estimation, logged_at_local),
+        local_date=logged_at_local.date(),
         meal_category_suggestion=estimation.meal_category_suggestion,
         meal_category_confidence=estimation.meal_category_confidence,
         estimated_calories=estimation.estimated_calories,
@@ -161,7 +178,7 @@ async def _process_and_save_meal(
         # savepoint so a summary write failure cannot poison meal persistence.
         async with db.begin_nested():
             summary_service = SummaryService(db)
-            meal_date = meal.created_at.date()
+            meal_date = meal.local_date
             await summary_service.sync_daily_summary(user.id, meal_date)
     except Exception:
         logger.exception("Failed to synchronize daily summary on meal log")
@@ -169,7 +186,7 @@ async def _process_and_save_meal(
     await InsightVersionService(db).record(
         user.id,
         DomainEvent.MEAL_CREATED,
-        affected_date=meal.created_at.date(),
+        affected_date=meal.local_date,
     )
     from app.tasks.memory import enqueue_memory_distillation
 
@@ -193,7 +210,7 @@ def _primary_locale(accept_language: str | None) -> str:
     if not accept_language:
         return "en"
     primary = accept_language.split(",")[0].split("-")[0].split("_")[0].strip().lower()
-    return primary if primary in {"en", "it", "es", "zh", "ja", "ar"} else "en"
+    return primary if primary in {"en", "it", "es", "zh", "ja", "ar", "de", "fr"} else "en"
 
 
 async def _build_user_context(
@@ -693,7 +710,7 @@ async def cancel_photo_analysis(
     if job.status == "completed" and job.meal_id is not None:
         meal = await db.get(Meal, job.meal_id)
         if meal is not None and meal.confirmed_calories is None:
-            meal_date = meal.created_at.date()
+            meal_date = meal.local_date
             await db.delete(meal)
             await db.flush()
             await SummaryService(db).sync_daily_summary(current_user.id, meal_date)
@@ -1389,7 +1406,7 @@ async def list_user_meals(
 
     cutoff = None
     if not await has_premium_access(current_user, db):
-        cutoff = dt.datetime.combine(free_history_cutoff(), dt.time.min).replace(tzinfo=dt.UTC)
+        cutoff = free_history_cutoff()
 
     return await meal_repo.get_by_user(
         user_id=current_user.id,
@@ -1475,7 +1492,7 @@ async def refine_meal_estimate(
             detail="Meal record not found or access forbidden.",
         )
 
-    await ensure_history_date_access(meal.created_at.date(), current_user, db)
+    await ensure_history_date_access(meal.local_date, current_user, db)
 
     ai_service = AICalorieEstimationService(db)
     user_context = await _build_user_context(
@@ -1556,7 +1573,7 @@ async def get_meal_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Meal record not found or access forbidden.",
         )
-    await ensure_history_date_access(meal.created_at.date(), current_user, db)
+    await ensure_history_date_access(meal.local_date, current_user, db)
     return meal
 
 
@@ -1580,19 +1597,20 @@ async def update_meal(
             detail="Meal record not found or access forbidden.",
         )
 
-    await ensure_history_date_access(meal.created_at.date(), current_user, db)
+    await ensure_history_date_access(meal.local_date, current_user, db)
 
     previous_category = meal.meal_category
-    previous_date = meal.created_at.date()
+    previous_date = meal.local_date
     target_date = payload.logged_date
     if target_date is not None and target_date != previous_date:
-        if target_date > dt.date.today():
+        if target_date > client_today():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="A meal cannot be moved to a future date.",
             )
         await ensure_history_date_access(target_date, current_user, db)
-        meal.created_at = dt.datetime.combine(target_date, meal.created_at.timetz())
+        meal.created_at = moved_to_day(meal.created_at, target_date)
+        meal.local_date = target_date
 
     # Perform repository updates. Ingredient quantity/density determine totals.
     try:
@@ -1626,8 +1644,8 @@ async def update_meal(
     # Recalculate summary balance for this meal's day (and the day it left).
     try:
         summary_service = SummaryService(db)
-        await summary_service.sync_daily_summary(current_user.id, updated_meal.created_at.date())
-        if updated_meal.created_at.date() != previous_date:
+        await summary_service.sync_daily_summary(current_user.id, updated_meal.local_date)
+        if updated_meal.local_date != previous_date:
             await summary_service.sync_daily_summary(current_user.id, previous_date)
     except Exception as e:
         logger.error(f"Failed to synchronize daily summary during meal adjustment: {e}")
@@ -1652,9 +1670,9 @@ async def update_meal(
     await InsightVersionService(db).record(
         current_user.id,
         *events,
-        affected_date=updated_meal.created_at.date(),
+        affected_date=updated_meal.local_date,
     )
-    if updated_meal.created_at.date() != previous_date:
+    if updated_meal.local_date != previous_date:
         await InsightVersionService(db).record(
             current_user.id,
             DomainEvent.MEAL_UPDATED,
@@ -1693,7 +1711,7 @@ async def delete_meal(
             detail="Meal record not found or access forbidden.",
         )
 
-    meal_date = meal.created_at.date()
+    meal_date = meal.local_date
 
     # Perform the deletion
     await meal_repo.remove(id)

@@ -4,6 +4,7 @@ from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.client_time import client_today
 from app.models.daily_summary import DailySummary
 
 DAYS_IN_WEEK = 7
@@ -68,7 +69,7 @@ class AwarenessService:
         return streak
 
     async def today(self, user_id: int, today: dt.date | None = None) -> dict:
-        today = today or dt.date.today()
+        today = today or client_today()
         aware = await self._aware_dates(user_id)
         week_start = self._week_start(today)
         aware_this_week = sum(1 for d in aware if week_start <= d <= today)
@@ -84,7 +85,7 @@ class AwarenessService:
         }
 
     async def week(self, user_id: int, today: dt.date | None = None) -> dict:
-        today = today or dt.date.today()
+        today = today or client_today()
         aware = set(await self._aware_dates(user_id))
         week_start = self._week_start(today)
         days = []
