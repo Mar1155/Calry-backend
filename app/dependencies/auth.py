@@ -35,7 +35,9 @@ async def get_current_user(
     """FastAPI dependency to retrieve the authenticated user.
 
     1. Extracts the Bearer token from the Authorization header.
-    2. Validates it via Firebase (supports mock bypasses in development).
+    2. Validates it via Firebase (supports mock bypasses in development). Every
+       sign-in provider (Apple, Google, email/password) yields the same ID
+       token shape, so no provider-specific handling is needed here.
     3. Looks up the corresponding user record in the local database.
     4. Auto-creates a new user profile on the fly if this is their first login.
     """
@@ -81,6 +83,14 @@ async def get_current_user(
     if not user:
         # Check if a user with the same email already exists (e.g. from previous mock runs)
         user = await user_repo.get_by_email(email)
+        if user and payload.get("email_verified") is not True:
+            # Email/password sign-ups can claim any address before proving they
+            # own it. Never hand an existing account to an unverified email.
+            raise CalryException(
+                message="This email is already registered with another sign-in method.",
+                status_code=409,
+                error_code="EMAIL_ALREADY_REGISTERED",
+            )
         if user:
             # Link the existing user record to the new Firebase UID
             update_data = {"firebase_uid": firebase_uid}

@@ -85,3 +85,73 @@ async def test_get_current_user_profile_links_by_email(client: AsyncClient, db_s
     # Goals and history should be preserved
     assert data["daily_calorie_goal"] == 1800
     assert data["goal_type"] == "lose"
+
+
+@pytest.mark.asyncio
+async def test_email_password_user_auto_registers_without_display_name(client: AsyncClient) -> None:
+    """Email/password tokens have no name claim and may be unverified; both are fine for a new account."""
+    headers = {"Authorization": "Bearer mock_token_password_unverified_new"}
+
+    response = await client.get("/api/v1/users/me", headers=headers)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["firebase_uid"] == "password_unverified_new"
+    assert data["email"] == "password_unverified_new@example.com"
+    assert data["name"] is None
+
+
+@pytest.mark.asyncio
+async def test_unverified_email_does_not_link_existing_account(client: AsyncClient, db_session: AsyncSession) -> None:
+    """An unverified email/password sign-up must never take over an account registered under that email."""
+    from app.models.user import User
+    from app.repositories.user import UserRepository
+
+    await UserRepository(db_session).create(
+        User(
+            firebase_uid="original_owner_uid",
+            email="password_unverified_taken@example.com",
+            daily_calorie_goal=1800,
+            goal_type="lose",
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": "Bearer mock_token_password_unverified_taken"},
+    )
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "EMAIL_ALREADY_REGISTERED"
+
+    owner = await UserRepository(db_session).get_by_firebase_uid("original_owner_uid")
+    assert owner is not None
+    assert owner.email == "password_unverified_taken@example.com"
+
+
+@pytest.mark.asyncio
+async def test_verified_email_password_user_links_existing_account(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Once Firebase has verified the address, email/password users link by email like other providers."""
+    from app.models.user import User
+    from app.repositories.user import UserRepository
+
+    await UserRepository(db_session).create(
+        User(
+            firebase_uid="previous_uid",
+            email="password_verified_owner@example.com",
+            daily_calorie_goal=1700,
+            goal_type="lose",
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": "Bearer mock_token_password_verified_owner"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["firebase_uid"] == "password_verified_owner"
+    assert data["daily_calorie_goal"] == 1700

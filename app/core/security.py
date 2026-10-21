@@ -66,12 +66,17 @@ def verify_firebase_token(token: str) -> dict:
         suffix = suffix or "default"
         uid = suffix
         email = f"{suffix.lower()}@example.com"
-        name = "Google User" if "google" in token else "Calry Developer"
+        # Email/password mock tokens ("mock_token_password_...") carry no
+        # display name, and "unverified" marks an address Firebase has not
+        # confirmed yet, mirroring a fresh email/password sign-up.
+        is_password = "password" in token
+        name = None if is_password else "Google User" if "google" in token else "Calry Developer"
         return {
             "uid": uid,
             "email": email,
             "name": name,
-            "email_verified": True,
+            "email_verified": "unverified" not in token,
+            "firebase": {"sign_in_provider": "password" if is_password else "custom"},
         }
 
     try:
