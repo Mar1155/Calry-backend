@@ -19,7 +19,6 @@ _STYLE = (
     "shapes, warm appetizing color palette"
 )
 
-
 def build_ingredient_image_prompt(ingredient_name: str) -> str:
     name = " ".join(ingredient_name.strip().split())
     return f"A single serving of {name}. {_STYLE}."
