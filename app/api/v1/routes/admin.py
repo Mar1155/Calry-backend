@@ -15,12 +15,15 @@ from app.core.security import init_firebase
 from app.dependencies.admin import AdminIdentity, enforce_admin_rate_limit, get_current_admin, new_audit
 from app.dependencies.db import get_db
 from app.models.admin import AdminAuditLog, UserDeletionJob
+from app.models.app_setting import AppSetting
 from app.models.meal import Meal
 from app.models.onboarding_event import OnboardingEvent
 from app.models.promo_code import PromoCode
 from app.models.revenuecat_event import RevenueCatEvent
 from app.models.user import User
 from app.repositories.user import UserRepository
+from app.schemas.app_setting import AppVersionPolicy, AppVersionPolicyUpdate
+from app.services.app_version_service import invalidate_policy_cache
 from app.schemas.admin import (
     AccessRestrictionRequest,
     AccessRestrictionResponse,
@@ -137,6 +140,48 @@ async def admin_me(
 ) -> AdminMeResponse:
     db.add(new_audit(request, admin, "admin_login", "success"))
     return AdminMeResponse(uid=admin.uid, email=admin.email)
+
+
+@router.get("/app-version", response_model=AppVersionPolicy)
+async def get_app_version_policy(
+    admin: AdminIdentity = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AppVersionPolicy:
+    row = (await db.execute(select(AppSetting).where(AppSetting.id == 1))).scalar_one_or_none()
+    if row is None:
+        return AppVersionPolicy(min_supported_app_version="0.0.1")
+    return AppVersionPolicy.model_validate(row)
+
+
+@router.put("/app-version", response_model=AppVersionPolicy)
+async def update_app_version_policy(
+    payload: AppVersionPolicyUpdate,
+    request: Request,
+    admin: AdminIdentity = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AppVersionPolicy:
+    """Set the force-update thresholds. Clients below the minimum get HTTP 426 / the update screen."""
+    enforce_admin_rate_limit(request, "app_version_update", 30)
+    row = (await db.execute(select(AppSetting).where(AppSetting.id == 1))).scalar_one_or_none()
+    previous = AppVersionPolicy.model_validate(row).model_dump() if row else None
+    if row is None:
+        row = AppSetting(id=1)
+        db.add(row)
+    for field, value in payload.model_dump().items():
+        setattr(row, field, value)
+    db.add(
+        new_audit(
+            request,
+            admin,
+            "app_version_policy_updated",
+            "success",
+            metadata={"previous": previous, "new": payload.model_dump()},
+        )
+    )
+    await db.commit()
+    invalidate_policy_cache()
+    logger.info("admin_app_version_policy_updated admin_uid=%s", admin.uid)
+    return AppVersionPolicy.model_validate(row)
 
 
 @router.get("/onboarding-funnel", response_model=OnboardingFunnelResponse)

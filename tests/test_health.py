@@ -21,7 +21,7 @@ async def test_app_version_endpoint_defaults_when_missing(client: AsyncClient) -
     assert response.status_code == 200
 
     data = response.json()
-    assert data == {"min_supported_app_version": "0.0.1"}
+    assert data == {"min_supported_app_version": "0.0.1", "store_url": None}
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import sentry_sdk
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -32,6 +33,7 @@ from app.api.v1.routes.system import router as system_router
 from app.api.v1.routes.users import router as users_router
 from app.core.config import settings
 from app.core.exceptions import CalryException
+from app.dependencies.app_version import enforce_min_app_version
 from app.core.logging import setup_logging
 
 logger = logging.getLogger("app.main")
@@ -171,7 +173,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "success": False,
             "error_code": "VALIDATION_FAILED",
             "message": "Input validation failed. Please check payload parameters.",
-            "details": exc.errors(),
+            "details": jsonable_encoder(exc.errors(), custom_encoder={Exception: str}),
         },
     )
 
@@ -194,19 +196,19 @@ async def fallback_exception_handler(request: Request, exc: Exception) -> JSONRe
 
 # Register Versioned API Routes under namespace /api/v1
 app.include_router(system_router, prefix="/api/v1", tags=["System"])
-app.include_router(users_router, prefix="/api/v1/users", tags=["Users"])
-app.include_router(onboarding_router, prefix="/api/v1/onboarding", tags=["Onboarding"])
-app.include_router(meals_router, prefix="/api/v1/meals", tags=["Meals"])
-app.include_router(meal_completion_router, prefix="/api/v1/meals", tags=["Meal Completion"])
-app.include_router(burned_router, prefix="/api/v1/burned-calories", tags=["Burned Calories"])
-app.include_router(summaries_router, prefix="/api/v1/summary", tags=["Summaries"])
-app.include_router(insights_router, prefix="/api/v1", tags=["Insights"])
-app.include_router(memory_router, prefix="/api/v1/memory", tags=["Memory"])
-app.include_router(premium_router, prefix="/api/v1/premium", tags=["Premium"])
+app.include_router(users_router, prefix="/api/v1/users", tags=["Users"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(onboarding_router, prefix="/api/v1/onboarding", tags=["Onboarding"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(meals_router, prefix="/api/v1/meals", tags=["Meals"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(meal_completion_router, prefix="/api/v1/meals", tags=["Meal Completion"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(burned_router, prefix="/api/v1/burned-calories", tags=["Burned Calories"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(summaries_router, prefix="/api/v1/summary", tags=["Summaries"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(insights_router, prefix="/api/v1", tags=["Insights"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(memory_router, prefix="/api/v1/memory", tags=["Memory"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(premium_router, prefix="/api/v1/premium", tags=["Premium"], dependencies=[Depends(enforce_min_app_version)])
 app.include_router(webhook_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
-app.include_router(food_memory_router, prefix="/api/v1/food-memory", tags=["Food Memory"])
-app.include_router(habits_router, prefix="/api/v1/habits", tags=["Habits"])
-app.include_router(awareness_router, prefix="/api/v1/awareness", tags=["Awareness"])
+app.include_router(food_memory_router, prefix="/api/v1/food-memory", tags=["Food Memory"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(habits_router, prefix="/api/v1/habits", tags=["Habits"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(awareness_router, prefix="/api/v1/awareness", tags=["Awareness"], dependencies=[Depends(enforce_min_app_version)])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
 app.include_router(admin_scans_router, prefix="/api/v1/admin", tags=["Admin Scans"])
 

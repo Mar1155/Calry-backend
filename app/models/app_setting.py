@@ -11,6 +11,10 @@ class AppSetting(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     min_supported_app_version: Mapped[str] = mapped_column(String(32), nullable=False, default="0.0.1")
+    min_supported_ios_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    min_supported_android_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ios_store_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    android_store_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: dt.datetime.now(dt.UTC),

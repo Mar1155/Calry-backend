@@ -60,6 +60,15 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
         await session.rollback()
 
 
+@pytest.fixture(autouse=True)
+def _reset_app_version_cache():
+    from app.services.app_version_service import invalidate_policy_cache
+
+    invalidate_policy_cache()
+    yield
+    invalidate_policy_cache()
+
+
 @pytest.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Creates an async HTTPX client with database dependency overrides."""
