@@ -18,27 +18,28 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
   <p>This policy applies to the Calory app, its backend services and these public legal pages. Third-party services linked from Calory have their own privacy terms.</p>
 </section>
 <section>
-  <h2>2. What Calory collects</h2>
+  <h2>2. What Calory collects and how it is collected</h2>
+  <p>Calory collects personal data in three ways: (a) directly from information and media you enter or capture in the app, (b) from the identity or store provider you choose when signing in or subscribing, and (c) automatically from authenticated app requests.</p>
   <h3>Account and identity data</h3>
   <ul>
-    <li>Firebase user identifier, email address, display name and the Google or Apple sign-in provider you choose.</li>
+    <li>Firebase user identifier, email address, display name and the Google, Apple or email sign-in provider you choose (collected via Firebase Authentication when you sign in).</li>
     <li>Internal account identifier and onboarding status.</li>
   </ul>
   <h3>Profile and wellness data</h3>
   <ul>
-    <li>Your calorie goal, goal type, age, height, weight, formula selection, activity level, preferred units and other settings you provide.</li>
-    <li>Daily calorie summaries, consumed and burned calories, water entries, meal categories and progress history.</li>
+    <li>Your calorie goal, goal type, age, height, weight, formula selection, activity level, preferred units and other settings you enter directly during onboarding or in your profile.</li>
+    <li>Daily calorie summaries, consumed and burned calories, water entries, meal categories and progress history generated from the entries you save.</li>
   </ul>
   <h3>Meal and activity content</h3>
   <ul>
-    <li>Descriptions, photos and voice recordings you submit; transcripts; detected food items; calorie and macro estimates; corrections and confirmations.</li>
+    <li>Descriptions you type, meal photos you capture with the camera or select from your photo library, and voice recordings you record with the microphone; transcripts; detected food items; calorie and macro estimates; corrections and confirmations.</li>
     <li>Activities and calories burned that you enter manually.</li>
     <li>Food memories derived from confirmed entries so repeated meals can be recognized more consistently.</li>
   </ul>
   <h3>Subscription, technical and support data</h3>
   <ul>
-    <li>Subscription entitlement, product, store, renewal and expiry information received from RevenueCat. Calory does not receive your complete payment-card details.</li>
-    <li>IP address, request metadata, app version, device and diagnostic information, performance traces and error reports generated when the service is used.</li>
+    <li>Subscription entitlement, product, store, renewal and expiry information received from Apple App Store / Google Play and RevenueCat when you view or purchase a subscription. Calory does not receive your complete payment-card details.</li>
+    <li>IP address, request metadata, app version, device and diagnostic information, performance traces and error reports generated automatically when the service is used.</li>
     <li>Messages and information you send when requesting support or exercising a privacy right.</li>
   </ul>
 </section>
@@ -51,28 +52,29 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
     <li><strong>Protect Calory:</strong> secure accounts and infrastructure, investigate misuse and enforce these terms.</li>
     <li><strong>Meet legal duties:</strong> maintain records or respond to lawful requests where required.</li>
   </ul>
-  <p>Depending on where you live, the legal bases are performance of the contract you request, your consent, legitimate interests in operating and securing Calory, and compliance with law. Where profile or meal information qualifies as health data, Calory relies on your explicit consent or another basis permitted by applicable law. You may withdraw consent prospectively, although some features will then no longer work.</p>
+  <p>Depending on where you live, the legal bases are performance of the contract you request, your consent, legitimate interests in operating and securing Calory, and compliance with law. Where profile or meal information qualifies as health data, or when data is transmitted to third-party AI services, Calory relies on your explicit consent. You may withdraw consent at any time in the app Settings or by contacting us, although AI features will then not run until you re-enable permission.</p>
   <p class="note"><strong>No sale or third-party advertising.</strong> Calory does not sell personal data and does not use meal or profile data for third-party targeted advertising.</p>
 </section>
 <section>
-  <h2>4. AI processing</h2>
-  <p>Calory uses artificial intelligence to analyze the text, photo or audio you choose to submit. Relevant content and technical instructions are sent to OpenRouter and the model provider selected through it (currently Google Gemini) to produce an estimate or transcript. Do not include information about other people or sensitive details that are unnecessary for a meal estimate.</p>
+  <h2>4. AI processing and in-app permission</h2>
+  <p>Before sending any personal data to a third-party AI service, Calory displays a clear in-app disclosure explaining what data will be sent, who receives it, and asks for your explicit permission. You can grant, review or withdraw this permission at any time in Profile &rarr; Settings.</p>
+  <p>When you grant permission and use an AI feature, Calory transmits the meal text description, meal photo or voice recording you submit—together with relevant nutritional context (your daily calorie/macro goals, logged meals for the day or period being reviewed, and saved food memories)—to <strong>OpenRouter (OpenRouter, Inc.)</strong> and the AI model provider selected through it, <strong>Google Gemini (Google LLC)</strong>, solely to transcribe voice notes, recognize food items, estimate calories and macronutrients, and generate personalized meal suggestions and insights. Do not include information about other people or sensitive details that are unnecessary for a meal estimate.</p>
   <p>AI results can be inaccurate. Calory may retain inference inputs, outputs, model identifiers, latency and error diagnostics to provide the feature, investigate quality and keep an audit trail. Access is restricted to operational needs.</p>
   <p>AI estimates do not make decisions that produce legal or similarly significant effects about you.</p>
 </section>
 <section>
-  <h2>5. Who receives data</h2>
-  <p>Calory shares only the data reasonably needed for the following providers to perform their services:</p>
+  <h2>5. Who receives data and equal-protection guarantee</h2>
+  <p>Calory shares only the data reasonably needed for the following third-party service providers to perform their services:</p>
   <ul>
-    <li><strong>Google Firebase</strong> for authentication and account-token verification.</li>
-    <li><strong>Apple and Google</strong> when you use their sign-in services or complete an in-app purchase through their stores.</li>
-    <li><strong>RevenueCat</strong> to manage subscription status, entitlements and purchase events.</li>
-    <li><strong>Railway and PostgreSQL infrastructure</strong> to host the API, databases and background processing.</li>
-    <li><strong>The configured media-storage provider</strong> to store meal photos and voice recordings.</li>
-    <li><strong>OpenRouter and routed AI model providers</strong> to process meal text, photos and audio.</li>
-    <li><strong>Sentry</strong>, when enabled, for error, performance and diagnostic monitoring.</li>
+    <li><strong>Google Firebase (Google LLC)</strong> for authentication, account-token verification and media storage.</li>
+    <li><strong>Apple Inc. and Google LLC</strong> when you use their sign-in services or complete an in-app purchase through their stores.</li>
+    <li><strong>RevenueCat, Inc.</strong> to manage subscription status, entitlements and purchase events.</li>
+    <li><strong>Railway Corp. and PostgreSQL infrastructure</strong> to host the API, databases and background processing.</li>
+    <li><strong>OpenRouter (OpenRouter, Inc.) and Google Gemini (Google LLC)</strong> to process meal text descriptions, meal photos, voice recordings and nutritional context for AI food estimation and insights, only after you grant explicit in-app permission.</li>
+    <li><strong>Sentry (Functional Software, Inc.)</strong>, when enabled, for error, performance and diagnostic monitoring.</li>
     <li>Professional advisers, authorities or a successor operator where required by law, to protect rights, or as part of a legitimate business transaction.</li>
   </ul>
+  <p><strong>Equal protection commitment:</strong> Every third party with whom Calory shares personal data (including OpenRouter, Google Gemini, Google Firebase, RevenueCat and our infrastructure providers) is contractually and legally required to provide the same or equal protection of your personal data as stated in this Privacy Policy and required by applicable data-protection laws and Apple App Store / Google Play guidelines, and is prohibited from using your personal data for unauthorized purposes or third-party advertising.</p>
   <p>Some providers process data in countries outside your own. Calory uses the safeguards required by applicable law, such as adequacy decisions or approved contractual clauses, where relevant.</p>
 </section>
 <section>
@@ -112,27 +114,28 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
   <p>L’informativa si applica all’app Calory, ai relativi servizi backend e a queste pagine legali pubbliche. I servizi di terze parti collegati da Calory hanno informative proprie.</p>
 </section>
 <section>
-  <h2>2. Dati raccolti</h2>
+  <h2>2. Dati raccolti e modalità di raccolta</h2>
+  <p>Calory raccoglie i dati personali in tre modi: (a) direttamente dalle informazioni e dai contenuti multimediali inseriti o acquisiti dall’utente nell’app, (b) dal provider di identità o dallo store scelto durante l’accesso o l’abbonamento e (c) automaticamente dalle richieste autenticate dell’app.</p>
   <h3>Account e identità</h3>
   <ul>
-    <li>Identificativo Firebase, indirizzo email, nome visualizzato e provider Google o Apple scelto per l’accesso.</li>
+    <li>Identificativo Firebase, indirizzo email, nome visualizzato e provider Google, Apple o email scelto per l’accesso (raccolti tramite Firebase Authentication al momento dell’accesso).</li>
     <li>Identificativo interno dell’account e stato dell’onboarding.</li>
   </ul>
   <h3>Profilo e dati sul benessere</h3>
   <ul>
-    <li>Obiettivo calorico, tipo di obiettivo, età, altezza, peso, formula selezionata, livello di attività, unità preferite e altre impostazioni fornite.</li>
-    <li>Riepiloghi giornalieri, calorie assunte e bruciate, registrazioni dell’acqua, categorie dei pasti e cronologia dei progressi.</li>
+    <li>Obiettivo calorico, tipo di obiettivo, età, altezza, peso, formula selezionata, livello di attività, unità preferite e altre impostazioni inserite direttamente durante l’onboarding o nel profilo.</li>
+    <li>Riepiloghi giornalieri, calorie assunte e bruciate, registrazioni dell’acqua, categorie dei pasti e cronologia dei progressi generati a partire dalle voci salvate.</li>
   </ul>
   <h3>Contenuti relativi a pasti e attività</h3>
   <ul>
-    <li>Descrizioni, foto e registrazioni vocali inviate; trascrizioni; alimenti rilevati; stime di calorie e macronutrienti; correzioni e conferme.</li>
+    <li>Descrizioni digitate, foto dei pasti scattate con la fotocamera o selezionate dalla libreria foto e registrazioni vocali effettuate tramite microfono; trascrizioni; alimenti rilevati; stime di calorie e macronutrienti; correzioni e conferme.</li>
     <li>Attività e calorie bruciate inserite manualmente.</li>
     <li>Memorie alimentari ricavate dalle conferme, per riconoscere con maggiore coerenza i pasti ripetuti.</li>
   </ul>
   <h3>Abbonamenti, dati tecnici e assistenza</h3>
   <ul>
-    <li>Dati su entitlement, prodotto, store, rinnovo e scadenza ricevuti da RevenueCat. Calory non riceve i dati completi della carta di pagamento.</li>
-    <li>Indirizzo IP, metadati delle richieste, versione dell’app, informazioni su dispositivo e diagnostica, tracce di prestazione e segnalazioni di errore generate durante l’uso.</li>
+    <li>Dati su entitlement, prodotto, store, rinnovo e scadenza ricevuti da Apple App Store / Google Play e RevenueCat. Calory non riceve i dati completi della carta di pagamento.</li>
+    <li>Indirizzo IP, metadati delle richieste, versione dell’app, informazioni su dispositivo e diagnostica, tracce di prestazione e segnalazioni di errore generate automaticamente durante l’uso.</li>
     <li>Messaggi e informazioni inviati in caso di assistenza o esercizio di un diritto privacy.</li>
   </ul>
 </section>
@@ -145,28 +148,29 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
     <li><strong>Proteggere Calory:</strong> tutelare account e infrastruttura, indagare abusi e applicare i termini.</li>
     <li><strong>Adempiere a obblighi di legge:</strong> conservare registrazioni o rispondere a richieste legittime quando necessario.</li>
   </ul>
-  <p>A seconda del luogo in cui si trova l’utente, le basi giuridiche sono l’esecuzione del contratto richiesto, il consenso, il legittimo interesse a gestire e proteggere Calory e l’adempimento di obblighi legali. Quando profilo o pasti costituiscono dati relativi alla salute, Calory si basa sul consenso esplicito o su un’altra base consentita dalla legge applicabile. Il consenso può essere revocato per il futuro, ma alcune funzioni non saranno più disponibili.</p>
+  <p>A seconda del luogo in cui si trova l’utente, le basi giuridiche sono l’esecuzione del contratto richiesto, il consenso, il legittimo interesse a gestire e proteggere Calory e l’adempimento di obblighi legali. Quando profilo o pasti costituiscono dati relativi alla salute o vengono trasmessi a servizi IA di terze parti, Calory si basa sul consenso esplicito dell’utente. Il consenso può essere revocato in qualsiasi momento nelle Impostazioni dell’app o contattandoci; in tal caso le funzioni IA non invieranno dati finché il permesso non verrà nuovamente concesso.</p>
   <p class="note"><strong>Nessuna vendita o pubblicità di terze parti.</strong> Calory non vende dati personali e non usa i dati di pasti o profilo per pubblicità mirata di terze parti.</p>
 </section>
 <section>
-  <h2>4. Trattamento tramite AI</h2>
-  <p>Calory usa sistemi di intelligenza artificiale per analizzare testo, foto o audio che l’utente sceglie di inviare. Il contenuto pertinente e le istruzioni tecniche vengono trasmessi a OpenRouter e al provider del modello selezionato tramite tale servizio (attualmente Google Gemini) per produrre una stima o una trascrizione. È opportuno non includere dati di altre persone o informazioni sensibili non necessarie alla stima.</p>
-  <p>I risultati AI possono essere inesatti. Calory può conservare input, output, identificativi dei modelli, latenza e diagnostica degli errori per fornire la funzione, verificarne la qualità e mantenere una traccia di audit. L’accesso è limitato alle necessità operative.</p>
-  <p>Le stime AI non producono decisioni con effetti giuridici o analogamente significativi sull’utente.</p>
+  <h2>4. Trattamento tramite IA e consenso nell’app</h2>
+  <p>Prima di inviare qualsiasi dato personale a un servizio IA di terze parti, Calory mostra una chiara informativa nell’app che spiega quali dati verranno inviati, a chi vengono trasmessi e richiede il permesso esplicito dell’utente. È possibile concedere, consultare o revocare tale permesso in qualsiasi momento in Profilo &rarr; Impostazioni.</p>
+  <p>Quando l’utente concede il permesso e usa una funzione IA, Calory trasmette la descrizione testuale del pasto, la foto del pasto o la registrazione vocale inviata—insieme al contesto nutrizionale pertinente (obiettivi giornalieri di calorie/macro, pasti registrati per il giorno o il periodo analizzato e memorie alimentari salvate)—a <strong>OpenRouter (OpenRouter, Inc.)</strong> e al provider del modello IA selezionato tramite esso, <strong>Google Gemini (Google LLC)</strong>, esclusivamente per trascrivere note vocali, riconoscere gli alimenti, stimare calorie e macronutrienti e generare suggerimenti e insight personalizzati. È opportuno non includere dati di altre persone o informazioni sensibili non necessarie alla stima.</p>
+  <p>I risultati IA possono essere inesatti. Calory può conservare input, output, identificativi dei modelli, latenza e diagnostica degli errori per fornire la funzione, verificarne la qualità e mantenere una traccia di audit. L’accesso è limitato alle necessità operative.</p>
+  <p>Le stime IA non producono decisioni con effetti giuridici o analogamente significativi sull’utente.</p>
 </section>
 <section>
-  <h2>5. Destinatari dei dati</h2>
-  <p>Calory condivide solo i dati ragionevolmente necessari affinché i seguenti fornitori svolgano i propri servizi:</p>
+  <h2>5. Destinatari dei dati e garanzia di pari protezione</h2>
+  <p>Calory condivide solo i dati ragionevolmente necessari affinché i seguenti fornitori terzi svolgano i propri servizi:</p>
   <ul>
-    <li><strong>Google Firebase</strong> per autenticazione e verifica dei token.</li>
-    <li><strong>Apple e Google</strong> per i rispettivi servizi di accesso e per gli acquisti in-app effettuati tramite gli store.</li>
-    <li><strong>RevenueCat</strong> per stato degli abbonamenti, entitlement ed eventi di acquisto.</li>
-    <li><strong>Railway e infrastruttura PostgreSQL</strong> per API, database ed elaborazioni in background.</li>
-    <li><strong>Il provider di archiviazione media configurato</strong> per foto dei pasti e registrazioni vocali.</li>
-    <li><strong>OpenRouter e i provider AI instradati</strong> per elaborare testo, foto e audio dei pasti.</li>
-    <li><strong>Sentry</strong>, quando attivo, per monitoraggio di errori, prestazioni e diagnostica.</li>
+    <li><strong>Google Firebase (Google LLC)</strong> per autenticazione, verifica dei token e archiviazione media.</li>
+    <li><strong>Apple Inc. e Google LLC</strong> per i rispettivi servizi di accesso e per gli acquisti in-app effettuati tramite gli store.</li>
+    <li><strong>RevenueCat, Inc.</strong> per stato degli abbonamenti, entitlement ed eventi di acquisto.</li>
+    <li><strong>Railway Corp. e infrastruttura PostgreSQL</strong> per API, database ed elaborazioni in background.</li>
+    <li><strong>OpenRouter (OpenRouter, Inc.) e Google Gemini (Google LLC)</strong> per elaborare descrizioni testuali, foto, audio dei pasti e contesto nutrizionale per le stime e gli insight IA, esclusivamente dopo il consenso esplicito dell’utente nell’app.</li>
+    <li><strong>Sentry (Functional Software, Inc.)</strong>, quando attivo, per monitoraggio di errori, prestazioni e diagnostica.</li>
     <li>Consulenti professionali, autorità o un eventuale operatore subentrante quando richiesto dalla legge, per tutelare diritti o nell’ambito di una legittima operazione societaria.</li>
   </ul>
+  <p><strong>Garanzia di pari protezione:</strong> Ogni terza parte con cui Calory condivide dati personali (inclusi OpenRouter, Google Gemini, Google Firebase, RevenueCat e i fornitori di infrastruttura) è vincolata contrattualmente e legalmente a garantire un livello di protezione dei dati personali uguale o equivalente a quello descritto nella presente Informativa privacy e richiesto dalle leggi applicabili sulla protezione dei dati e dalle linee guida di Apple App Store e Google Play, con divieto di utilizzare i dati per finalità non autorizzate o pubblicità di terze parti.</p>
   <p>Alcuni fornitori possono trattare dati in Paesi diversi da quello dell’utente. Quando necessario, Calory applica le garanzie richieste dalla legge, come decisioni di adeguatezza o clausole contrattuali approvate.</p>
 </section>
 <section>
