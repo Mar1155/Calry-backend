@@ -1,12 +1,13 @@
 import datetime as dt
 
-from fastapi import Depends, Header, Security
+from fastapi import Depends, Header, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_time import TIMEZONE_HEADER, UTC_ZONE, parse_timezone, set_timezone
 from app.core.exceptions import AuthException, CalryException
+from app.core.observability import set_sentry_user
 from app.core.security import verify_firebase_token
 from app.dependencies.db import get_db
 from app.models.admin import UserDeletionJob
@@ -38,6 +39,7 @@ def _activate_client_timezone(user: User, header_value: str | None) -> None:
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Security(security),
     db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default=None),
@@ -124,6 +126,7 @@ async def get_current_user(
             await db.flush()
 
     _activate_client_timezone(user, client_timezone)
+    set_sentry_user(user.id, request_id=getattr(request.state, "request_id", None))
 
     if user.access_status != "active":
         expires_at = user.access_restriction_expires_at

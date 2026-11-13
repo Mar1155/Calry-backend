@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import time
 
+import sentry_sdk
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -28,6 +29,7 @@ def analyze_photo_meal(self, job_id: str) -> int | None:
     started_at = time.perf_counter()
     task_id = self.request.id
     retry_number = self.request.retries
+    sentry_sdk.set_tag("job_id", job_id)
     logger.info(
         "event=meal_analysis_worker_task_received job_id=%s celery_task_id=%s retry=%s",
         job_id,

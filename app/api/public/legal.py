@@ -82,7 +82,8 @@ def _render(document: str, language: str, request: Request) -> HTMLResponse:
     other_label = "Italiano" if other_language == "it" else "English"
     privacy_label = "Privacy Policy" if language == "en" else "Informativa privacy"
     terms_label = "Terms & Conditions" if language == "en" else "Termini e condizioni"
-    canonical_path = "/privacy" if document == "privacy" else "/terms"
+    sources_label = "Scientific Sources" if language == "en" else "Fonti scientifiche"
+    canonical_path = f"/{document}"
     canonical = str(request.base_url).rstrip("/") + canonical_path
 
     html = f"""<!doctype html>
@@ -116,6 +117,7 @@ def _render(document: str, language: str, request: Request) -> HTMLResponse:
     <nav aria-label="Legal">
       <a href="/privacy?lang={language}">{privacy_label}</a>
       <a href="/terms?lang={language}">{terms_label}</a>
+      <a href="/sources?lang={language}">{sources_label}</a>
     </nav>
     <p>© {settings.LEGAL_EFFECTIVE_DATE.year} {operator}. {content['footer']}</p>
   </footer>
@@ -142,3 +144,9 @@ async def privacy_policy(request: Request, lang: str | None = Query(default=None
 @router.get("/terms-and-conditions", response_class=HTMLResponse, include_in_schema=False)
 async def terms_and_conditions(request: Request, lang: str | None = Query(default=None)) -> HTMLResponse:
     return _render("terms", _language(lang, request.headers.get("accept-language")), request)
+
+
+@router.get("/sources", response_class=HTMLResponse, include_in_schema=False)
+@router.get("/scientific-sources", response_class=HTMLResponse, include_in_schema=False)
+async def scientific_sources(request: Request, lang: str | None = Query(default=None)) -> HTMLResponse:
+    return _render("sources", _language(lang, request.headers.get("accept-language")), request)

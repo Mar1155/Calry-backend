@@ -358,4 +358,116 @@ LEGAL_DOCUMENTS: dict[tuple[str, str], dict[str, str]] = {
 </section>
 """,
     },
+    ("sources", "en"): {
+        "title": "Scientific Sources & Citations",
+        "description": "Formulas, medical literature, and evidence base for Calry's calorie and nutrition estimates.",
+        "lead": "A transparent overview of the scientific equations, dietary guidelines, and clinical literature used in Calry.",
+        "footer": "Evidence-based wellness.",
+        "body": """
+<section>
+  <h2>Medical & Health Disclaimer</h2>
+  <p>Calry is designed for nutritional awareness, general wellness, and educational purposes only. Calry is not a medical app or medical device, and does not provide clinical or medical advice, diagnosis, or treatment. It must not be used to replace professional medical consultations. Always consult a qualified physician or registered dietitian before making substantial changes to your diet, especially if you have chronic medical conditions, are pregnant or breastfeeding, or have a history of disordered eating.</p>
+</section>
+<section>
+  <h2>1. Resting Energy Expenditure (BMR) & Daily Calorie Estimation</h2>
+  <p>To establish your estimated daily calorie starting point, Calry calculates your Basal Metabolic Rate (BMR) using the Mifflin-St Jeor equation. Widely validated in nutritional science and recommended by the Academy of Nutrition and Dietetics, this equation accounts for body weight, height, age, and biological sex:</p>
+  <ul>
+    <li><strong>Males:</strong> BMR (kcal/day) = 10 &times; weight (kg) + 6.25 &times; height (cm) &minus; 5 &times; age (years) + 5</li>
+    <li><strong>Females:</strong> BMR (kcal/day) = 10 &times; weight (kg) + 6.25 &times; height (cm) &minus; 5 &times; age (years) &minus; 161</li>
+  </ul>
+  <p><strong>Citation:</strong> Mifflin, M. D., St Jeor, S. T., Hill, L. A., Scott, B. J., Daugherty, S. A., &amp; Koh, Y. O. (1990). A new predictive equation for resting energy expenditure in healthy individuals. <em>The American Journal of Clinical Nutrition</em>, 51(2), 241–247. <a href="https://pubmed.ncbi.nlm.nih.gov/2305711/" target="_blank" rel="noopener noreferrer">PubMed: 2305711</a> &middot; <a href="https://doi.org/10.1093/ajcn/51.2.241" target="_blank" rel="noopener noreferrer">DOI: 10.1093/ajcn/51.2.241</a></p>
+</section>
+<section>
+  <h2>2. Physical Activity Level (PAL) & Total Daily Energy Expenditure (TDEE)</h2>
+  <p>Your Total Daily Energy Expenditure is estimated by scaling BMR with Physical Activity Level (PAL) factors derived from international nutritional consensus:</p>
+  <ul>
+    <li><strong>Sedentary / Low activity:</strong> 1.30 &times; BMR</li>
+    <li><strong>Light activity:</strong> 1.40 &times; BMR</li>
+    <li><strong>Moderate activity:</strong> 1.50 &times; BMR</li>
+    <li><strong>High activity:</strong> 1.60 &times; BMR</li>
+  </ul>
+  <p><strong>Citation:</strong> Food and Agriculture Organization (FAO), World Health Organization (WHO), &amp; United Nations University (UNU). (2004). <em>Human energy requirements: Report of a Joint FAO/WHO/UNU Expert Consultation</em>. FAO Food and Nutrition Technical Report Series, No. 1. Rome: FAO. <a href="https://www.fao.org/3/y5686e/y5686e07.htm" target="_blank" rel="noopener noreferrer">FAO Technical Report</a></p>
+</section>
+<section>
+  <h2>3. Macronutrient Distribution Ranges (AMDR) & Protein Guidance</h2>
+  <p>Daily macronutrient targets are configured according to the Acceptable Macronutrient Distribution Ranges (AMDR) defined by the Institute of Medicine (National Academies of Sciences, Engineering, and Medicine):</p>
+  <ul>
+    <li><strong>Carbohydrates:</strong> 45% &ndash; 65% of total caloric intake.</li>
+    <li><strong>Dietary Fats:</strong> 20% &ndash; 35% of total caloric intake.</li>
+    <li><strong>Protein:</strong> 10% &ndash; 35% of total caloric intake, targeted at 1.2 to 1.6 g per kilogram of body weight to support satiety and preserve lean muscle mass during weight management.</li>
+  </ul>
+  <p><strong>Citations:</strong></p>
+  <ul>
+    <li>Institute of Medicine. (2005). <em>Dietary Reference Intakes for Energy, Carbohydrate, Fiber, Fat, Fatty Acids, Cholesterol, Protein, and Amino Acids</em>. Washington, DC: The National Academies Press. <a href="https://nap.nationalacademies.org/catalog/10490/" target="_blank" rel="noopener noreferrer">National Academies Catalog</a></li>
+    <li>Leidy, H. J., Clifton, P. M., Astrup, A., et al. (2015). The role of protein in weight management and satiety. <em>The American Journal of Clinical Nutrition</em>, 101(6), 1320S–1329S. <a href="https://pubmed.ncbi.nlm.nih.gov/25926512/" target="_blank" rel="noopener noreferrer">PubMed: 25926512</a></li>
+    <li>J&auml;ger, R., Kerksick, C. M., Campbell, B. I., et al. (2017). International Society of Sports Nutrition Position Stand: protein and exercise. <em>Journal of the International Society of Sports Nutrition</em>, 14, 20. <a href="https://pubmed.ncbi.nlm.nih.gov/28642676/" target="_blank" rel="noopener noreferrer">PubMed: 28642676</a></li>
+  </ul>
+</section>
+<section>
+  <h2>4. Safe Intake Limits & Minimum Calorie Thresholds</h2>
+  <p>Calry incorporates minimum safe intake floors (1,200 kcal/day for women and 1,500 kcal/day for men) unless explicitly overridden by the user. These safety boundaries align with medical consensus to prevent malnutrition, micronutrient deficiencies, and adverse metabolic impacts.</p>
+  <p><strong>Citations:</strong></p>
+  <ul>
+    <li>Harvard Health Publishing. (2020). Calorie counting made easy. <em>Harvard Medical School</em>. <a href="https://www.health.harvard.edu/staying-healthy/calorie-counting-made-easy" target="_blank" rel="noopener noreferrer">Harvard Health</a></li>
+    <li>U.S. Department of Agriculture &amp; U.S. Department of Health and Human Services. <em>Dietary Guidelines for Americans, 2020-2025</em>. 9th Edition. <a href="https://www.dietaryguidelines.gov/" target="_blank" rel="noopener noreferrer">Dietary Guidelines for Americans</a></li>
+  </ul>
+</section>
+""",
+    },
+    ("sources", "it"): {
+        "title": "Fonti scientifiche e citazioni",
+        "description": "Formule, letteratura medica e basi scientifiche delle stime di calorie e nutrizione in Calry.",
+        "lead": "Una panoramica trasparente delle equazioni scientifiche, linee guida dietetiche e letteratura clinica adottate da Calry.",
+        "footer": "Consapevolezza basata sull'evidenza.",
+        "body": """
+<section>
+  <h2>Avvertenza medica e sulla salute</h2>
+  <p>Calry è concepita esclusivamente per scopi educativi, di consapevolezza nutrizionale e di benessere generale. Calry non è un dispositivo medico e non fornisce diagnosi, terapie o consulenze mediche o dietetiche. Non sostituisce il parere di un medico. Consulta sempre un medico o un biologo nutrizionista prima di intraprendere cambiamenti significativi nella tua alimentazione, soprattutto in presenza di condizioni cliniche croniche, gravidanza, allattamento o disturbi del comportamento alimentare.</p>
+</section>
+<section>
+  <h2>1. Metabolismo Basale (BMR) e Fabbisogno Calorico Giornaliero</h2>
+  <p>Per determinare il punto di partenza calorico stimato, Calry calcola il Metabolismo Basale (BMR) mediante l'equazione di Mifflin-St Jeor. Ampiamente validata nella letteratura nutrizionale e raccomandata dall'Academy of Nutrition and Dietetics, la formula considera peso, altezza, età e sesso biologico:</p>
+  <ul>
+    <li><strong>Uomini:</strong> BMR (kcal/giorno) = 10 &times; peso (kg) + 6,25 &times; altezza (cm) &minus; 5 &times; età (anni) + 5</li>
+    <li><strong>Donne:</strong> BMR (kcal/giorno) = 10 &times; peso (kg) + 6,25 &times; altezza (cm) &minus; 5 &times; età (anni) &minus; 161</li>
+  </ul>
+  <p><strong>Citazione:</strong> Mifflin, M. D., St Jeor, S. T., Hill, L. A., Scott, B. J., Daugherty, S. A., &amp; Koh, Y. O. (1990). A new predictive equation for resting energy expenditure in healthy individuals. <em>The American Journal of Clinical Nutrition</em>, 51(2), 241–247. <a href="https://pubmed.ncbi.nlm.nih.gov/2305711/" target="_blank" rel="noopener noreferrer">PubMed: 2305711</a> &middot; <a href="https://doi.org/10.1093/ajcn/51.2.241" target="_blank" rel="noopener noreferrer">DOI: 10.1093/ajcn/51.2.241</a></p>
+</section>
+<section>
+  <h2>2. Livello di Attività Fisica (PAL) e Dispendio Energetico Totale (TDEE)</h2>
+  <p>Il dispendio energetico giornaliero totale (TDEE) viene stimato moltiplicando il BMR per i coefficienti del Livello di Attività Fisica (PAL) definiti dal consenso internazionale FAO/OMS:</p>
+  <ul>
+    <li><strong>Sedentario / Bassa attività:</strong> 1,30 &times; BMR</li>
+    <li><strong>Attività leggera:</strong> 1,40 &times; BMR</li>
+    <li><strong>Attività moderata:</strong> 1,50 &times; BMR</li>
+    <li><strong>Attività intensa:</strong> 1,60 &times; BMR</li>
+  </ul>
+  <p><strong>Citazione:</strong> Food and Agriculture Organization (FAO), World Health Organization (WHO), &amp; United Nations University (UNU). (2004). <em>Human energy requirements: Report of a Joint FAO/WHO/UNU Expert Consultation</em>. FAO Food and Nutrition Technical Report Series, No. 1. Rome: FAO. <a href="https://www.fao.org/3/y5686e/y5686e07.htm" target="_blank" rel="noopener noreferrer">Rapporto Tecnico FAO</a></p>
+</section>
+<section>
+  <h2>3. Ripartizione dei Macronutrienti (AMDR) e Fabbisogno Proteico</h2>
+  <p>La distribuzione dei macronutrienti rispetta gli intervalli di riferimento (AMDR) dell'Institute of Medicine (National Academies of Sciences, Engineering, and Medicine):</p>
+  <ul>
+    <li><strong>Carboidrati:</strong> 45% &ndash; 65% delle calorie giornaliere.</li>
+    <li><strong>Grassi:</strong> 20% &ndash; 35% delle calorie giornaliere.</li>
+    <li><strong>Proteine:</strong> 10% &ndash; 35% delle calorie giornaliere, calibrate a 1,2–1,6 g per chilogrammo di peso corporeo per favorire la sazietà e preservare la massa muscolare magra durante la gestione del peso.</li>
+  </ul>
+  <p><strong>Citazioni:</strong></p>
+  <ul>
+    <li>Institute of Medicine. (2005). <em>Dietary Reference Intakes for Energy, Carbohydrate, Fiber, Fat, Fatty Acids, Cholesterol, Protein, and Amino Acids</em>. Washington, DC: The National Academies Press. <a href="https://nap.nationalacademies.org/catalog/10490/" target="_blank" rel="noopener noreferrer">Catalogo National Academies</a></li>
+    <li>Leidy, H. J., Clifton, P. M., Astrup, A., et al. (2015). The role of protein in weight management and satiety. <em>The American Journal of Clinical Nutrition</em>, 101(6), 1320S–1329S. <a href="https://pubmed.ncbi.nlm.nih.gov/25926512/" target="_blank" rel="noopener noreferrer">PubMed: 25926512</a></li>
+    <li>J&auml;ger, R., Kerksick, C. M., Campbell, B. I., et al. (2017). International Society of Sports Nutrition Position Stand: protein and exercise. <em>Journal of the International Society of Sports Nutrition</em>, 14, 20. <a href="https://pubmed.ncbi.nlm.nih.gov/28642676/" target="_blank" rel="noopener noreferrer">PubMed: 28642676</a></li>
+  </ul>
+</section>
+<section>
+  <h2>4. Soglie Minime di Sicurezza Nutrizionale</h2>
+  <p>Calry adotta soglie minime di sicurezza calorica (almeno 1.200 kcal/giorno per le donne e 1.500 kcal/giorno per gli uomini) a meno che non vi sia una conferma esplicita dell'utente, prevenendo deficit eccessivi che espongono al rischio di carenze nutrizionali.</p>
+  <p><strong>Citazioni:</strong></p>
+  <ul>
+    <li>Harvard Health Publishing. (2020). Calorie counting made easy. <em>Harvard Medical School</em>. <a href="https://www.health.harvard.edu/staying-healthy/calorie-counting-made-easy" target="_blank" rel="noopener noreferrer">Harvard Health</a></li>
+    <li>U.S. Department of Agriculture &amp; U.S. Department of Health and Human Services. <em>Dietary Guidelines for Americans, 2020-2025</em>. 9th Edition. <a href="https://www.dietaryguidelines.gov/" target="_blank" rel="noopener noreferrer">Linee Guida Nutrizionali Statunitensi</a></li>
+  </ul>
+</section>
+""",
+    },
 }

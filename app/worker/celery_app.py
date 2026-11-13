@@ -3,9 +3,10 @@ from urllib.parse import urlsplit
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_ready, worker_shutdown
+from celery.signals import celeryd_init, worker_process_init, worker_ready, worker_shutdown
 
 from app.core.config import settings
+from app.core.observability import init_sentry
 from app.worker.health import WorkerHealthServer
 
 logger = logging.getLogger("app.worker.celery")
@@ -61,6 +62,15 @@ celery_app.conf.update(
         },
     },
 )
+
+
+# This module is also imported by the API to enqueue tasks, so Sentry is
+# initialised from worker signals only, never at import time. Prefork children
+# re-init so each has its own transport after the fork.
+@celeryd_init.connect
+@worker_process_init.connect
+def init_worker_sentry(**_: object) -> None:
+    init_sentry("worker")
 
 
 @worker_ready.connect

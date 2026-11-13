@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     # Sentry error/performance monitoring. Unset in dev to keep local runs quiet.
     SENTRY_DSN: str | None = None
+    # Defaults to RAILWAY_GIT_COMMIT_SHA when unset.
+    SENTRY_RELEASE: str | None = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
     SENTRY_PROFILE_SESSION_SAMPLE_RATE: float = 0.01
 

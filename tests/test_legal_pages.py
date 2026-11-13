@@ -9,6 +9,8 @@ from httpx import AsyncClient
         ("/privacy-policy?lang=it", "Informativa privacy"),
         ("/terms?lang=en", "Terms &amp; Conditions"),
         ("/terms-and-conditions?lang=it", "Termini e condizioni"),
+        ("/sources?lang=en", "Scientific Sources &amp; Citations"),
+        ("/scientific-sources?lang=it", "Fonti scientifiche e citazioni"),
     ],
 )
 async def test_public_legal_pages_are_available(client: AsyncClient, path: str, heading: str):

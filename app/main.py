@@ -4,7 +4,6 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import sentry_sdk
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -35,19 +34,11 @@ from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.dependencies.app_version import enforce_min_app_version
 from app.core.logging import setup_logging
+from app.core.observability import capture_server_error, init_sentry
 
 logger = logging.getLogger("app.main")
 
-if settings.SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
-        environment=settings.ENVIRONMENT,
-        send_default_pii=False,
-        enable_logs=True,
-        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
-        profile_session_sample_rate=settings.SENTRY_PROFILE_SESSION_SAMPLE_RATE,
-        profile_lifecycle="trace",
-    )
+init_sentry("api")
 
 
 @asynccontextmanager
@@ -152,6 +143,9 @@ async def log_requests(request: Request, call_next):
 @app.exception_handler(CalryException)
 async def calry_exception_handler(request: Request, exc: CalryException) -> JSONResponse:
     logger.warning(f"Application Business Exception: [{exc.error_code}] - {exc.message}")
+    # Expected 4xx business errors are noise; a handled 5xx is a real failure.
+    if exc.status_code >= 500:
+        capture_server_error(exc)
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -182,6 +176,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def fallback_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception(f"Unhandled critical system error: {exc}")
+    capture_server_error(exc)
     detail = {"error": str(exc)} if not settings.is_production else {}
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
