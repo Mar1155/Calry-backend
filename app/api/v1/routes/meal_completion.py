@@ -7,14 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.schemas.meal_completion import MealCompletionRequest
 from app.ai.schemas.meal_estimate import UserContext
 from app.ai.schemas.meal_review import DayReviewMealFact, DayReviewRequest, MealOccasionReviewRequest
+from app.ai.schemas.menu_scan import MenuScanAIRequest
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.core.client_time import client_today
+from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
-from app.dependencies.premium import require_premium_user
+from app.dependencies.premium import ensure_pro_feature, require_premium_user
 from app.models.user import User
+from app.repositories.food_memory import FoodMemoryRepository
 from app.repositories.meal import MealRepository
 from app.schemas.meal_completion import MealCompletionPreferences, MealCompletionResponse, MealSuggestionResponse
 from app.schemas.meal_review import DayReviewMeal, DayReviewResponse, MealOccasionReviewResponse, MealReviewEvidence
+from app.schemas.menu_scan import (
+    MenuDishIngredientResponse,
+    MenuDishSuggestionResponse,
+    MenuScanRequest,
+    MenuScanResponse,
+)
 from app.services.summary import SummaryService
 
 logger = logging.getLogger("app.api.meal_completion")
@@ -533,6 +542,7 @@ def _macro_targets(user: User) -> tuple[int, int, int]:
 async def _build_user_context(db: AsyncSession, user: User, locale: str | None = None) -> UserContext:
     """Retrieves calibration/correction history and profile to build a comprehensive UserContext."""
     from app.ai.services.correction_context_service import AICorrectionContextService
+    from app.memory.service import MemoryQueryService
 
     try:
         correction_service = AICorrectionContextService(db)
@@ -542,6 +552,12 @@ async def _build_user_context(db: AsyncSession, user: User, locale: str | None =
         logger.warning(f"Could not load correction context: {e}")
         summary = None
         avg_pct = None
+
+    memory_summary = None
+    try:
+        memory_summary = (await MemoryQueryService(db).get_estimation_hints(user.id)).summary
+    except Exception as e:
+        logger.warning(f"Could not load memory hints: {e}")
 
     return UserContext(
         daily_calorie_goal=user.daily_calorie_goal,
@@ -554,6 +570,7 @@ async def _build_user_context(db: AsyncSession, user: User, locale: str | None =
         weight_kg=user.weight_kg,
         goal_type=user.goal_type,
         avg_correction_percent=avg_pct,
+        memory_summary=memory_summary,
     )
 
 
@@ -678,6 +695,127 @@ async def suggest_daily_completion(
         ],
         daily_context_summary=ai_result.daily_context_summary,
         macro_balance_note=ai_result.macro_balance_note,
+        remaining_calories=summary.remaining_calories,
+        consumed_calories=summary.consumed_calories,
+        daily_goal=current_user.daily_calorie_goal,
+    )
+
+
+@router.post("/menu-scan", response_model=MenuScanResponse)
+async def scan_menu_and_recommend(
+    payload: MenuScanRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
+) -> MenuScanResponse:
+    """Reads 1-3 menu photos and recommends 3 personalized dish options (Calry Pro)."""
+    await ensure_pro_feature(current_user, db, "menu_scan")
+
+    today = client_today()
+    lang = "en"
+    if accept_language:
+        primary = accept_language.split(",")[0].split("-")[0].split("_")[0].strip().lower()
+        if primary in {"en", "it", "es", "zh", "ja", "ar", "de", "fr"}:
+            lang = primary
+
+    summary = await SummaryService(db).sync_daily_summary(current_user.id, today)
+    meals = await MealRepository(db).get_user_meals_on_date(current_user.id, today)
+
+    consumed_protein = sum(m.total_protein_g or 0.0 for m in meals)
+    consumed_carbs = sum(m.total_carbs_g or 0.0 for m in meals)
+    consumed_fat = sum(m.total_fat_g or 0.0 for m in meals)
+    meals_eaten_today = [m.meal_name for m in meals if m.meal_name]
+    target_protein, target_carbs, target_fat = _macro_targets(current_user)
+
+    favorite_and_regular_foods: list[str] = []
+    seen_foods: set[str] = set()
+    try:
+        recents = await FoodMemoryRepository(db).get_recents(current_user.id, limit=10)
+        for mem in recents:
+            name = (mem.display_name or "").strip()
+            if name and name.lower() not in seen_foods:
+                seen_foods.add(name.lower())
+                favorite_and_regular_foods.append(name)
+    except Exception as exc:
+        logger.warning("Could not load food memory recents for menu scan: %s", exc)
+
+    try:
+        from app.memory.service import MemoryQueryService
+
+        hints = await MemoryQueryService(db).get_estimation_hints(current_user.id)
+        for hint in hints.preference_hints:
+            name = (hint.display_name or "").strip()
+            if name and name.lower() not in seen_foods:
+                seen_foods.add(name.lower())
+                favorite_and_regular_foods.append(name)
+    except Exception as exc:
+        logger.warning("Could not load preference hints for menu scan: %s", exc)
+
+    user_context = await _build_user_context(db, current_user, lang)
+    menu_req = MenuScanAIRequest(
+        image_urls=payload.image_urls,
+        user_note=payload.user_note,
+        requested_meal_type=payload.meal_type,
+        remaining_calories=summary.remaining_calories,
+        consumed_calories=summary.consumed_calories,
+        daily_goal=current_user.daily_calorie_goal,
+        consumed_protein_g=consumed_protein,
+        consumed_carbs_g=consumed_carbs,
+        consumed_fat_g=consumed_fat,
+        target_protein_g=target_protein,
+        target_carbs_g=target_carbs,
+        target_fat_g=target_fat,
+        meals_eaten_today=meals_eaten_today,
+        favorite_and_regular_foods=favorite_and_regular_foods[:12],
+    )
+
+    ai_service = AICalorieEstimationService(db)
+    ai_result = await ai_service.scan_menu(
+        menu_req=menu_req,
+        user_context=user_context,
+        user_id=current_user.id,
+    )
+
+    if not ai_result.is_menu or not ai_result.suggestions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MENU_UNREADABLE",
+                "message": "We couldn't read a menu from these photos. Try a clearer shot of the dishes.",
+            },
+        )
+
+    return MenuScanResponse(
+        suggestions=[
+            MenuDishSuggestionResponse(
+                angle=s.angle,
+                dish_name=s.dish_name,
+                original_menu_name=s.original_menu_name,
+                description=s.description,
+                estimated_calories=s.estimated_calories,
+                protein_g=s.protein_g,
+                carbs_g=s.carbs_g,
+                fat_g=s.fat_g,
+                why_for_you_today=s.why_for_you_today,
+                practical_tip=s.practical_tip,
+                meal_category=s.meal_category,
+                items=[
+                    MenuDishIngredientResponse(
+                        name=item.name,
+                        quantity_estimate=item.quantity_estimate,
+                        weight_grams=item.weight_grams or 100,
+                        calories_per_100g=float(item.calories_per_100g or 0.0),
+                        protein_g=item.protein_g,
+                        carbs_g=item.carbs_g,
+                        fat_g=item.fat_g,
+                        estimated_calories=item.estimated_calories,
+                    )
+                    for item in s.items
+                ],
+            )
+            for s in ai_result.suggestions
+        ],
+        daily_context_summary=ai_result.daily_context_summary,
         remaining_calories=summary.remaining_calories,
         consumed_calories=summary.consumed_calories,
         daily_goal=current_user.daily_calorie_goal,

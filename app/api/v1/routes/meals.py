@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.ai.schemas.food_detection import regions_from_items
-from app.ai.schemas.meal_estimate import MealEstimateResult, UserContext
+from app.ai.schemas.meal_estimate import MealEstimateItem, MealEstimateResult, UserContext
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
 from app.ai.services.inference_logger import AIInferenceLogger
 from app.ai.streaming import protocol
@@ -39,6 +39,7 @@ from app.repositories.meal import MealRepository
 from app.schemas.meal import (
     BarcodeProductResponse,
     MealCreateBarcode,
+    MealCreateMenuOrder,
     MealCreatePhoto,
     MealCreateText,
     MealCreateVoice,
@@ -515,6 +516,83 @@ async def log_meal_via_barcode(
         meal_category=payload.meal_category,
     )
     return meal
+
+
+@router.post("/menu-order", response_model=MealResponse, status_code=status.HTTP_201_CREATED)
+async def log_meal_from_menu_order(
+    payload: MealCreateMenuOrder,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Meal:
+    """Logs an ordered menu dish as an unconfirmed pending meal (Calry Pro)."""
+    await ensure_pro_feature(current_user, db, "menu_scan")
+    existing = await _find_existing_by_request_id(db, current_user.id, payload.client_request_id)
+    if existing is not None:
+        return existing
+
+    items = [
+        MealEstimateItem(
+            name=item.name,
+            quantity_estimate=item.quantity_estimate,
+            weight_grams=item.weight_grams,
+            calories_per_100g=item.calories_per_100g,
+            protein_g=item.protein_g,
+            carbs_g=item.carbs_g,
+            fat_g=item.fat_g,
+            estimated_calories=round(item.weight_grams * item.calories_per_100g / 100),
+            image_url=item.image_url,
+        )
+        for item in payload.items
+    ]
+    total_protein = (
+        round(sum(i.protein_g or 0.0 for i in items), 1)
+        if any(i.protein_g is not None for i in items)
+        else None
+    )
+    total_carbs = (
+        round(sum(i.carbs_g or 0.0 for i in items), 1)
+        if any(i.carbs_g is not None for i in items)
+        else None
+    )
+    total_fat = (
+        round(sum(i.fat_g or 0.0 for i in items), 1)
+        if any(i.fat_g is not None for i in items)
+        else None
+    )
+    total_calories = sum(i.estimated_calories for i in items)
+
+    estimation = enforce_estimate_ingredient_invariants(
+        MealEstimateResult(
+            meal_name=payload.meal_name.strip(),
+            estimated_calories=total_calories,
+            estimated_min_calories=round(total_calories * 0.9),
+            estimated_max_calories=round(total_calories * 1.1),
+            confidence="medium",
+            confidence_score=0.75,
+            meal_category_suggestion=payload.meal_category,
+            meal_category_confidence="high" if payload.meal_category else None,
+            source_type="menu",
+            items=items,
+            total_protein_g=total_protein,
+            total_carbs_g=total_carbs,
+            total_fat_g=total_fat,
+            estimation_reasoning=payload.estimation_reasoning,
+            model_name="menu_order",
+            prompt_version="menu_order_v1",
+        )
+    )
+
+    return await _process_and_save_meal(
+        db=db,
+        user=current_user,
+        source_type="menu",
+        original_input=payload.meal_name.strip(),
+        image_url=payload.image_url,
+        audio_url=None,
+        estimation=estimation,
+        client_request_id=payload.client_request_id,
+        meal_category=payload.meal_category,
+    )
 
 
 

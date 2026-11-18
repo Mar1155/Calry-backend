@@ -52,6 +52,10 @@ from app.ai.prompts.meal_review import (
     MEAL_OCCASION_REVIEW_PROMPT_VERSION,
     MEAL_OCCASION_REVIEW_SYSTEM_PROMPT,
 )
+from app.ai.prompts.menu_scan import (
+    MENU_SCAN_PROMPT_VERSION,
+    MENU_SCAN_SYSTEM_PROMPT,
+)
 from app.ai.providers.base import BaseAIProvider
 from app.ai.schemas.ingredient_image import IngredientImageResult
 from app.ai.schemas.ingredient_translation import (
@@ -74,7 +78,9 @@ from app.ai.schemas.meal_review import (
     MealOccasionReviewRequest,
     MealOccasionReviewResult,
 )
+from app.ai.schemas.menu_scan import MenuDishSuggestionItem, MenuScanAIRequest, MenuScanAIResult
 from app.core.config import settings
+from app.services.meal_invariants import normalize_meal_ingredients
 
 logger = logging.getLogger("app.ai.openrouter")
 
@@ -1433,6 +1439,164 @@ class OpenRouterProvider(BaseAIProvider):
             macro_balance_note=parsed.get("macro_balance_note", ""),
             model_name=model,
             prompt_version=MEAL_COMPLETION_PROMPT_VERSION,
+            raw_output=raw_text,
+            latency_ms=latency_ms,
+            token_usage=self._normalize_usage(usage),
+        )
+
+    async def scan_menu(
+        self,
+        menu_req: MenuScanAIRequest,
+        user_context: UserContext | None = None,
+    ) -> MenuScanAIResult:
+        model = settings.OPENROUTER_IMAGE_MODEL
+        data_uris = await asyncio.gather(*(self._load_image_data_uri(url) for url in menu_req.image_urls))
+        context_str = self._build_user_context(user_context, leading_blank=True)
+
+        req_info = (
+            f"Remaining Calories: {menu_req.remaining_calories} kcal\n"
+            f"Consumed Calories: {menu_req.consumed_calories} kcal\n"
+            f"Daily Calorie Goal: {menu_req.daily_goal} kcal\n"
+            f"Consumed Protein: {menu_req.consumed_protein_g:g}g\n"
+            f"Consumed Carbs: {menu_req.consumed_carbs_g:g}g\n"
+            f"Consumed Fat: {menu_req.consumed_fat_g:g}g\n"
+            f"Target Protein: {f'{menu_req.target_protein_g:g}g' if menu_req.target_protein_g is not None else 'not set'}\n"
+            f"Target Carbs: {f'{menu_req.target_carbs_g:g}g' if menu_req.target_carbs_g is not None else 'not set'}\n"
+            f"Target Fat: {f'{menu_req.target_fat_g:g}g' if menu_req.target_fat_g is not None else 'not set'}\n"
+            f"Meals Eaten Today: {', '.join(menu_req.meals_eaten_today) if menu_req.meals_eaten_today else 'None'}\n"
+            f"Favorite / Recurring Foods: {', '.join(menu_req.favorite_and_regular_foods) if menu_req.favorite_and_regular_foods else 'None'}\n"
+            f"Requested Meal Category: {menu_req.requested_meal_type or 'infer from menu/context'}\n"
+            f"User Note / Craving: {menu_req.user_note.strip() if menu_req.user_note and menu_req.user_note.strip() else 'None'}"
+        )
+        output_lang = self._output_language(user_context)
+
+        user_content: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    f"Analyze these {len(data_uris)} menu photo(s) and recommend 3 real dishes from the menu "
+                    f"for this user:\n{req_info}{context_str}\n\n"
+                    f"Write all user-facing text fields (daily_context_summary, dish_name, description, "
+                    f"why_for_you_today, practical_tip, item names, quantity_estimate) in {output_lang}. "
+                    "Keep angle (best_fit/for_you/mindful_pleasure) and meal_category "
+                    "(breakfast/lunch/dinner/snack) in exact lowercase English enum values."
+                ),
+            },
+            *[
+                {"type": "image_url", "image_url": {"url": uri, "detail": "high"}}
+                for uri in data_uris
+            ],
+        ]
+
+        raw_text, latency_ms, usage, _ = await self._post_openrouter(
+            model=model,
+            system_prompt=MENU_SCAN_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_content}],
+            response_format={"type": "json_object"},
+        )
+
+        try:
+            parsed = json.loads(self._extract_json(raw_text))
+        except json.JSONDecodeError as e:
+            parsed = await self._repair_json(raw_text, str(e), MenuScanAIResult)
+
+        return self._build_menu_scan_result(parsed, model, raw_text, latency_ms, usage, menu_req)
+
+    @staticmethod
+    def _as_float(value: Any, default: float = 0.0) -> float:
+        if value is None or isinstance(value, bool):
+            return default
+        try:
+            parsed = float(value)
+            return parsed if parsed >= 0 else default
+        except (TypeError, ValueError):
+            return default
+
+    def _build_menu_scan_result(
+        self,
+        parsed: dict[str, Any],
+        model: str,
+        raw_text: str,
+        latency_ms: int,
+        usage: dict | None,
+        menu_req: MenuScanAIRequest,
+    ) -> MenuScanAIResult:
+        is_menu = bool(parsed.get("is_menu", True))
+        if not is_menu:
+            return MenuScanAIResult(
+                is_menu=False,
+                suggestions=[],
+                daily_context_summary="",
+                model_name=model,
+                prompt_version=MENU_SCAN_PROMPT_VERSION,
+                raw_output=raw_text,
+                latency_ms=latency_ms,
+                token_usage=self._normalize_usage(usage),
+            )
+
+        default_angles = ("best_fit", "for_you", "mindful_pleasure")
+        default_category = menu_req.requested_meal_type or "lunch"
+        suggestions: list[MenuDishSuggestionItem] = []
+
+        for idx, raw_item in enumerate(parsed.get("suggestions") or []):
+            if not isinstance(raw_item, dict):
+                continue
+            dish_name = str(raw_item.get("dish_name") or "").strip()
+            if not dish_name:
+                continue
+            raw_calories = self._as_int(raw_item.get("estimated_calories")) or 0
+            raw_items = self._dict_to_items(raw_item)
+            normalized_items, derived_calories = normalize_meal_ingredients(
+                raw_items,
+                meal_name=dish_name,
+                target_calories=raw_calories,
+            )
+            items = [MealEstimateItem(**item) for item in normalized_items]
+            fallback_angle = default_angles[idx] if idx < len(default_angles) else "best_fit"
+            angle = self._coerce_enum(
+                raw_item.get("angle"),
+                {"best_fit", "for_you", "mindful_pleasure"},
+                fallback_angle,
+            )
+            meal_category = self._coerce_enum(
+                raw_item.get("meal_category"),
+                {"breakfast", "lunch", "dinner", "snack"},
+                default_category,
+            )
+            original_menu_name = raw_item.get("original_menu_name")
+            if isinstance(original_menu_name, str):
+                original_menu_name = original_menu_name.strip() or None
+            else:
+                original_menu_name = None
+            practical_tip = raw_item.get("practical_tip")
+            if isinstance(practical_tip, str):
+                practical_tip = practical_tip.strip() or None
+            else:
+                practical_tip = None
+
+            suggestions.append(
+                MenuDishSuggestionItem(
+                    angle=angle,  # type: ignore[arg-type]
+                    dish_name=dish_name,
+                    original_menu_name=original_menu_name,
+                    description=str(raw_item.get("description") or "").strip(),
+                    estimated_calories=derived_calories if derived_calories > 0 else raw_calories,
+                    protein_g=round(self._as_float(raw_item.get("protein_g")), 1),
+                    carbs_g=round(self._as_float(raw_item.get("carbs_g")), 1),
+                    fat_g=round(self._as_float(raw_item.get("fat_g")), 1),
+                    why_for_you_today=str(raw_item.get("why_for_you_today") or "").strip(),
+                    practical_tip=practical_tip,
+                    meal_category=meal_category,  # type: ignore[arg-type]
+                    items=items,
+                )
+            )
+
+        return MenuScanAIResult(
+            is_menu=bool(suggestions),
+            suggestions=suggestions[:3],
+            daily_context_summary=str(parsed.get("daily_context_summary") or "").strip(),
+            model_name=model,
+            prompt_version=MENU_SCAN_PROMPT_VERSION,
             raw_output=raw_text,
             latency_ms=latency_ms,
             token_usage=self._normalize_usage(usage),

@@ -18,6 +18,7 @@ _SCOPE_LABELS = {
     "source:photo": "your photo estimates",
     "source:text": "your text estimates",
     "source:voice": "your voice estimates",
+    "source:menu": "your menu estimates",
 }
 
 

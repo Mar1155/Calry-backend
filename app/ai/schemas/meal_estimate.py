@@ -28,7 +28,7 @@ class MealEstimateResult(BaseModel):
     confidence: Literal["low", "medium", "high"]
     meal_category_suggestion: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     meal_category_confidence: Literal["low", "medium", "high"] | None = None
-    source_type: Literal["text", "voice", "photo", "barcode"]
+    source_type: Literal["text", "voice", "photo", "barcode", "menu"]
     items: list[MealEstimateItem] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     needs_clarification: bool = False

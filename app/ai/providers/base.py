@@ -8,6 +8,7 @@ from app.ai.schemas.meal_review import (
     MealOccasionReviewRequest,
     MealOccasionReviewResult,
 )
+from app.ai.schemas.menu_scan import MenuScanAIRequest, MenuScanAIResult
 
 
 class BaseAIProvider(ABC):
@@ -88,4 +89,13 @@ class BaseAIProvider(ABC):
         locale: str = "en",
     ) -> DayReviewResult:
         """Reflects on the whole day's logged meals, peak-end style."""
+        pass
+
+    @abstractmethod
+    async def scan_menu(
+        self,
+        menu_req: MenuScanAIRequest,
+        user_context: UserContext | None = None,
+    ) -> MenuScanAIResult:
+        """Reads 1-3 menu photos and recommends 3 personalized dish options."""
         pass

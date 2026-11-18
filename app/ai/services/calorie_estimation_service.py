@@ -10,6 +10,7 @@ from app.ai.prompts.meal_completion import MEAL_COMPLETION_PROMPT_VERSION
 from app.ai.prompts.meal_estimation import TEXT_MEAL_ESTIMATION_PROMPT_VERSION
 from app.ai.prompts.meal_refinement import MEAL_REFINEMENT_PROMPT_VERSION
 from app.ai.prompts.meal_review import DAY_REVIEW_PROMPT_VERSION, MEAL_OCCASION_REVIEW_PROMPT_VERSION
+from app.ai.prompts.menu_scan import MENU_SCAN_PROMPT_VERSION
 from app.ai.providers.base import BaseAIProvider
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.schemas.meal_completion import MealCompletionRequest, MealCompletionResult
@@ -20,6 +21,7 @@ from app.ai.schemas.meal_review import (
     MealOccasionReviewRequest,
     MealOccasionReviewResult,
 )
+from app.ai.schemas.menu_scan import MenuScanAIRequest, MenuScanAIResult
 from app.ai.services.confidence_service import AIConfidenceService, bucket_confidence
 from app.ai.services.inference_logger import AIInferenceLogger
 from app.ai.services.speech_service import AISpeechService
@@ -667,6 +669,47 @@ class AICalorieEstimationService:
                 prompt_version=prompt_version,
                 input_type="meal_completion",
                 raw_input=completion_req.model_dump_json(),
+                raw_output=str(raw_output) if raw_output else None,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_msg,
+                token_usage=raw_result.token_usage if raw_result is not None else None,
+            )
+
+    async def scan_menu(
+        self,
+        menu_req: MenuScanAIRequest,
+        user_context: UserContext | None = None,
+        user_id: int | None = None,
+        provider_override: str | None = None,
+    ) -> MenuScanAIResult:
+        provider = self._get_provider(provider_override)
+        start_time = time.perf_counter()
+        success = False
+        raw_result = None
+        raw_output = None
+        error_msg = None
+
+        try:
+            raw_result = await provider.scan_menu(menu_req, user_context)
+            raw_output = raw_result.raw_output
+            success = True
+            return raw_result
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error in scan_menu: {e}")
+            raise e
+        finally:
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            prompt_version = raw_result.prompt_version if raw_result is not None else MENU_SCAN_PROMPT_VERSION
+            await self.inference_logger.log_call(
+                user_id=user_id,
+                provider=provider.provider_name,
+                model_name=settings.OPENROUTER_IMAGE_MODEL,
+                prompt_version=prompt_version,
+                input_type="menu_scan",
+                raw_input=menu_req.model_dump_json(),
                 raw_output=str(raw_output) if raw_output else None,
                 latency_ms=latency_ms,
                 success=success,

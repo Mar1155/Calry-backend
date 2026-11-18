@@ -103,6 +103,15 @@ class MealCreateBarcode(BaseModel):
     client_request_id: str | None = Field(default=None, max_length=64)
 
 
+class MealCreateMenuOrder(BaseModel):
+    meal_name: str = Field(..., min_length=1, max_length=255)
+    meal_category: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
+    estimation_reasoning: str | None = Field(default=None, max_length=2000)
+    image_url: str | None = Field(default=None, max_length=1024)
+    items: list[MealItemCreate] = Field(..., min_length=1)
+    client_request_id: str | None = Field(default=None, max_length=64)
+
+
 class MealRefineRequest(BaseModel):
     user_refinement: str = Field(..., min_length=2, max_length=2000)
     refinement_type: Literal["text", "voice"] = "text"
@@ -135,7 +144,7 @@ class MealResponse(BaseModel):
 
     id: int
     user_id: int
-    source_type: Literal["text", "voice", "photo", "barcode"]
+    source_type: Literal["text", "voice", "photo", "barcode", "menu"]
     original_input: str
     image_url: str | None = None
     audio_url: str | None = None
