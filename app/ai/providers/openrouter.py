@@ -53,6 +53,8 @@ from app.ai.prompts.meal_review import (
     MEAL_OCCASION_REVIEW_SYSTEM_PROMPT,
 )
 from app.ai.prompts.menu_scan import (
+    MENU_CATEGORIES_PROMPT_VERSION,
+    MENU_CATEGORIES_SYSTEM_PROMPT,
     MENU_SCAN_PROMPT_VERSION,
     MENU_SCAN_SYSTEM_PROMPT,
 )
@@ -78,7 +80,14 @@ from app.ai.schemas.meal_review import (
     MealOccasionReviewRequest,
     MealOccasionReviewResult,
 )
-from app.ai.schemas.menu_scan import MenuDishSuggestionItem, MenuScanAIRequest, MenuScanAIResult
+from app.ai.schemas.menu_scan import (
+    MenuCategoriesAIRequest,
+    MenuCategoriesAIResult,
+    MenuCategoryAIItem,
+    MenuDishSuggestionItem,
+    MenuScanAIRequest,
+    MenuScanAIResult,
+)
 from app.core.config import settings
 from app.services.meal_invariants import normalize_meal_ingredients
 
@@ -1444,14 +1453,166 @@ class OpenRouterProvider(BaseAIProvider):
             token_usage=self._normalize_usage(usage),
         )
 
+    async def _build_menu_source_parts(
+        self,
+        *,
+        image_urls: list[str],
+        menu_data_uris: list[str],
+        menu_text: str | None,
+        menu_url: str | None,
+    ) -> tuple[str, str, list[dict[str, Any]]]:
+        """Resolves photos, fetched URL images/PDFs, or digital menu text into model parts."""
+        loaded_photo_uris = (
+            await asyncio.gather(*(self._load_image_data_uri(url) for url in image_urls))
+            if image_urls
+            else []
+        )
+        all_data_uris = [*loaded_photo_uris, *menu_data_uris]
+        media_parts: list[dict[str, Any]] = []
+        for idx, uri in enumerate(all_data_uris):
+            if uri.startswith("data:application/pdf"):
+                media_parts.append(
+                    {
+                        "type": "file",
+                        "file": {"filename": f"menu_{idx + 1}.pdf", "file_data": uri},
+                    }
+                )
+            else:
+                media_parts.append(
+                    {"type": "image_url", "image_url": {"url": uri, "detail": "high"}}
+                )
+
+        model = settings.OPENROUTER_IMAGE_MODEL if media_parts else settings.OPENROUTER_TEXT_MODEL
+        source_sections: list[str] = []
+        if loaded_photo_uris:
+            source_sections.append(f"Attached menu photos: {len(loaded_photo_uris)}")
+        if menu_url:
+            source_sections.append(f"Digital menu URL: {menu_url}")
+        if menu_text and menu_text.strip():
+            source_sections.append(f"Extracted Digital Menu Content:\n{menu_text.strip()}")
+        source_summary = "\n".join(source_sections)
+        return model, source_summary, media_parts
+
+    async def extract_menu_categories(
+        self,
+        menu_req: MenuCategoriesAIRequest,
+        user_context: UserContext | None = None,
+    ) -> MenuCategoriesAIResult:
+        model, source_summary, media_parts = await self._build_menu_source_parts(
+            image_urls=menu_req.image_urls,
+            menu_data_uris=menu_req.menu_data_uris,
+            menu_text=menu_req.menu_text,
+            menu_url=menu_req.menu_url,
+        )
+        output_lang = self._output_language(user_context)
+        user_content: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    f"Inspect this restaurant menu and extract its food/drink categories:\n"
+                    f"{source_summary}\n\n"
+                    f"Write category names and restaurant_name naturally in {output_lang}."
+                ),
+            },
+            *media_parts,
+        ]
+
+        raw_text, latency_ms, usage, _ = await self._post_openrouter(
+            model=model,
+            system_prompt=MENU_CATEGORIES_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_content}],
+            response_format={"type": "json_object"},
+        )
+
+        try:
+            parsed = json.loads(self._extract_json(raw_text))
+        except json.JSONDecodeError as e:
+            parsed = await self._repair_json(raw_text, str(e), MenuCategoriesAIResult)
+
+        return self._build_menu_categories_result(parsed, model, raw_text, latency_ms, usage)
+
+    def _build_menu_categories_result(
+        self,
+        parsed: dict[str, Any],
+        model: str,
+        raw_text: str,
+        latency_ms: int,
+        usage: dict | None,
+    ) -> MenuCategoriesAIResult:
+        is_menu = bool(parsed.get("is_menu", True))
+        if not is_menu:
+            return MenuCategoriesAIResult(
+                is_menu=False,
+                restaurant_name=None,
+                categories=[],
+                model_name=model,
+                prompt_version=MENU_CATEGORIES_PROMPT_VERSION,
+                raw_output=raw_text,
+                latency_ms=latency_ms,
+                token_usage=self._normalize_usage(usage),
+            )
+
+        categories: list[MenuCategoryAIItem] = []
+        seen_names: set[str] = set()
+        for idx, raw_cat in enumerate(parsed.get("categories") or []):
+            if not isinstance(raw_cat, dict):
+                continue
+            name = str(raw_cat.get("name") or "").strip()
+            if not name or name.lower() in seen_names:
+                continue
+            seen_names.add(name.lower())
+            raw_id = str(raw_cat.get("id") or "").strip().lower()
+            slug = re.sub(r"[^a-z0-9]+", "_", raw_id or name.lower()).strip("_")
+            cat_id = slug or f"category_{idx + 1}"
+            dish_count = self._as_int(raw_cat.get("dish_count"))
+            sample_dishes = [
+                str(d).strip()
+                for d in (raw_cat.get("sample_dishes") or [])
+                if isinstance(d, str) and d.strip()
+            ][:3]
+            categories.append(
+                MenuCategoryAIItem(
+                    id=cat_id,
+                    name=name,
+                    dish_count=dish_count if dish_count and dish_count > 0 else None,
+                    sample_dishes=sample_dishes,
+                )
+            )
+
+        restaurant_name = parsed.get("restaurant_name")
+        if isinstance(restaurant_name, str):
+            restaurant_name = restaurant_name.strip() or None
+        else:
+            restaurant_name = None
+
+        return MenuCategoriesAIResult(
+            is_menu=bool(categories),
+            restaurant_name=restaurant_name,
+            categories=categories[:20],
+            model_name=model,
+            prompt_version=MENU_CATEGORIES_PROMPT_VERSION,
+            raw_output=raw_text,
+            latency_ms=latency_ms,
+            token_usage=self._normalize_usage(usage),
+        )
+
     async def scan_menu(
         self,
         menu_req: MenuScanAIRequest,
         user_context: UserContext | None = None,
     ) -> MenuScanAIResult:
-        model = settings.OPENROUTER_IMAGE_MODEL
-        data_uris = await asyncio.gather(*(self._load_image_data_uri(url) for url in menu_req.image_urls))
+        model, source_summary, media_parts = await self._build_menu_source_parts(
+            image_urls=menu_req.image_urls,
+            menu_data_uris=menu_req.menu_data_uris,
+            menu_text=menu_req.menu_text,
+            menu_url=menu_req.menu_url,
+        )
         context_str = self._build_user_context(user_context, leading_blank=True)
+        selected_cats = (
+            ", ".join(menu_req.selected_categories)
+            if menu_req.selected_categories
+            else "All categories"
+        )
 
         req_info = (
             f"Remaining Calories: {menu_req.remaining_calories} kcal\n"
@@ -1465,6 +1626,7 @@ class OpenRouterProvider(BaseAIProvider):
             f"Target Fat: {f'{menu_req.target_fat_g:g}g' if menu_req.target_fat_g is not None else 'not set'}\n"
             f"Meals Eaten Today: {', '.join(menu_req.meals_eaten_today) if menu_req.meals_eaten_today else 'None'}\n"
             f"Favorite / Recurring Foods: {', '.join(menu_req.favorite_and_regular_foods) if menu_req.favorite_and_regular_foods else 'None'}\n"
+            f"Selected Menu Categories: {selected_cats}\n"
             f"Requested Meal Category: {menu_req.requested_meal_type or 'infer from menu/context'}\n"
             f"User Note / Craving: {menu_req.user_note.strip() if menu_req.user_note and menu_req.user_note.strip() else 'None'}"
         )
@@ -1474,18 +1636,15 @@ class OpenRouterProvider(BaseAIProvider):
             {
                 "type": "text",
                 "text": (
-                    f"Analyze these {len(data_uris)} menu photo(s) and recommend 3 real dishes from the menu "
-                    f"for this user:\n{req_info}{context_str}\n\n"
+                    f"Analyze this menu and recommend 3 real dishes from the menu for this user:\n"
+                    f"{req_info}\n\n{source_summary}{context_str}\n\n"
                     f"Write all user-facing text fields (daily_context_summary, dish_name, description, "
                     f"why_for_you_today, practical_tip, item names, quantity_estimate) in {output_lang}. "
                     "Keep angle (best_fit/for_you/mindful_pleasure) and meal_category "
                     "(breakfast/lunch/dinner/snack) in exact lowercase English enum values."
                 ),
             },
-            *[
-                {"type": "image_url", "image_url": {"url": uri, "detail": "high"}}
-                for uri in data_uris
-            ],
+            *media_parts,
         ]
 
         raw_text, latency_ms, usage, _ = await self._post_openrouter(

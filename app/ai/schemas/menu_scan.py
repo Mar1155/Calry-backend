@@ -7,6 +7,31 @@ from app.ai.schemas.meal_estimate import MealEstimateItem
 MenuDishAngle = Literal["best_fit", "for_you", "mindful_pleasure"]
 
 
+class MenuCategoryAIItem(BaseModel):
+    id: str
+    name: str
+    dish_count: int | None = None
+    sample_dishes: list[str] = Field(default_factory=list)
+
+
+class MenuCategoriesAIRequest(BaseModel):
+    image_urls: list[str] = Field(default_factory=list, max_length=3)
+    menu_url: str | None = None
+    menu_text: str | None = None
+    menu_data_uris: list[str] = Field(default_factory=list)
+
+
+class MenuCategoriesAIResult(BaseModel):
+    is_menu: bool = True
+    restaurant_name: str | None = None
+    categories: list[MenuCategoryAIItem] = Field(default_factory=list)
+    model_name: str
+    prompt_version: str
+    raw_output: dict | str | None = None
+    latency_ms: int | None = None
+    token_usage: dict | None = None
+
+
 class MenuDishSuggestionItem(BaseModel):
     angle: MenuDishAngle
     dish_name: str
@@ -34,7 +59,11 @@ class MenuScanAIResult(BaseModel):
 
 
 class MenuScanAIRequest(BaseModel):
-    image_urls: list[str] = Field(..., min_length=1, max_length=3)
+    image_urls: list[str] = Field(default_factory=list, max_length=3)
+    menu_url: str | None = None
+    menu_text: str | None = None
+    menu_data_uris: list[str] = Field(default_factory=list)
+    selected_categories: list[str] = Field(default_factory=list)
     user_note: str | None = None
     requested_meal_type: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
     remaining_calories: int

@@ -1,14 +1,54 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.ai.schemas.menu_scan import MenuDishAngle
 
 
+def _validate_menu_source(image_urls: list[str], menu_url: str | None) -> tuple[list[str], str | None]:
+    cleaned_images = [u.strip() for u in image_urls if isinstance(u, str) and u.strip()]
+    cleaned_url = menu_url.strip() if isinstance(menu_url, str) and menu_url.strip() else None
+    if not cleaned_images and not cleaned_url:
+        raise ValueError("Provide at least one menu photo or a digital menu URL.")
+    return cleaned_images, cleaned_url
+
+
+class MenuCategoriesRequest(BaseModel):
+    image_urls: list[str] = Field(default_factory=list, max_length=3)
+    menu_url: str | None = Field(default=None, max_length=2048)
+
+    @model_validator(mode="after")
+    def _ensure_source(self) -> "MenuCategoriesRequest":
+        self.image_urls, self.menu_url = _validate_menu_source(self.image_urls, self.menu_url)
+        return self
+
+
+class MenuCategoryResponse(BaseModel):
+    id: str
+    name: str
+    dish_count: int | None = None
+    sample_dishes: list[str] = Field(default_factory=list)
+
+
+class MenuCategoriesResponse(BaseModel):
+    restaurant_name: str | None = None
+    categories: list[MenuCategoryResponse]
+
+
 class MenuScanRequest(BaseModel):
-    image_urls: list[str] = Field(..., min_length=1, max_length=3)
+    image_urls: list[str] = Field(default_factory=list, max_length=3)
+    menu_url: str | None = Field(default=None, max_length=2048)
+    selected_categories: list[str] = Field(default_factory=list, max_length=30)
     user_note: str | None = Field(default=None, max_length=500)
     meal_type: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
+
+    @model_validator(mode="after")
+    def _ensure_source(self) -> "MenuScanRequest":
+        self.image_urls, self.menu_url = _validate_menu_source(self.image_urls, self.menu_url)
+        self.selected_categories = [
+            c.strip() for c in self.selected_categories if isinstance(c, str) and c.strip()
+        ]
+        return self
 
 
 class MenuDishIngredientResponse(BaseModel):

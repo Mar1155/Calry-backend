@@ -7,7 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.providers.openrouter import OpenRouterProvider
 from app.ai.schemas.meal_estimate import MealEstimateItem
-from app.ai.schemas.menu_scan import MenuDishSuggestionItem, MenuScanAIRequest, MenuScanAIResult
+from app.ai.schemas.menu_scan import (
+    MenuCategoriesAIRequest,
+    MenuCategoriesAIResult,
+    MenuCategoryAIItem,
+    MenuDishSuggestionItem,
+    MenuScanAIRequest,
+    MenuScanAIResult,
+)
+from app.ai.services.menu_url_loader import (
+    LoadedMenuContent,
+    MenuUrlError,
+    extract_text_from_html,
+    validate_public_http_url,
+)
 from app.models.food_memory import UserFoodMemory
 from app.models.meal import Meal
 from app.models.user import User
@@ -388,3 +401,151 @@ async def test_menu_order_creates_pending_meal_and_confirms(client: AsyncClient)
     )
     assert confirm_res.status_code == 200
     assert confirm_res.json()["confirmed_calories"] == 480
+
+
+def test_menu_url_ssrf_and_html_extractor() -> None:
+    for blocked in (
+        "ftp://example.com/menu",
+        "http://localhost/menu",
+        "http://127.0.0.1:8000/menu",
+        "http://10.0.0.5/menu",
+        "http://192.168.1.10/menu",
+        "http://169.254.169.254/latest/meta-data",
+        "http://service.internal/menu",
+    ):
+        with pytest.raises(MenuUrlError):
+            validate_public_http_url(blocked)
+
+    with patch("app.ai.services.menu_url_loader.socket.getaddrinfo") as mock_dns:
+        mock_dns.return_value = [(2, 1, 6, "", ("93.184.216.34", 443))]
+        assert validate_public_http_url("https://ristorante.example/menu") == "https://ristorante.example/menu"
+
+        mock_dns.return_value = [(2, 1, 6, "", ("127.0.0.1", 80))]
+        with pytest.raises(MenuUrlError):
+            validate_public_http_url("https://evil.example/menu")
+
+    sample_html = """
+    <html>
+      <head><title>Trattoria del Sole</title><style>.x{color:red}</style></head>
+      <body>
+        <script>console.log("ignore me")</script>
+        <h1>Antipasti</h1>
+        <p>Bruschetta al pomodoro - 6 EUR</p>
+        <h2>Primi piatti</h2>
+        <ul><li>Spaghetti alle vongole - 16 EUR</li></ul>
+      </body>
+    </html>
+    """
+    extracted = extract_text_from_html(sample_html)
+    assert "Trattoria del Sole" in extracted
+    assert "Antipasti" in extracted
+    assert "Bruschetta al pomodoro" in extracted
+    assert "Primi piatti" in extracted
+    assert "Spaghetti alle vongole" in extracted
+    assert "ignore me" not in extracted
+
+
+@pytest.mark.asyncio
+async def test_menu_categories_from_photos_and_digital_url(client: AsyncClient) -> None:
+    headers, _ = await _create_user(client, "menu_categories_pro", pro=True)
+
+    categories_result = MenuCategoriesAIResult(
+        is_menu=True,
+        restaurant_name="Osteria Moderna",
+        categories=[
+            MenuCategoryAIItem(
+                id="antipasti",
+                name="Antipasti",
+                dish_count=5,
+                sample_dishes=["Carpaccio di spigola", "Burrata"],
+            ),
+            MenuCategoryAIItem(
+                id="secondi_pesce",
+                name="Secondi di pesce",
+                dish_count=4,
+                sample_dishes=["Orata ai ferri", "Tataki di tonno"],
+            ),
+        ],
+        model_name="gemini-2.5-flash",
+        prompt_version="menu_categories_v1",
+        latency_ms=180,
+    )
+
+    with (
+        patch(
+            "app.api.v1.routes.meal_completion.fetch_digital_menu",
+            new_callable=AsyncMock,
+            return_value=LoadedMenuContent(
+                source_url="https://osteria.example/menu",
+                text_content="Osteria Moderna\nAntipasti\nCarpaccio di spigola\nSecondi di pesce\nOrata ai ferri",
+            ),
+        ) as mock_fetch,
+        patch(
+            "app.api.v1.routes.meal_completion.AICalorieEstimationService.extract_menu_categories",
+            new_callable=AsyncMock,
+            return_value=categories_result,
+        ) as mock_extract,
+    ):
+        res = await client.post(
+            "/api/v1/meals/menu-categories",
+            headers=headers,
+            json={"menu_url": "https://osteria.example/menu"},
+        )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["restaurant_name"] == "Osteria Moderna"
+    assert [c["name"] for c in body["categories"]] == ["Antipasti", "Secondi di pesce"]
+    mock_fetch.assert_awaited_once_with("https://osteria.example/menu")
+    cat_req: MenuCategoriesAIRequest = mock_extract.await_args.kwargs["menu_req"]
+    assert "Osteria Moderna" in (cat_req.menu_text or "")
+
+    # Unreachable/blocked URL surfaces MENU_URL_UNREACHABLE
+    with patch(
+        "app.api.v1.routes.meal_completion.fetch_digital_menu",
+        new_callable=AsyncMock,
+        side_effect=MenuUrlError("MENU_URL_UNREACHABLE", "Private network blocked"),
+    ):
+        err_res = await client.post(
+            "/api/v1/meals/menu-categories",
+            headers=headers,
+            json={"menu_url": "http://127.0.0.1/menu"},
+        )
+    assert err_res.status_code == 422
+    assert err_res.json()["detail"]["code"] == "MENU_URL_UNREACHABLE"
+
+
+@pytest.mark.asyncio
+async def test_menu_scan_with_url_and_selected_categories(client: AsyncClient) -> None:
+    headers, _ = await _create_user(client, "menu_url_selected", pro=True)
+
+    with (
+        patch(
+            "app.api.v1.routes.meal_completion.fetch_digital_menu",
+            new_callable=AsyncMock,
+            return_value=LoadedMenuContent(
+                source_url="https://osteria.example/menu",
+                text_content="Antipasti\nTartare\nSecondi di pesce\nOrata ai ferri\nDolci\nTiramisù",
+            ),
+        ),
+        patch(
+            "app.api.v1.routes.meal_completion.AICalorieEstimationService.scan_menu",
+            new_callable=AsyncMock,
+            return_value=_sample_menu_result(),
+        ) as mock_scan,
+    ):
+        res = await client.post(
+            "/api/v1/meals/menu-scan",
+            headers=headers,
+            json={
+                "menu_url": "https://osteria.example/menu",
+                "selected_categories": ["Secondi di pesce"],
+                "user_note": "Leggero",
+            },
+        )
+
+    assert res.status_code == 200
+    menu_req: MenuScanAIRequest = mock_scan.await_args.kwargs["menu_req"]
+    assert menu_req.menu_url == "https://osteria.example/menu"
+    assert menu_req.selected_categories == ["Secondi di pesce"]
+    assert "Orata ai ferri" in (menu_req.menu_text or "")

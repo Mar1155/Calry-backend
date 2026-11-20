@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.schemas.meal_completion import MealCompletionRequest
 from app.ai.schemas.meal_estimate import UserContext
 from app.ai.schemas.meal_review import DayReviewMealFact, DayReviewRequest, MealOccasionReviewRequest
-from app.ai.schemas.menu_scan import MenuScanAIRequest
+from app.ai.schemas.menu_scan import MenuCategoriesAIRequest, MenuScanAIRequest
 from app.ai.services.calorie_estimation_service import AICalorieEstimationService
+from app.ai.services.menu_url_loader import MenuUrlError, fetch_digital_menu
 from app.core.client_time import client_today
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
@@ -19,6 +20,9 @@ from app.repositories.meal import MealRepository
 from app.schemas.meal_completion import MealCompletionPreferences, MealCompletionResponse, MealSuggestionResponse
 from app.schemas.meal_review import DayReviewMeal, DayReviewResponse, MealOccasionReviewResponse, MealReviewEvidence
 from app.schemas.menu_scan import (
+    MenuCategoriesRequest,
+    MenuCategoriesResponse,
+    MenuCategoryResponse,
     MenuDishIngredientResponse,
     MenuDishSuggestionResponse,
     MenuScanRequest,
@@ -701,6 +705,80 @@ async def suggest_daily_completion(
     )
 
 
+def _menu_lang(accept_language: str | None) -> str:
+    if accept_language:
+        primary = accept_language.split(",")[0].split("-")[0].split("_")[0].strip().lower()
+        if primary in {"en", "it", "es", "zh", "ja", "ar", "de", "fr"}:
+            return primary
+    return "en"
+
+
+async def _resolve_menu_url_content(menu_url: str | None) -> tuple[str | None, str | None, list[str]]:
+    if not menu_url:
+        return None, None, []
+    try:
+        loaded = await fetch_digital_menu(menu_url)
+    except MenuUrlError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+            },
+        ) from exc
+    return loaded.source_url, loaded.text_content, loaded.data_uris
+
+
+@router.post("/menu-categories", response_model=MenuCategoriesResponse)
+async def extract_menu_categories(
+    payload: MenuCategoriesRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    accept_language: str | None = Header(default="en"),
+) -> MenuCategoriesResponse:
+    """Extracts food/drink categories from menu photos or a digital menu URL (Calry Pro)."""
+    await ensure_pro_feature(current_user, db, "menu_scan")
+    lang = _menu_lang(accept_language)
+
+    resolved_url, menu_text, menu_data_uris = await _resolve_menu_url_content(payload.menu_url)
+    user_context = await _build_user_context(db, current_user, lang)
+    cat_req = MenuCategoriesAIRequest(
+        image_urls=payload.image_urls,
+        menu_url=resolved_url or payload.menu_url,
+        menu_text=menu_text,
+        menu_data_uris=menu_data_uris,
+    )
+
+    ai_service = AICalorieEstimationService(db)
+    ai_result = await ai_service.extract_menu_categories(
+        menu_req=cat_req,
+        user_context=user_context,
+        user_id=current_user.id,
+    )
+
+    if not ai_result.is_menu or not ai_result.categories:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MENU_UNREADABLE",
+                "message": "We couldn't read a menu from this source. Try a clearer shot or direct menu link.",
+            },
+        )
+
+    return MenuCategoriesResponse(
+        restaurant_name=ai_result.restaurant_name,
+        categories=[
+            MenuCategoryResponse(
+                id=c.id,
+                name=c.name,
+                dish_count=c.dish_count,
+                sample_dishes=c.sample_dishes,
+            )
+            for c in ai_result.categories
+        ],
+    )
+
+
 @router.post("/menu-scan", response_model=MenuScanResponse)
 async def scan_menu_and_recommend(
     payload: MenuScanRequest,
@@ -708,15 +786,12 @@ async def scan_menu_and_recommend(
     db: AsyncSession = Depends(get_db),
     accept_language: str | None = Header(default="en"),
 ) -> MenuScanResponse:
-    """Reads 1-3 menu photos and recommends 3 personalized dish options (Calry Pro)."""
+    """Reads menu photos or a digital menu URL and recommends 3 personalized dish options (Calry Pro)."""
     await ensure_pro_feature(current_user, db, "menu_scan")
 
     today = client_today()
-    lang = "en"
-    if accept_language:
-        primary = accept_language.split(",")[0].split("-")[0].split("_")[0].strip().lower()
-        if primary in {"en", "it", "es", "zh", "ja", "ar", "de", "fr"}:
-            lang = primary
+    lang = _menu_lang(accept_language)
+    resolved_url, menu_text, menu_data_uris = await _resolve_menu_url_content(payload.menu_url)
 
     summary = await SummaryService(db).sync_daily_summary(current_user.id, today)
     meals = await MealRepository(db).get_user_meals_on_date(current_user.id, today)
@@ -754,6 +829,10 @@ async def scan_menu_and_recommend(
     user_context = await _build_user_context(db, current_user, lang)
     menu_req = MenuScanAIRequest(
         image_urls=payload.image_urls,
+        menu_url=resolved_url or payload.menu_url,
+        menu_text=menu_text,
+        menu_data_uris=menu_data_uris,
+        selected_categories=payload.selected_categories,
         user_note=payload.user_note,
         requested_meal_type=payload.meal_type,
         remaining_calories=summary.remaining_calories,

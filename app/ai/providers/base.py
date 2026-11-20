@@ -8,7 +8,12 @@ from app.ai.schemas.meal_review import (
     MealOccasionReviewRequest,
     MealOccasionReviewResult,
 )
-from app.ai.schemas.menu_scan import MenuScanAIRequest, MenuScanAIResult
+from app.ai.schemas.menu_scan import (
+    MenuCategoriesAIRequest,
+    MenuCategoriesAIResult,
+    MenuScanAIRequest,
+    MenuScanAIResult,
+)
 
 
 class BaseAIProvider(ABC):
@@ -92,10 +97,19 @@ class BaseAIProvider(ABC):
         pass
 
     @abstractmethod
+    async def extract_menu_categories(
+        self,
+        menu_req: MenuCategoriesAIRequest,
+        user_context: UserContext | None = None,
+    ) -> MenuCategoriesAIResult:
+        """Extracts food/drink categories from menu photos or digital menu content."""
+        pass
+
+    @abstractmethod
     async def scan_menu(
         self,
         menu_req: MenuScanAIRequest,
         user_context: UserContext | None = None,
     ) -> MenuScanAIResult:
-        """Reads 1-3 menu photos and recommends 3 personalized dish options."""
+        """Reads menu photos or digital menu content and recommends 3 personalized dish options."""
         pass
