@@ -19,6 +19,7 @@ from app.schemas.user import UserResponse, UserUpdate
 from app.services.admin_deletion import build_preview_snapshot, initial_steps, process_deletion_job
 from app.services.calorie_target_service import CalorieTargetService
 from app.services.summary import SummaryService
+from app.services.weight_service import WeightService
 
 logger = logging.getLogger("app.api.users")
 router = APIRouter()
@@ -70,7 +71,7 @@ async def update_user_profile(
         and getattr(profile_update, field) != original_values[field]
         for field in nutritional_fields
     )
-    if profile_update.daily_calorie_goal is None and nutrition_changed and current_user.calorie_target_source != "user_adjusted":
+    if profile_update.daily_calorie_goal is None and nutrition_changed and current_user.calorie_target_source not in ("user_adjusted", "adaptive"):
         if sex and age is not None and height_cm is not None and weight_kg is not None and goal_type:
             bmr = CalorieTargetService.calculate_bmr(
                 weight_kg=weight_kg,
@@ -95,6 +96,11 @@ async def update_user_profile(
 
     # Update profile in-place
     updated_user = await user_repo.update(current_user, profile_update)
+
+    # A weight edited on the profile is today's weigh-in in the history.
+    if "weight_kg" in profile_update.model_fields_set and profile_update.weight_kg is not None:
+        if profile_update.weight_kg != original_values["weight_kg"]:
+            await WeightService(db).upsert(updated_user, client_today(), profile_update.weight_kg, source="profile")
 
     # If the user adjusted their daily target calories, trigger today's summary sync
     if profile_update.daily_calorie_goal is not None and profile_update.daily_calorie_goal != original_goal:

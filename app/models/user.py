@@ -38,6 +38,9 @@ class User(Base):
     calorie_target_source: Mapped[str] = mapped_column(String(32), default="calculated", nullable=False)
     onboarding_offer_status: Mapped[str] = mapped_column(String(16), default="handled", server_default="handled", nullable=False)
     onboarding_journey_id: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
+    # Last time the user applied or dismissed an adaptive target suggestion
+    # (weight trend vs logged intake). Suggestions pause for a cooldown after.
+    adaptive_target_reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Premium Billing Fields
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -85,6 +88,9 @@ class User(Base):
     )
     daily_summaries: Mapped[list["DailySummary"]] = relationship(
         "DailySummary", back_populates="user", cascade="all, delete-orphan"
+    )
+    weight_entries: Mapped[list["WeightEntry"]] = relationship(
+        "WeightEntry", back_populates="user", cascade="all, delete-orphan"
     )
     food_memories: Mapped[list["UserFoodMemory"]] = relationship(
         "UserFoodMemory", back_populates="user", cascade="all, delete-orphan"

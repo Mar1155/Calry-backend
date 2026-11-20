@@ -34,6 +34,7 @@ from app.models.promo_code import PromoCode, PromoCodeAttempt, PromoCodeRedempti
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.scan_review import ScanReview
 from app.models.user import User
+from app.models.weight_entry import WeightEntry
 
 __all__ = [
     "Base",
@@ -53,6 +54,7 @@ __all__ = [
     "PromoCodeAttempt",
     "BurnedCalories",
     "DailySummary",
+    "WeightEntry",
     "AIInferenceLog",
     "IngredientImage",
     "IngredientTranslation",

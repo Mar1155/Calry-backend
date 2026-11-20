@@ -28,6 +28,7 @@ from app.models.promo_code import PromoCodeAttempt, PromoCodeRedemption
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.scan_review import ScanReview
 from app.models.user import User
+from app.models.weight_entry import WeightEntry
 from app.services.privacy import pseudonymize
 from app.services.revenuecat_service import RevenueCatClient
 from app.services.storage import delete_storage_object, storage_key_from_url
@@ -77,6 +78,7 @@ async def user_inventory(db: AsyncSession, user: User) -> dict[str, int]:
         "reports": await _count(db, InsightSnapshot, InsightSnapshot.user_id == user.id),
         "water_records": await _count(db, DailySummary, DailySummary.user_id == user.id),
         "activity_records": await _count(db, BurnedCalories, BurnedCalories.user_id == user.id),
+        "weight_entries": await _count(db, WeightEntry, WeightEntry.user_id == user.id),
         "profile_onboarding_records": 1,
         "daily_summaries": await _count(db, DailySummary, DailySummary.user_id == user.id),
         "food_memories": await _count(db, UserFoodMemory, UserFoodMemory.user_id == user.id),
@@ -221,6 +223,7 @@ async def _delete_database_records(db: AsyncSession, job: UserDeletionJob) -> bo
         delete(MealItem).where(MealItem.meal_id.in_(meal_ids)),
         delete(Meal).where(Meal.user_id == user_id),
         delete(BurnedCalories).where(BurnedCalories.user_id == user_id),
+        delete(WeightEntry).where(WeightEntry.user_id == user_id),
         delete(DailySummary).where(DailySummary.user_id == user_id),
         delete(UserFoodMemory).where(UserFoodMemory.user_id == user_id),
         delete(PromoCodeRedemption).where(PromoCodeRedemption.user_id == user_id),

@@ -30,6 +30,7 @@ from app.api.v1.routes.revenuecat_webhook import router as webhook_router
 from app.api.v1.routes.summaries import router as summaries_router
 from app.api.v1.routes.system import router as system_router
 from app.api.v1.routes.users import router as users_router
+from app.api.v1.routes.weight import router as weight_router
 from app.core.config import settings
 from app.core.exceptions import CalryException
 from app.dependencies.app_version import enforce_min_app_version
@@ -196,6 +197,7 @@ app.include_router(onboarding_router, prefix="/api/v1/onboarding", tags=["Onboar
 app.include_router(meals_router, prefix="/api/v1/meals", tags=["Meals"], dependencies=[Depends(enforce_min_app_version)])
 app.include_router(meal_completion_router, prefix="/api/v1/meals", tags=["Meal Completion"], dependencies=[Depends(enforce_min_app_version)])
 app.include_router(burned_router, prefix="/api/v1/burned-calories", tags=["Burned Calories"], dependencies=[Depends(enforce_min_app_version)])
+app.include_router(weight_router, prefix="/api/v1/weight", tags=["Weight"], dependencies=[Depends(enforce_min_app_version)])
 app.include_router(summaries_router, prefix="/api/v1/summary", tags=["Summaries"], dependencies=[Depends(enforce_min_app_version)])
 app.include_router(insights_router, prefix="/api/v1", tags=["Insights"], dependencies=[Depends(enforce_min_app_version)])
 app.include_router(memory_router, prefix="/api/v1/memory", tags=["Memory"], dependencies=[Depends(enforce_min_app_version)])

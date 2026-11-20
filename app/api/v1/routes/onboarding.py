@@ -12,6 +12,7 @@ from app.models.user import User
 from app.schemas.onboarding import CalculateTargetRequest, CompleteOnboardingRequest, OnboardingStatusResponse
 from app.services.calorie_target_service import CalorieTargetService
 from app.services.summary import SummaryService
+from app.services.weight_service import WeightService
 
 router = APIRouter()
 
@@ -81,6 +82,7 @@ async def complete_onboarding(payload: CompleteOnboardingRequest, current_user: 
     current_user.onboarding_journey_id = payload.journey_id
     db.add(current_user)
     await db.flush()
+    await WeightService(db).upsert(current_user, client_today(), payload.weight_kg, source="onboarding")
     await SummaryService(db).sync_daily_summary(current_user.id, client_today())
     await InsightVersionService(db).record(
         current_user.id,
