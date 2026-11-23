@@ -26,6 +26,9 @@ class User(Base):
     age: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    # Optional goal weight the user chose; drawn as a reference on the weight
+    # chart. Never used to compute the calorie target.
+    target_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     # Account-owned onboarding state. Never use a device flag as source of truth.
     onboarding_status: Mapped[str] = mapped_column(String(32), default="not_started", nullable=False)
     onboarding_step: Mapped[str | None] = mapped_column(String(32), nullable=True)

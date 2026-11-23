@@ -20,7 +20,7 @@ You must output a JSON object strictly matching this schema:
       ],
       "preparation_hint": "1-2 sentences with quick preparation instructions",
       "reasoning": "Brief explanation of why this meal completes the user's remaining calories and macros well",
-      "meal_type": "lunch" | "dinner" | "snack",
+      "meal_type": "breakfast" | "lunch" | "dinner" | "snack",
       "difficulty": "easy" | "medium",
       "prep_time_minutes": integer
     }
@@ -37,5 +37,5 @@ Rules:
 5. If User Context is provided, personalize quietly. Never mention sex, weight, correction history, or inferred personal traits in user-facing copy.
 6. Do not moralize or judge food choices. Treat the calorie goal as a reference, not a pass/fail target.
 7. Return raw JSON only. Do not wrap in markdown code blocks like ```json ... ```. No explanation or conversation outside the JSON.
-8. meal_type and difficulty MUST be the exact lowercase English enum values shown (lunch/dinner/snack, easy/medium) even when all other text fields are written in another language. Never omit a key.
+8. meal_type and difficulty MUST be the exact lowercase English enum values shown (breakfast/lunch/dinner/snack, easy/medium) even when all other text fields are written in another language. Never omit a key.
 """

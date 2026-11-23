@@ -403,3 +403,36 @@ async def test_meal_completion_rejects_unusable_ai_output(client: AsyncClient, d
         response = await client.post("/api/v1/meals/complete-day", headers=headers)
 
     assert response.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_meal_completion_accepts_breakfast(
+    client: AsyncClient, db_session: AsyncSession, mock_completion_result
+) -> None:
+    headers = {"Authorization": "Bearer mock_token_completion_breakfast"}
+    await client.get("/api/v1/users/me", headers=headers)
+    await client.post(
+        "/api/v1/premium/sync",
+        headers=headers,
+        json={
+            "is_premium": True,
+            "entitlement": "pro_subscription",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "revenuecat_app_user_id": "completion_breakfast",
+        },
+    )
+    for suggestion in mock_completion_result.suggestions:
+        suggestion.meal_type = "breakfast"
+    with patch(
+        "app.api.v1.routes.meal_completion.AICalorieEstimationService.suggest_meal_completion",
+        new_callable=AsyncMock,
+        return_value=mock_completion_result,
+    ) as complete:
+        response = await client.post(
+            "/api/v1/meals/complete-day",
+            headers=headers,
+            json={"meal_type": "breakfast"},
+        )
+    assert response.status_code == 200
+    assert {item["meal_type"] for item in response.json()["suggestions"]} == {"breakfast"}
+    assert complete.await_args.kwargs["completion_req"].requested_meal_type == "breakfast"

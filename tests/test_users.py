@@ -58,6 +58,27 @@ async def test_update_user_locale(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_target_weight_can_be_set_and_cleared(client: AsyncClient) -> None:
+    headers = {"Authorization": "Bearer mock_token_target_weight"}
+    profile = (await client.get("/api/v1/users/me", headers=headers)).json()
+    assert profile["target_weight_kg"] is None
+    goal_before = profile["daily_calorie_goal"]
+
+    response = await client.patch("/api/v1/users/me", json={"target_weight_kg": 68.5}, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["target_weight_kg"] == 68.5
+    # A goal weight is a chart reference only; it never moves the target.
+    assert response.json()["daily_calorie_goal"] == goal_before
+
+    response = await client.patch("/api/v1/users/me", json={"target_weight_kg": None}, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["target_weight_kg"] is None
+
+    response = await client.patch("/api/v1/users/me", json={"target_weight_kg": 12}, headers=headers)
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_current_user_profile_links_by_email(client: AsyncClient, db_session: AsyncSession) -> None:
     """Verifies that if a user already exists with the same email but different UID, they get linked."""
     from app.models.user import User

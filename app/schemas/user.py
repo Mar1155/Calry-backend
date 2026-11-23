@@ -28,6 +28,8 @@ class UserUpdate(BaseModel):
     age: int | None = Field(default=None, ge=18, le=100)
     height_cm: float | None = Field(default=None, ge=120.0, le=230.0)
     weight_kg: float | None = Field(default=None, ge=30.0, le=300.0)
+    # Send null to clear the goal weight.
+    target_weight_kg: float | None = Field(default=None, ge=30.0, le=300.0)
     daily_protein_goal: int | None = None
     daily_carbs_goal: int | None = None
     daily_fat_goal: int | None = None
@@ -47,6 +49,7 @@ class UserResponse(UserBase):
     daily_protein_goal: int | None = None
     daily_carbs_goal: int | None = None
     daily_fat_goal: int | None = None
+    target_weight_kg: float | None = None
     created_at: dt.datetime
     updated_at: dt.datetime | None = None
     onboarding_status: str = "not_started"

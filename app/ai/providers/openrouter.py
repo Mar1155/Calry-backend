@@ -1394,7 +1394,7 @@ class OpenRouterProvider(BaseAIProvider):
                     f"Write all free-text fields (meal_name, description, ingredients, preparation_hint, reasoning, "
                     f"daily_context_summary, macro_balance_note) in this language: {output_lang}. "
                     f"But keep meal_type and difficulty as the exact lowercase English enum values "
-                    f"(lunch/dinner/snack, easy/medium). Include dietary_tags using only vegetarian and vegan; "
+                    f"(breakfast/lunch/dinner/snack, easy/medium). Include dietary_tags using only vegetarian and vegan; "
                     f"vegan suggestions must include both vegan and vegetarian."
                 ),
             }
@@ -1434,7 +1434,7 @@ class OpenRouterProvider(BaseAIProvider):
                 ingredients=item.get("ingredients", []) or [],
                 preparation_hint=item.get("preparation_hint", ""),
                 reasoning=item.get("reasoning", ""),
-                meal_type=self._coerce_enum(item.get("meal_type"), {"lunch", "dinner", "snack"}, "snack"),
+                meal_type=self._coerce_enum(item.get("meal_type"), {"breakfast", "lunch", "dinner", "snack"}, "snack"),
                 difficulty=self._coerce_enum(item.get("difficulty"), {"easy", "medium"}, "easy"),
                 prep_time_minutes=self._as_int(item.get("prep_time_minutes")) or 0,
                 dietary_tags=[tag for tag in item.get("dietary_tags", []) if tag in {"vegetarian", "vegan"}],
