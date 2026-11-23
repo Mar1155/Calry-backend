@@ -1,4 +1,5 @@
 import asyncio
+import datetime as dt
 import os
 from collections.abc import AsyncGenerator
 
@@ -7,6 +8,9 @@ os.environ["ENVIRONMENT"] = "testing"
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import types as sqltypes
+from sqlalchemy.dialects.sqlite.aiosqlite import SQLiteDialect_aiosqlite
+from sqlalchemy.dialects.sqlite.base import DATETIME as SQLITE_DATETIME
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.dependencies.db import get_db
@@ -15,6 +19,36 @@ from app.models.base import Base
 
 # In-memory SQLite for high-speed, zero-config local testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+class _UTCAwareSQLiteDateTime(SQLITE_DATETIME):
+    """Make SQLite behave like Postgres for ``DateTime(timezone=True)``.
+
+    Postgres returns timezone-aware datetimes for those columns; SQLite has no
+    timezone type and hands back naive values. Code that compares a stored
+    timestamp with ``datetime.now(UTC)`` then fails only under tests. Values
+    are stored in UTC, so naive results are tagged UTC on the way out.
+    """
+
+    def result_processor(self, dialect, coltype):
+        process = super().result_processor(dialect, coltype)
+        if not self.timezone:
+            return process
+
+        def to_aware(value):
+            if process is not None:
+                value = process(value)
+            if isinstance(value, dt.datetime) and value.tzinfo is None:
+                value = value.replace(tzinfo=dt.UTC)
+            return value
+
+        return to_aware
+
+
+SQLiteDialect_aiosqlite.colspecs = {
+    **SQLiteDialect_aiosqlite.colspecs,
+    sqltypes.DateTime: _UTCAwareSQLiteDateTime,
+}
 
 
 @pytest.fixture(scope="session")

@@ -86,8 +86,9 @@ async def test_forget_archives_and_hides(client: AsyncClient, db_session: AsyncS
     response = await client.post(f"/api/v1/memory/beliefs/{belief.id}/forget", headers=headers)
     assert response.status_code == 200
 
-    latest = await client.get("/api/v1/memory/latest", headers=headers)
-    assert latest.json()["moment"] is None
+    # The forgotten belief's moments are hidden; other beliefs' moments stay.
+    latest = (await client.get("/api/v1/memory/latest", headers=headers)).json()["moment"]
+    assert latest is None or latest["domain"] != "portion_model"
 
 
 async def test_free_user_is_forbidden(client: AsyncClient, db_session: AsyncSession, monkeypatch) -> None:

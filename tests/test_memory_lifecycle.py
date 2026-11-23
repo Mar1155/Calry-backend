@@ -97,7 +97,13 @@ async def test_forget_suppresses_and_blocks_rederivation(db_session: AsyncSessio
     assert suppression is not None
     belief = await _portion_belief(db_session, user.id)
     assert belief.status == "archived"
-    assert await repo.latest_moment(user.id) is None  # moments hidden
+    # The forgotten belief's moments are hidden (other beliefs keep theirs).
+    visible = (
+        await db_session.execute(
+            select(MemoryMoment).where(MemoryMoment.belief_id == belief.id, MemoryMoment.hidden_at.is_(None))
+        )
+    ).scalars().all()
+    assert visible == []
 
     # Re-distilling does not bring it back while suppressed.
     await service.distill_user(user.id, now=NOW)

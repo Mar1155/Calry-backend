@@ -29,7 +29,7 @@ async def test_awareness_counts_logged_days(client: AsyncClient, db_session: Asy
     profile = await client.get("/api/v1/users/me", headers=headers)
     user_id = profile.json()["id"]
 
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     week_start = today - dt.timedelta(days=today.weekday())
     # Two aware days this week: week_start and today (today only counts if in this week)
     dates = {week_start, today}
@@ -64,7 +64,7 @@ async def test_zero_consumed_day_is_not_aware(client: AsyncClient, db_session: A
     profile = await client.get("/api/v1/users/me", headers=headers)
     user_id = profile.json()["id"]
 
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     db_session.add(
         DailySummary(user_id=user_id, date=today, consumed_calories=0, burned_calories=300, remaining_calories=2000)
     )

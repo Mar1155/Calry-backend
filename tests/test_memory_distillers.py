@@ -45,7 +45,11 @@ async def test_portion_belief_materializes_with_evidence_and_moment(db_session: 
     assert len(evidence) == 5
     assert all(e.ref_table == "meals" for e in evidence)
 
-    moments = (await db_session.execute(select(MemoryMoment).where(MemoryMoment.user_id == user.id))).scalars().all()
+    # The same meals can also form a "regular food" preference; this test is
+    # about the portion belief's own discovery moment.
+    moments = (
+        await db_session.execute(select(MemoryMoment).where(MemoryMoment.belief_id == belief.id))
+    ).scalars().all()
     discovery = [m for m in moments if m.moment_kind == "discovery"]
     assert len(discovery) == 1
     assert discovery[0].fact_json["grams"] == 120
@@ -60,7 +64,10 @@ async def test_distillation_is_idempotent(db_session: AsyncSession) -> None:
 
     assert len(await _beliefs(db_session, user.id, "portion_model")) == 1
     moments = (await db_session.execute(select(MemoryMoment).where(MemoryMoment.user_id == user.id))).scalars().all()
-    assert len([m for m in moments if m.moment_kind == "discovery"]) == 1
+    discovery = [m for m in moments if m.moment_kind == "discovery"]
+    # One discovery per belief (portion + regular-food preference), never
+    # duplicated by a second run.
+    assert len(discovery) == len({m.belief_id for m in discovery})
 
 
 async def test_below_gate_produces_no_belief(db_session: AsyncSession) -> None:

@@ -146,7 +146,7 @@ async def _headers(client: AsyncClient, token: str) -> tuple[dict, int]:
 @pytest.mark.asyncio
 async def test_weight_log_edit_delete_and_current_weight(client: AsyncClient, db_session: AsyncSession):
     headers, user_id = await _headers(client, "mock_token_weight_crud")
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     old = today - dt.timedelta(days=5)
 
     first = await client.post("/api/v1/weight/entries", json={"weight_kg": 82.4, "date": old.isoformat()}, headers=headers)
@@ -210,7 +210,7 @@ async def test_adaptive_target_apply_and_dismiss(client: AsyncClient, db_session
     user.goal_type = "lose"
     user.target_pace = "balanced"
     user.sex = "male"
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     # 28 days eaten exactly on target, weight flat: the deficit is not real.
     db_session.add_all(
         DailySummary(

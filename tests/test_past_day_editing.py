@@ -24,7 +24,7 @@ async def _summary(client: AsyncClient, headers: dict, day: dt.date) -> dict:
 @pytest.mark.asyncio
 async def test_activity_can_be_logged_edited_and_removed_on_a_past_day(client: AsyncClient):
     headers, _ = await _user(client, "mock_token_past_activity")
-    day = dt.date.today() - dt.timedelta(days=3)
+    day = dt.datetime.now(dt.UTC).date() - dt.timedelta(days=3)
 
     created = await client.post(
         "/api/v1/burned-calories",
@@ -54,7 +54,7 @@ async def test_activity_can_be_logged_edited_and_removed_on_a_past_day(client: A
 @pytest.mark.asyncio
 async def test_activity_cannot_be_logged_in_the_future(client: AsyncClient):
     headers, _ = await _user(client, "mock_token_future_activity")
-    tomorrow = dt.date.today() + dt.timedelta(days=1)
+    tomorrow = dt.datetime.now(dt.UTC).date() + dt.timedelta(days=1)
     response = await client.post(
         "/api/v1/burned-calories",
         json={"calories": 100, "date": tomorrow.isoformat()},
@@ -75,7 +75,7 @@ async def test_someone_elses_activity_is_not_editable(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_meal_moves_onto_a_past_day_and_both_summaries_follow(client: AsyncClient, db_session):
     headers, user_id = await _user(client, "mock_token_move_meal")
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     day = today - dt.timedelta(days=2)
     meal = Meal(
         user_id=user_id,
@@ -114,7 +114,7 @@ async def test_meal_cannot_move_into_the_future(client: AsyncClient, db_session)
     db_session.add(meal)
     await db_session.commit()
     await db_session.refresh(meal)
-    tomorrow = dt.date.today() + dt.timedelta(days=1)
+    tomorrow = dt.datetime.now(dt.UTC).date() + dt.timedelta(days=1)
     response = await client.patch(
         f"/api/v1/meals/{meal.id}", json={"logged_date": tomorrow.isoformat()}, headers=headers
     )

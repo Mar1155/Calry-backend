@@ -45,7 +45,7 @@ async def test_insights_success_for_premium_users(client: AsyncClient, db_sessio
     await client.post("/api/v1/premium/sync", json=sync_payload, headers=headers)
 
     # 2. Populate daily summaries for the past few days to calculate stats
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
 
     # Add summaries for the last 3 days
     s1 = DailySummary(

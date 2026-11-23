@@ -88,7 +88,7 @@ async def test_meal_completion_success(client: AsyncClient, db_session: AsyncSes
     )
 
     # 2. Add today's meal consuming 1200 calories
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     meal = Meal(
         user_id=user_id,
         source_type="text",
@@ -297,7 +297,7 @@ async def test_meal_completion_guardrail(client: AsyncClient, db_session: AsyncS
     )
 
     # 2. Add today's meal consuming 1850 calories
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     meal = Meal(
         user_id=user_id,
         source_type="text",
@@ -356,7 +356,7 @@ async def test_meal_completion_clamps_negative_remaining_calories(
             original_input="Dinner",
             meal_name="Dinner",
             estimated_calories=2150,
-            created_at=dt.datetime.combine(dt.date.today(), dt.time(20, 0)).replace(tzinfo=dt.UTC),
+            created_at=dt.datetime.combine(dt.datetime.now(dt.UTC).date(), dt.time(20, 0)).replace(tzinfo=dt.UTC),
         )
     )
     await db_session.commit()

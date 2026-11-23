@@ -37,7 +37,7 @@ async def admin_target(db_session):
     db_session.add(meal)
     await db_session.flush()
     db_session.add(MealItem(meal_id=meal.id, name="Food", weight_grams=100, calories_per_100g=100))
-    db_session.add(DailySummary(user_id=user.id, date=__import__("datetime").date.today()))
+    db_session.add(DailySummary(user_id=user.id, date=__import__("datetime").datetime.now(__import__("datetime").UTC).date()))
     await db_session.flush()
     return user
 

@@ -71,7 +71,7 @@ async def test_free_versus_premium_history_gating(client: AsyncClient, db_sessio
     profile_res = await client.get("/api/v1/users/me", headers=headers)
     user_id = profile_res.json()["id"]
 
-    today = dt.date.today()
+    today = dt.datetime.now(dt.UTC).date()
     old_date = today - dt.timedelta(days=10)
 
     # 1. Create a historical summary & meal in database from 10 days ago (manually inserting via DB session)
