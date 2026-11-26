@@ -142,6 +142,14 @@ class Settings(BaseSettings):
     PROACTIVE_NOTIFICATION_RETRY_MAX: int = 3
     PROACTIVE_NOTIFICATION_RETRY_BASE_SECONDS: int = 300
     PROACTIVE_PUSH_ENABLED: bool = True
+    # Push delivery for every notification type (app.notifications). The
+    # daily cap is PROACTIVE_NOTIFICATION_DAILY_LIMIT and applies across types.
+    PUSH_NOTIFICATIONS_ENABLED: bool = True
+    PUSH_WEEKLY_LIMIT: int = 4
+    # A1 first-meal nudge, A2 meal-window reminder, B4 analysis-ready push.
+    MEAL_NUDGES_ENABLED: bool = True
+    # B4 waits this long so a person still in the app is not pinged.
+    ANALYSIS_READY_PUSH_DELAY_SECONDS: int = 120
 
     @property
     def proactive_insight_type_cooldowns(self) -> dict[str, int]:

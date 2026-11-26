@@ -129,19 +129,21 @@ async def _evaluate_due() -> dict:
 
 
 async def _deliver_notification(delivery_id: int) -> dict:
-    from app.proactive_insights.notifications import InsightNotificationService
+    from app.notifications.dispatcher import build_dispatcher
 
-    if not settings.ENABLE_PROACTIVE_INSIGHTS or not settings.PROACTIVE_PUSH_ENABLED:
+    # Every notification type shares this ledger; type switches such as
+    # PROACTIVE_PUSH_ENABLED are enforced by each type's policy.
+    if not settings.PUSH_NOTIFICATIONS_ENABLED:
         return {"status": "disabled"}
     try:
         async with SessionLocal() as db:
-            return await InsightNotificationService(db).deliver(delivery_id)
+            return await build_dispatcher(db).deliver(delivery_id)
     finally:
         await engine.dispose()
 
 
 async def _sweep_notifications() -> dict:
-    if not settings.ENABLE_PROACTIVE_INSIGHTS or not settings.PROACTIVE_PUSH_ENABLED:
+    if not settings.PUSH_NOTIFICATIONS_ENABLED:
         return {"status": "disabled", "deliveries": 0}
     now = dt.datetime.now(dt.UTC)
     try:

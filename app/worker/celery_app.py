@@ -21,6 +21,7 @@ celery_app = Celery(
         "app.tasks.memory",
         "app.tasks.proactive_insights",
         "app.tasks.ingredient_images",
+        "app.tasks.notifications",
     ],
 )
 
@@ -55,6 +56,12 @@ celery_app.conf.update(
         "proactive-insights-notification-sweep": {
             "task": "app.tasks.proactive_insights.sweep_notifications",
             "schedule": crontab(minute="*"),
+        },
+        # First-meal nudges and meal-window reminders are due on a 5-minute
+        # grid in each person's zone; a 30-minute window absorbs a late tick.
+        "meal-nudges-plan": {
+            "task": "app.tasks.notifications.plan_meal_nudges",
+            "schedule": crontab(minute="*/5"),
         },
         "proactive-insights-timezone-aware-evaluation": {
             "task": "app.tasks.proactive_insights.evaluate_due",

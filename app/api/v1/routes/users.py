@@ -1,6 +1,7 @@
 import datetime as dt
 import logging
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -139,6 +140,11 @@ async def update_user_profile(
 
 class FCMTokenUpdate(BaseModel):
     token: str = Field(..., min_length=10, max_length=512)
+    platform: Literal["ios", "android"] | None = None
+
+
+class FCMTokenRemoval(BaseModel):
+    token: str = Field(..., min_length=10, max_length=512)
 
 
 @router.post("/me/fcm-token", status_code=status.HTTP_204_NO_CONTENT)
@@ -147,14 +153,24 @@ async def update_fcm_token(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Stores the device FCM token and revives recent notification candidates."""
-    current_user.fcm_token = payload.token
-    await db.flush()
-    from app.proactive_insights.notifications import InsightNotificationService
+    """Registers this device for pushes and revives recent notifications."""
+    from app.notifications.devices import PushDeviceService
+    from app.notifications.dispatcher import build_dispatcher
 
-    await InsightNotificationService(db).reschedule_after_token(
-        current_user, now=dt.datetime.now(dt.UTC)
-    )
+    await PushDeviceService(db).register(current_user, payload.token, platform=payload.platform)
+    await build_dispatcher(db).reschedule_suppressed(current_user, now=dt.datetime.now(dt.UTC))
+
+
+@router.post("/me/fcm-token/unregister", status_code=status.HTTP_204_NO_CONTENT)
+async def unregister_fcm_token(
+    payload: FCMTokenRemoval,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Stops pushes to this device only; the account's other devices keep them."""
+    from app.notifications.devices import PushDeviceService
+
+    await PushDeviceService(db).unregister(current_user, payload.token)
 
 
 @router.delete("/me/fcm-token", status_code=status.HTTP_204_NO_CONTENT)
@@ -162,8 +178,10 @@ async def delete_fcm_token(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    current_user.fcm_token = None
-    await db.flush()
+    """Legacy sign-out call from app builds that knew one device per account."""
+    from app.notifications.devices import PushDeviceService
+
+    await PushDeviceService(db).unregister_all(current_user)
 
 
 @router.delete("/me", status_code=status.HTTP_202_ACCEPTED)

@@ -17,3 +17,9 @@ def test_proactive_insight_periodic_schedule_is_registered() -> None:
         "proactive-insights-timezone-aware-evaluation",
         "proactive-insights-notification-sweep",
     }.issubset(schedule)
+
+
+def test_meal_nudge_planner_is_scheduled() -> None:
+    entry = celery_app.conf.beat_schedule["meal-nudges-plan"]
+    assert entry["task"] == "app.tasks.notifications.plan_meal_nudges"
+    assert "app.tasks.notifications" in celery_app.conf.include

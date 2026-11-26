@@ -187,11 +187,15 @@ class InsightNotificationPreference(Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    proactive_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Granting the OS permission is the consent; these switches only narrow it.
+    proactive_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     daily_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     weekly_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    quiet_hours_start: Mapped[str] = mapped_column(String(5), default="21:00", nullable=False)
+    # Opt-outs for push categories other than insights (see app.notifications).
+    disabled_categories: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    quiet_hours_start: Mapped[str] = mapped_column(String(5), default="22:00", nullable=False)
     quiet_hours_end: Mapped[str] = mapped_column(String(5), default="08:00", nullable=False)
+    # Fallback only: delivery uses users.timezone, which every request refreshes.
     timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
@@ -202,17 +206,36 @@ class InsightNotificationPreference(Base):
 
 
 class InsightNotificationDelivery(Base):
+    """Push delivery ledger for every notification type, not only insights.
+
+    The table keeps its original name; ``NotificationDelivery`` is the
+    type-neutral alias new code should use.
+    """
+
     __tablename__ = "insight_notification_deliveries"
     __table_args__ = (
         UniqueConstraint("insight_id", name="uq_insight_notification_delivery_insight"),
         UniqueConstraint("idempotency_key", name="uq_insight_notification_delivery_key"),
         Index("ix_insight_notification_deliveries_due", "status", "scheduled_for"),
+        Index("ix_insight_notification_deliveries_user_sent", "user_id", "sent_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    insight_id: Mapped[str] = mapped_column(
-        ForeignKey("proactive_insights.id", ondelete="CASCADE"), nullable=False
+    # Set only for proactive insight pushes.
+    insight_id: Mapped[str | None] = mapped_column(
+        ForeignKey("proactive_insights.id", ondelete="CASCADE"), nullable=True
     )
+    notification_type: Mapped[str] = mapped_column(
+        String(40), default="proactive_insight", server_default="proactive_insight", nullable=False
+    )
+    category: Mapped[str] = mapped_column(String(40), default="insight", server_default="insight", nullable=False)
+    # "normal" counts toward the caps; "digest" respects quiet hours but not the
+    # caps; "transactional" answers something the person just did.
+    priority: Mapped[str] = mapped_column(String(16), default="normal", server_default="normal", nullable=False)
+    title: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    body: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    data_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    opened_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
@@ -233,8 +256,11 @@ class InsightNotificationDelivery(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
-    insight: Mapped["ProactiveInsight"] = relationship("ProactiveInsight")
+    insight: Mapped["ProactiveInsight | None"] = relationship("ProactiveInsight")
     user: Mapped["User"] = relationship("User")
+
+
+NotificationDelivery = InsightNotificationDelivery
 
 
 class InsightAnalyticsEvent(Base):

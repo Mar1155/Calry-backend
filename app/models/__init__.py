@@ -31,6 +31,7 @@ from app.models.memory import (
 )
 from app.models.onboarding_event import OnboardingEvent
 from app.models.promo_code import PromoCode, PromoCodeAttempt, PromoCodeRedemption
+from app.models.push_device import PushDevice
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.scan_review import ScanReview
 from app.models.user import User
@@ -50,6 +51,7 @@ __all__ = [
     "BarcodeProduct",
     "UserAiUsage",
     "PromoCode",
+    "PushDevice",
     "PromoCodeRedemption",
     "PromoCodeAttempt",
     "BurnedCalories",

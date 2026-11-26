@@ -163,6 +163,17 @@ async def update_insight_notification_preferences(
     service = InsightNotificationService(db)
     preference = await service.preferences(current_user.id)
     values = payload.model_dump(exclude_unset=True)
+    if "disabled_categories" in values:
+        from app.notifications.dispatcher import OPTIONAL_CATEGORIES
+
+        requested = values["disabled_categories"] or []
+        unknown = sorted(set(requested) - OPTIONAL_CATEGORIES)
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Unknown notification categories: {', '.join(unknown)}",
+            )
+        values["disabled_categories"] = sorted(set(requested))
     if "timezone" in values:
         try:
             validate_timezone(values["timezone"])
@@ -181,7 +192,9 @@ async def update_insight_notification_preferences(
         return preference
     preference.updated_at = dt.datetime.now(dt.UTC)
     await db.flush()
-    if preference.proactive_enabled and current_user.fcm_token:
+    from app.notifications.devices import PushDeviceService
+
+    if await PushDeviceService(db).has_devices(current_user.id):
         await service.reschedule_suppressed(current_user, now=dt.datetime.now(dt.UTC))
     await InsightAnalytics(db).record(
         user_id=current_user.id,
@@ -217,6 +230,18 @@ async def record_insight_analytics(
         )
         if insight is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Insight not found.")
+    delivery_id = payload.metadata.get("delivery_id")
+    if payload.event_name == "notification_opened" and isinstance(delivery_id, int):
+        from app.models.insight import NotificationDelivery
+
+        delivery = await db.scalar(
+            select(NotificationDelivery).where(
+                NotificationDelivery.id == delivery_id,
+                NotificationDelivery.user_id == current_user.id,
+            )
+        )
+        if delivery is not None and delivery.opened_at is None:
+            delivery.opened_at = dt.datetime.now(dt.UTC)
     try:
         await InsightAnalytics(db).record(
             user_id=current_user.id,

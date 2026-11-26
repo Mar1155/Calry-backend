@@ -25,6 +25,7 @@ from app.models.insight import (
     ProactiveInsightEvent,
 )
 from app.models.user import User
+from app.notifications.devices import PushDeviceService
 from app.proactive_insights.candidates import CandidateFactory, InsightCandidate, ProactiveTrigger
 from app.proactive_insights.notifications import (
     InsightNotificationService,
@@ -715,12 +716,14 @@ async def test_notification_preferences_are_account_owned_and_validated(
     )
 
     assert defaults.status_code == 200
-    assert defaults.json()["proactive_enabled"] is False
+    assert defaults.json()["proactive_enabled"] is True
+    assert defaults.json()["quiet_hours_start"] == "22:00"
     assert updated.status_code == 200
     assert updated.json() == {
         "proactive_enabled": True,
         "daily_enabled": False,
         "weekly_enabled": True,
+        "disabled_categories": [],
         "quiet_hours_start": "22:30",
         "quiet_hours_end": "07:15",
         "timezone": "Europe/Rome",
@@ -795,7 +798,7 @@ async def test_periodic_evaluation_uses_each_users_local_time(
 @pytest.mark.asyncio
 async def test_disabled_notifications_preserve_diary_entry(db_session: AsyncSession) -> None:
     user = await _user(db_session)
-    user.fcm_token = "test-device-token-long-enough"
+    await PushDeviceService(db_session).register(user, "test-device-token-long-enough")
     insight = _persisted_insight(user.id, suffix="disabled")
     db_session.add_all(
         [
@@ -825,7 +828,7 @@ async def test_quiet_hours_delay_existing_insight_without_regeneration(
     db_session: AsyncSession,
 ) -> None:
     user = await _user(db_session)
-    user.fcm_token = "test-device-token-long-enough"
+    await PushDeviceService(db_session).register(user, "test-device-token-long-enough")
     now = dt.datetime(2026, 8, 11, 20, 30, tzinfo=dt.UTC)
     insight = _persisted_insight(user.id, suffix="quiet", created_at=now)
     db_session.add_all(
@@ -858,7 +861,7 @@ async def test_push_delivery_is_idempotent_and_persists_provider_metadata(
     db_session: AsyncSession,
 ) -> None:
     user = await _user(db_session)
-    user.fcm_token = "test-device-token-long-enough"
+    await PushDeviceService(db_session).register(user, "test-device-token-long-enough")
     insight = _persisted_insight(user.id, suffix="success")
     preference = InsightNotificationPreference(
         user_id=user.id,
@@ -891,7 +894,7 @@ async def test_transient_push_failure_retries_without_losing_insight(
     db_session: AsyncSession,
 ) -> None:
     user = await _user(db_session)
-    user.fcm_token = "test-device-token-long-enough"
+    await PushDeviceService(db_session).register(user, "test-device-token-long-enough")
     insight = _persisted_insight(user.id, suffix="retry")
     db_session.add_all(
         [
@@ -935,7 +938,7 @@ async def test_delivery_policy_suppresses_noise(
     suppression: str,
 ) -> None:
     user = await _user(db_session)
-    user.fcm_token = "test-device-token-long-enough"
+    await PushDeviceService(db_session).register(user, "test-device-token-long-enough")
     suffix = f"policy-{suppression}"
     insight = _persisted_insight(user.id, suffix=suffix)
     preference = InsightNotificationPreference(
@@ -960,6 +963,19 @@ async def test_delivery_policy_suppresses_noise(
         prior.notification_status = "sent"
         prior.notification_sent_at = NOW - dt.timedelta(hours=1)
         db_session.add(prior)
+        if suppression == "daily_limit":
+            # The cap counts sent ledger rows of every notification type.
+            db_session.add(
+                InsightNotificationDelivery(
+                    insight_id=prior.id,
+                    user_id=user.id,
+                    idempotency_key=f"prior-{suppression}-delivery-key",
+                    status="sent",
+                    scheduled_for=NOW - dt.timedelta(hours=1),
+                    sent_at=NOW - dt.timedelta(hours=1),
+                    metadata_json={},
+                )
+            )
         if suppression == "cooldown":
             # Weekly sends are outside the ordinary daily cap, isolating cooldown.
             prior.evidence_json["evidence"]["source_trigger"] = ProactiveTrigger.WEEKLY.value
@@ -986,7 +1002,7 @@ async def test_permanent_push_failure_keeps_diary_and_clears_invalid_token(
     db_session: AsyncSession,
 ) -> None:
     user = await _user(db_session)
-    user.fcm_token = "test-device-token-long-enough"
+    await PushDeviceService(db_session).register(user, "test-device-token-long-enough")
     insight = _persisted_insight(user.id, suffix="permanent-failure")
     db_session.add_all(
         [

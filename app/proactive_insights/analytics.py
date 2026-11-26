@@ -25,6 +25,8 @@ TRACKED_EVENTS = frozenset(
         "insight_dismissed",
         "diary_opened",
         "notification_preferences_changed",
+        "push_prompt_shown",
+        "push_prompt_answered",
     }
 )
 
@@ -46,6 +48,7 @@ class InsightAnalytics:
         user_id: int,
         event_name: str,
         insight: ProactiveInsight | None = None,
+        category: str | None = None,
         source: str = "backend",
         metadata: dict[str, Any] | None = None,
         event_id: str | None = None,
@@ -68,7 +71,7 @@ class InsightAnalytics:
             user_id=user_id,
             insight_id=insight.id if insight else None,
             event_name=event_name,
-            category=insight.category if insight else None,
+            category=insight.category if insight else category,
             source=source,
             metadata_json=metadata or {},
             created_at=now,

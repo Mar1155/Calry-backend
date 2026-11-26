@@ -142,6 +142,7 @@ class InsightNotificationPreferenceResponse(BaseModel):
     proactive_enabled: bool
     daily_enabled: bool
     weekly_enabled: bool
+    disabled_categories: list[str] = Field(default_factory=list)
     quiet_hours_start: str
     quiet_hours_end: str
     timezone: str
@@ -151,6 +152,7 @@ class InsightNotificationPreferenceUpdate(BaseModel):
     proactive_enabled: bool | None = None
     daily_enabled: bool | None = None
     weekly_enabled: bool | None = None
+    disabled_categories: list[str] | None = Field(default=None, max_length=8)
     quiet_hours_start: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     quiet_hours_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     timezone: str | None = Field(default=None, min_length=1, max_length=64)

@@ -77,6 +77,19 @@ Diary endpoints retain existing premium-insight authorization. Push preferences 
 
 Routine notifications use normal Android priority and APNs priority 5. Copy is deliberately quiet: a neutral Calry title plus the already quality-gated insight title. No numeric badge is requested by the app.
 
+## Shared push foundation (`app/notifications/`)
+
+Since migration `push_foundations_0001`, insight pushes are one notification type on a type-neutral layer:
+
+- `push_devices` holds one row per installed app; a token belongs to one account and moves when another account signs in on the same phone. `users.fcm_token` is only a legacy mirror of the newest token. `POST /api/v1/users/me/fcm-token` accepts an optional `platform`; `POST /api/v1/users/me/fcm-token/unregister` removes one device; the legacy `DELETE` removes all of them.
+- `insight_notification_deliveries` (alias `NotificationDelivery`) is the ledger for every type: `notification_type`, `category`, `priority`, stored `title`/`body`/`data_json`, and `opened_at`, set when the app reports `notification_opened` with a `delivery_id`.
+- `PushDispatcher` owns the cross-type rules: category opt-outs (`insight` → `proactive_enabled`, others → `disabled_categories`, `account` cannot be muted in-app), quiet hours in `users.timezone` (preference timezone is only a fallback), the daily cap (`PROACTIVE_NOTIFICATION_DAILY_LIMIT`) and the rolling weekly cap (`PUSH_WEEKLY_LIMIT`) for `normal` priority, fan-out to every device, per-token invalidation and the at-most-once claim. `digest` skips the caps; `transactional` skips caps and quiet hours.
+- Each type adds a `TypePolicy` for its own rules (`ProactiveInsightPolicy`: stale, superseded, cooldown, daily/weekly switches) and registers it in `build_dispatcher`.
+- Defaults are opt-out: granting the OS permission is the consent, so `proactive_enabled` defaults to true and quiet hours to 22:00–08:00. The migration flipped rows created with the old opt-in default unless the person had changed that switch.
+- `PUSH_NOTIFICATIONS_ENABLED` stops all delivery; `PROACTIVE_PUSH_ENABLED` stops insight pushes only.
+
+The app asks for permission in two steps: on iOS a provisional (quiet) grant after onboarding, then a Calry sheet after a saved meal (at most twice, a week apart) before the system prompt. `push_prompt_shown` and `push_prompt_answered` record that funnel.
+
 ## Suppression rules
 
 - engine or push rollout disabled
@@ -122,5 +135,14 @@ Platform operations still required:
 - Upload/verify the APNs authentication key in the Firebase project and enable Push Notifications for the production App ID/provisioning profile.
 - Confirm the checked-in production `aps-environment` matches every signing flavor; development builds may need flavor-specific entitlements.
 - Verify Android 13 permission behavior and OEM delivery on physical devices.
-- Current backend storage has one FCM token per user, so a newer device replaces an older one. Multi-device delivery needs a device-token table.
 - The at-most-once claim intentionally leaves a row in `sending` after an ambiguous worker crash to prevent duplicate interruption. Production reconciliation may inspect these rows, but must not resend blindly.
+
+## Meal pushes (A1 / A2 / B4)
+
+Defined in `app/notifications/meal_nudges.py`, copy in `app/notifications/copy.py` (8 locales, from `users.locale`). Kill switch: `MEAL_NUDGES_ENABLED`.
+
+- **A1 first meal** (`first_meal_nudge`, category `meal_reminder`): onboarded users with no meal yet, 90 min to 72 h after onboarding, at 12:45 / 19:45 local, at most 2. Dropped at send time if a meal appeared.
+- **A2 meal reminder** (`meal_reminder`, category `meal_reminder`): at most one per local day, only if the lunch/dinner band has no meal today. Time is learned (median first meal in the band + 45 min, needs 3 of the last 14 days); users with < 5 logged days get 13:30 / 20:30; a slot the person never logs is never reminded. Requires a meal in the last 7 days. Backoff: 3 ignored in a row (not opened, no meal within 2 h) → every other day; 7 → paused.
+- **B4 analysis ready** (`analysis_ready`, category `meal_status`, transactional): queued when a photo job completes, sent after `ANALYSIS_READY_PUSH_DELAY_SECONDS` (120 s) only if the meal is still unconfirmed.
+
+Planner: beat task `app.tasks.notifications.plan_meal_nudges` every 5 minutes; due windows are 30 minutes and idempotency keys are per user/local day (A2) or per user/day/slot (A1).

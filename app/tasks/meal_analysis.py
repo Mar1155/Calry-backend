@@ -330,7 +330,23 @@ async def _run_photo_analysis(job_id: str) -> int | None:
                 job.id,
                 meal.id,
             )
-        return meal.id
+        # After the stream got its result, so the app never waits on this.
+        meal_id = meal.id
+        await _queue_analysis_ready_push(db, job, meal)
+        return meal_id
+
+
+async def _queue_analysis_ready_push(db, job: MealAnalysisJob, meal: Meal) -> None:
+    """B4: ping the person if they leave before confirming. Never fails the job."""
+    from app.notifications.meal_nudges import schedule_analysis_ready
+
+    job_id, meal_id = job.id, meal.id
+    try:
+        await schedule_analysis_ready(db, job, meal)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("event=analysis_ready_push_queue_failed job_id=%s meal_id=%s", job_id, meal_id)
 
 
 async def _get_job(db, job_id: str) -> MealAnalysisJob | None:

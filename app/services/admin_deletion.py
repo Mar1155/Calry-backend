@@ -25,6 +25,7 @@ from app.models.meal import Meal, MealItem, MealRevision
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.onboarding_event import OnboardingEvent
 from app.models.promo_code import PromoCodeAttempt, PromoCodeRedemption
+from app.models.push_device import PushDevice
 from app.models.revenuecat_event import RevenueCatEvent, RevenueCatSubscriberSnapshot
 from app.models.scan_review import ScanReview
 from app.models.user import User
@@ -224,6 +225,7 @@ async def _delete_database_records(db: AsyncSession, job: UserDeletionJob) -> bo
         delete(Meal).where(Meal.user_id == user_id),
         delete(BurnedCalories).where(BurnedCalories.user_id == user_id),
         delete(WeightEntry).where(WeightEntry.user_id == user_id),
+        delete(PushDevice).where(PushDevice.user_id == user_id),
         delete(DailySummary).where(DailySummary.user_id == user_id),
         delete(UserFoodMemory).where(UserFoodMemory.user_id == user_id),
         delete(PromoCodeRedemption).where(PromoCodeRedemption.user_id == user_id),
