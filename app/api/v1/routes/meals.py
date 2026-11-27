@@ -82,17 +82,62 @@ def _time_based_meal_category(now: dt.datetime | None = None) -> str:
     return "snack"
 
 
+MAIN_MEALS = frozenset({"breakfast", "lunch", "dinner"})
+# A meal logged this soon after the previous one is usually the rest of the
+# same meal (the pasta, then the mozzarella, then the vegetables), even when
+# each entry alone looks like a snack.
+SAME_MEAL_WINDOW = dt.timedelta(minutes=60)
+
+
 def _resolve_meal_category(
     explicit_category: str | None,
     estimation: MealEstimateResult,
     logged_at_local: dt.datetime | None = None,
+    previous_category: str | None = None,
 ) -> str:
-    """Manual choice wins; an uncertain AI label never overrides the clock."""
+    """Pick the diary category for a new meal.
+
+    Order: the person's own choice; the category of a meal they confirmed
+    within ``SAME_MEAL_WINDOW``; an AI label read from explicit wording (high
+    confidence); a medium-confidence AI label, unless it calls a main-meal-time
+    entry a snack (the model sees the food, never the clock); the clock.
+    """
     if explicit_category:
         return explicit_category
-    if estimation.meal_category_suggestion is not None and estimation.meal_category_confidence in {"medium", "high"}:
-        return estimation.meal_category_suggestion
-    return _time_based_meal_category(logged_at_local)
+    if previous_category:
+        return previous_category
+    clock = _time_based_meal_category(logged_at_local)
+    suggestion = estimation.meal_category_suggestion
+    confidence = estimation.meal_category_confidence
+    if suggestion is not None and confidence == "high":
+        return suggestion
+    if suggestion is not None and confidence == "medium":
+        if not (suggestion == "snack" and clock in MAIN_MEALS):
+            return suggestion
+    return clock
+
+
+async def _recent_meal_category(
+    db: AsyncSession,
+    user_id: int,
+    logged_at: dt.datetime,
+    local_date: dt.date,
+) -> str | None:
+    """Category of the person's latest confirmed meal on the same diary day
+    within ``SAME_MEAL_WINDOW`` before ``logged_at``, if any."""
+    row = await db.scalar(
+        select(Meal.meal_category)
+        .where(
+            Meal.user_id == user_id,
+            Meal.local_date == local_date,
+            Meal.confirmed_at.is_not(None),
+            Meal.created_at >= logged_at - SAME_MEAL_WINDOW,
+            Meal.created_at <= logged_at,
+        )
+        .order_by(Meal.created_at.desc())
+        .limit(1)
+    )
+    return row
 
 
 async def _process_and_save_meal(
@@ -122,6 +167,11 @@ async def _process_and_save_meal(
     estimation = enforce_estimate_ingredient_invariants(estimation)
     if detected_regions is None:
         detected_regions = [r.model_dump() for r in regions_from_items(estimation.items)]
+    previous_category = (
+        None
+        if meal_category
+        else await _recent_meal_category(db, user.id, logged_at, logged_at_local.date())
+    )
 
     # 1. Instantiate Core Meal entity with new AI pipeline fields
     meal = Meal(
@@ -131,7 +181,12 @@ async def _process_and_save_meal(
         image_url=image_url,
         audio_url=audio_url,
         meal_name=estimation.meal_name,
-        meal_category=_resolve_meal_category(meal_category, estimation, logged_at_local),
+        meal_category=_resolve_meal_category(
+            meal_category,
+            estimation,
+            logged_at_local,
+            previous_category=previous_category,
+        ),
         local_date=logged_at_local.date(),
         meal_category_suggestion=estimation.meal_category_suggestion,
         meal_category_confidence=estimation.meal_category_confidence,

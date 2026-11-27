@@ -62,6 +62,15 @@ material conflict as an assumption.
 ESTIMATION_RULES = """<estimation_rules>
 - Model the edible amount actually consumed. Distinguish cooked from dry weight
   and use an energy density for the same state.
+- A stated weight for pasta, rice, couscous, oats, or other dry grains and
+  legumes is the dry (raw) weight unless the text says cooked (for example
+  "cooked", "cotta", "cotto"): that is how people weigh them. "250 g di pasta
+  al ragù" means 250 g of dry pasta plus its sauce, not a 250 g plate. Record
+  the dry-weight reading in assumptions.
+- A weight stated for one component never transfers to the others. Estimate
+  each unstated sauce, condiment, or side as a typical serving for the stated
+  amount of the main food, record it in assumptions, and let the range carry
+  that uncertainty.
 - Decompose every composite or prepared dish into its calorie-bearing
   ingredients: one item per ingredient, in the state as eaten (for example,
   pizza margherita becomes baked dough, tomato sauce, mozzarella, and olive
@@ -93,8 +102,11 @@ ESTIMATION_RULES = """<estimation_rules>
 - The uncertainty range must contain the central estimate and reflect the main
   plausible variation in portion, recipe, and hidden fats. Do not use a narrow
   range to imply precision the evidence does not support.
-- Suggest a meal category only from explicit wording or strong contextual
-  evidence. Return null when uncertain; this is organization, not nutrition
+- Suggest a meal category with high confidence only from explicit wording
+  ("for breakfast", "a pranzo", "merenda", "dinner"). The kind of food alone
+  ("an apple", "two bars") is at most low confidence: you cannot see the time
+  of day or the meals logged just before, and the app decides from those.
+  Return null when there is no evidence; this is organization, not nutrition
   advice.
 </estimation_rules>"""
 
@@ -103,6 +115,7 @@ REFERENCE_ANCHORS = """<calibration_anchors>
 Use these only as sanity checks, never to override stronger evidence:
 - Cooking oil: 14 g per tablespoon, about 120 kcal.
 - Cooked rice: about 130 kcal/100 g; cooked plain pasta: about 150 kcal/100 g.
+- Dry pasta: about 355-370 kcal/100 g; dry rice: about 350-360 kcal/100 g.
 - Grilled skinless chicken breast: about 165 kcal/100 g before added oil/sauce.
 - Bread: commonly 240-280 kcal/100 g; cheese varies widely, often 250-420 kcal/100 g.
 - Restaurant and takeaway portions can be materially larger and fattier than
@@ -118,6 +131,19 @@ any defensible estimate. Still return one 100 g item named "Unidentified food"
 with calories_per_100g=0, then ask exactly one concise, high-information
 question. Otherwise set needs_clarification=false and clarifying_question=null.
 </uncertainty_policy>"""
+
+
+# Shared with the image prompt, which has no estimation_rules block.
+MEAL_CATEGORY_RULE = """Suggest a meal category with high confidence only from explicit wording
+("for breakfast", "a pranzo", "merenda", "dinner"). The kind of food alone
+("an apple", "two bars") is at most low confidence: you cannot see the time
+of day or the meals logged just before, and the app decides from those.
+Return null when there is no evidence; this is organization, not nutrition
+advice."""
+
+DRY_WEIGHT_RULE = """A stated weight for pasta, rice, couscous, oats, or other dry grains and
+legumes is the dry (raw) weight unless the user says cooked; a weight stated
+for one component never transfers to its sauce or sides."""
 
 
 INTERNAL_CHECK = """<internal_check>

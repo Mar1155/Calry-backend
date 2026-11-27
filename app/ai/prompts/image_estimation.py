@@ -1,8 +1,8 @@
 from xml.sax.saxutils import escape
 
-from app.ai.prompts._shared import OUTPUT_CONTRACT
+from app.ai.prompts._shared import DRY_WEIGHT_RULE, MEAL_CATEGORY_RULE, OUTPUT_CONTRACT
 
-IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v13_item_pins"
+IMAGE_MEAL_ESTIMATION_PROMPT_VERSION = "image_meal_estimation_v14_dry_weight_category"
 
 _FAT_LINE = '    "fat_g": number | null\n'
 assert _FAT_LINE in OUTPUT_CONTRACT
@@ -28,6 +28,8 @@ Item macros are for the full portion; weight and kcal/100g must use the
 same cooked/raw state. Use realistic uncertainty bounds. Ask for clarification
 only when no food or caloric drink can be identified. Never invent a brand,
 recipe, preparation, or exact portion.
+{dry_weight}
+{category}
 For each item, box_2d pins the ingredient on the photo: a tight box around one
 clearly visible, representative piece or cluster of it (one chicken strip, a
 patch of lettuce, the exposed edge of the bread), never its whole spread across
@@ -37,6 +39,7 @@ and xmin < xmax. Use null when the ingredient cannot be seen on its own
 (cooking oil, a sauce under everything, a hidden filling). Boxes locate
 ingredients only; they never change weights or calories.
 </rules>"""
+_VISUAL_RULES = _VISUAL_RULES.format(dry_weight=DRY_WEIGHT_RULE, category=MEAL_CATEGORY_RULE)
 
 IMAGE_MEAL_ESTIMATION_SYSTEM_PROMPT = "\n\n".join(
     [
