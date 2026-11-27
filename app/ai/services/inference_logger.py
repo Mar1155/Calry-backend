@@ -30,6 +30,7 @@ def _quality_fields(result: "MealEstimateResult | None") -> dict:
             "total_realigned": result.total_realigned,
             "bias_applied": result.bias_applied,
             "stated_quantities": result.stated_quantity_report,
+            "timing": result.provider_timing,
             "assumptions": list(result.assumptions or []),
         },
     }

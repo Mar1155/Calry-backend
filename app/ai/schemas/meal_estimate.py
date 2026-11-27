@@ -68,6 +68,8 @@ class MealEstimateResult(BaseModel):
     # ingredients (see app.ai.services.stated_quantities). Not in the API.
     stated_quantity_enforced: bool = False
     stated_quantity_report: dict | None = None
+    # Streaming phase timings from the provider (see stream_chat). Not in the API.
+    provider_timing: dict | None = None
 
     # Revision-only metadata. These fields are populated by the conversational
     # refinement pipeline and may be surfaced to the client before save.

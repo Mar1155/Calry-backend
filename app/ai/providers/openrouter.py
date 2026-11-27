@@ -134,7 +134,9 @@ def get_shared_client() -> httpx.AsyncClient:
     loop = _running_loop()
     if _shared_client is None or _shared_client.is_closed or _shared_client_loop is not loop:
         _shared_client = httpx.AsyncClient(
-            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+            # Keep idle connections for two minutes (httpx default: 5 s) so a
+            # meal logged a minute after the last one skips a new TLS handshake.
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=120.0),
         )
         _shared_client_loop = loop
     return _shared_client
@@ -421,10 +423,15 @@ class OpenRouterProvider(BaseAIProvider):
             finish_reason: str | None = None
             stream_error: Any = None
             emitted_content = False
+            # Phase timings (ms from the request): where a slow stream spends
+            # its time. generation_id lets OpenRouter's /generation endpoint
+            # report its own queue and provider latency for the same call.
+            timing: dict[str, Any] = {"attempt": attempt}
             try:
                 async with client.stream(
                     "POST", OPENROUTER_URL, json=payload, headers=headers, timeout=timeout
                 ) as response:
+                    timing["headers_ms"] = int((time.perf_counter() - start_time) * 1000)
                     if response.status_code != 200:
                         body = (await response.aread()).decode(errors="replace")
                         if (
@@ -471,6 +478,11 @@ class OpenRouterProvider(BaseAIProvider):
                             chunk = json.loads(data)
                         except json.JSONDecodeError:
                             continue
+                        if "first_chunk_ms" not in timing:
+                            timing["first_chunk_ms"] = int((time.perf_counter() - start_time) * 1000)
+                            timing["generation_id"] = chunk.get("id")
+                        if chunk.get("provider"):
+                            timing["provider"] = chunk["provider"]
                         if isinstance(chunk.get("usage"), dict):
                             usage = chunk["usage"]
                         if chunk.get("error"):
@@ -484,6 +496,8 @@ class OpenRouterProvider(BaseAIProvider):
                             delta = choice.get("delta") or {}
                             content = delta.get("content")
                             if content:
+                                if not emitted_content:
+                                    timing["first_content_ms"] = int((time.perf_counter() - start_time) * 1000)
                                 parts.append(content)
                                 emitted_content = True
                                 yield {"delta": content}
@@ -515,12 +529,26 @@ class OpenRouterProvider(BaseAIProvider):
                         model,
                         settings.AI_MAX_COMPLETION_TOKENS,
                     )
+                timing["total_ms"] = latency_ms
+                logger.info(
+                    "event=openrouter_stream_timing model=%s provider=%s generation_id=%s attempt=%s "
+                    "headers_ms=%s first_chunk_ms=%s first_content_ms=%s total_ms=%s",
+                    model,
+                    timing.get("provider"),
+                    timing.get("generation_id"),
+                    attempt,
+                    timing.get("headers_ms"),
+                    timing.get("first_chunk_ms"),
+                    timing.get("first_content_ms"),
+                    latency_ms,
+                )
                 yield {
                     "meta": {
                         "usage": usage,
                         "latency_ms": latency_ms,
                         "raw_text": "".join(parts),
                         "finish_reason": finish_reason,
+                        "timing": timing,
                     }
                 }
                 return

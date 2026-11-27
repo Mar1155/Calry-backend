@@ -2,6 +2,7 @@
 error chunk with finish_reason "error". That fragment must never be parsed as
 a finished estimate (it became a made-up one-item meal, or a failed scan that
 worked on retry)."""
+
 import json
 from unittest.mock import patch
 
@@ -21,7 +22,10 @@ def _delta(text: str) -> dict:
     return {"choices": [{"delta": {"content": text}}]}
 
 
-_ERROR = {"error": {"code": 502, "message": "upstream provider error"}, "choices": [{"delta": {}, "finish_reason": "error"}]}
+_ERROR = {
+    "error": {"code": 502, "message": "upstream provider error"},
+    "choices": [{"delta": {}, "finish_reason": "error"}],
+}
 _STOP = {"choices": [{"delta": {}, "finish_reason": "stop"}]}
 
 
@@ -71,3 +75,27 @@ async def test_a_clean_stream_is_unchanged():
     assert calls == 1
     assert [e["delta"] for e in events if "delta" in e] == ['{"a"', ": 1}"]
     assert events[-1]["meta"]["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_stream_meta_reports_phase_timings_and_generation():
+    first = {"id": "gen-abc", "provider": "Google AI Studio", **_delta('{"meal_name": "Mela"}')}
+    events, _ = await _collect([_sse({"id": "gen-abc", "choices": [{"delta": {"role": "assistant"}}]}, first, _STOP)])
+
+    timing = events[-1]["meta"]["timing"]
+    assert timing["generation_id"] == "gen-abc"
+    assert timing["provider"] == "Google AI Studio"
+    assert timing["attempt"] == 0
+    assert 0 <= timing["headers_ms"] <= timing["first_chunk_ms"] <= timing["first_content_ms"] <= timing["total_ms"]
+
+
+def test_shared_client_keeps_idle_connections_for_two_minutes():
+    import asyncio
+
+    async def pool_expiry() -> float:
+        client = openrouter.get_shared_client()
+        expiry = client._transport._pool._keepalive_expiry  # type: ignore[attr-defined]
+        await openrouter.close_shared_client()
+        return expiry
+
+    assert asyncio.run(pool_expiry()) == 120.0

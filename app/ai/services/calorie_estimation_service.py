@@ -443,9 +443,12 @@ class AICalorieEstimationService:
         success = False
         error_msg = None
         raw_output = None
+        timing: dict | None = None
+        provider_started_ms = 0
 
         try:
             try:
+                provider_started_ms = int((time.perf_counter() - start_time) * 1000)
                 async for ev in provider.stream_meal_from_text(
                     text, user_context, is_voice=is_voice, additional_context=additional_context
                 ):
@@ -463,6 +466,8 @@ class AICalorieEstimationService:
                         latency_ms = meta.get("latency_ms") or 0
                         raw_text = meta.get("raw_text") or raw_text
                         finish_reason = meta.get("finish_reason")
+                        timing = dict(meta.get("timing") or {})
+                        timing["before_provider_ms"] = provider_started_ms
             except AIProviderError as exc:
                 if exc.details.get("retryable") is not True:
                     raise
@@ -477,12 +482,12 @@ class AICalorieEstimationService:
                 usage = fallback.token_usage
                 validated = AIValidationService.validate_and_normalize_estimate(fallback)
                 self._finalize(
-                validated,
-                user_context,
-                channel,
-                transcription_confidence,
-                stated_text=_stated_text(text, additional_context),
-            )
+                    validated,
+                    user_context,
+                    channel,
+                    transcription_confidence,
+                    stated_text=_stated_text(text, additional_context),
+                )
                 success = True
                 yield {"type": "__complete__", "result": validated}
                 return
@@ -498,6 +503,7 @@ class AICalorieEstimationService:
                 finish_reason=finish_reason,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
+            validated.provider_timing = timing
             self._finalize(
                 validated,
                 user_context,
@@ -555,9 +561,12 @@ class AICalorieEstimationService:
         success = False
         error_msg = None
         raw_output = None
+        timing: dict | None = None
+        provider_started_ms = 0
 
         try:
             try:
+                provider_started_ms = int((time.perf_counter() - start_time) * 1000)
                 async for ev in provider.stream_meal_from_image(
                     image_url, user_context, optional_hint, additional_context=additional_context
                 ):
@@ -575,6 +584,8 @@ class AICalorieEstimationService:
                         latency_ms = meta.get("latency_ms") or 0
                         raw_text = meta.get("raw_text") or raw_text
                         finish_reason = meta.get("finish_reason")
+                        timing = dict(meta.get("timing") or {})
+                        timing["before_provider_ms"] = provider_started_ms
             except AIProviderError as exc:
                 if exc.details.get("retryable") is not True:
                     raise
@@ -589,11 +600,11 @@ class AICalorieEstimationService:
                 usage = fallback.token_usage
                 validated = AIValidationService.validate_and_normalize_estimate(fallback)
                 self._finalize(
-                validated,
-                user_context,
-                "photo",
-                stated_text=_stated_text(optional_hint, additional_context),
-            )
+                    validated,
+                    user_context,
+                    "photo",
+                    stated_text=_stated_text(optional_hint, additional_context),
+                )
                 success = True
                 yield {"type": "__complete__", "result": validated}
                 return
@@ -609,6 +620,7 @@ class AICalorieEstimationService:
                 finish_reason=finish_reason,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
+            validated.provider_timing = timing
             self._finalize(
                 validated,
                 user_context,
@@ -766,9 +778,7 @@ class AICalorieEstimationService:
             raise e
         finally:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
-            prompt_version = (
-                raw_result.prompt_version if raw_result is not None else MENU_CATEGORIES_PROMPT_VERSION
-            )
+            prompt_version = raw_result.prompt_version if raw_result is not None else MENU_CATEGORIES_PROMPT_VERSION
             has_media = bool(menu_req.image_urls or menu_req.menu_data_uris)
             model_name = (
                 raw_result.model_name
