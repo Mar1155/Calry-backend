@@ -23,6 +23,7 @@ a second one.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -37,27 +38,41 @@ STATE_TTL_SECONDS = 3600
 # lazily so the meals router — and every non-photo endpoint — still imports on
 # an API-only environment where the worker deps aren't installed.
 _redis: Any = None
+_redis_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _running_loop() -> asyncio.AbstractEventLoop | None:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 def get_redis() -> Any:
-    global _redis
-    if _redis is None:
+    """One client per event loop: a Celery task's loop closes when the task
+    ends, and a client left over from it would fail on the next task."""
+    global _redis, _redis_loop
+    loop = _running_loop()
+    if _redis is None or _redis_loop is not loop:
         from redis import asyncio as aioredis
 
         _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        _redis_loop = loop
     return _redis
 
 
 async def close_redis() -> None:
     """Close the per-loop Redis client. The Celery worker runs each task in a
     fresh event loop, so its connection must be closed at task end."""
-    global _redis
-    if _redis is not None:
+    global _redis, _redis_loop
+    client, client_loop = _redis, _redis_loop
+    _redis = None
+    _redis_loop = None
+    if client is not None and client_loop is _running_loop():
         try:
-            await _redis.aclose()
+            await client.aclose()
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Redis close failed: {e}")
-        _redis = None
 
 
 def _chan(job_id: str) -> str:

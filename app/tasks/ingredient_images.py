@@ -7,7 +7,6 @@ helper degrades to a no-op when disabled or no broker is reachable, and the
 task itself never lets one ingredient's failure stop the others.
 """
 
-import asyncio
 import logging
 
 from sqlalchemy import select
@@ -17,6 +16,7 @@ from app.ai.services.ingredient_image_service import IngredientImageService
 from app.core.config import settings
 from app.db.session import SessionLocal, engine
 from app.models.meal import Meal
+from app.worker.async_runner import run_task
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger("app.tasks.ingredient_images")
@@ -36,7 +36,7 @@ def enqueue_ingredient_images(meal_id: int, *, user_id: int | None = None) -> No
 def generate_ingredient_images(self, meal_id: int, user_id: int | None = None) -> None:
     logger.info("event=ingredient_image_task_received meal_id=%s", meal_id)
     try:
-        asyncio.run(_generate_for_meal_with_cleanup(meal_id, user_id))
+        run_task(_generate_for_meal_with_cleanup(meal_id, user_id))
     except Exception:
         logger.exception("event=ingredient_image_task_failed meal_id=%s", meal_id)
         # The meal itself is unaffected either way; a retry only guards
@@ -47,7 +47,7 @@ def generate_ingredient_images(self, meal_id: int, user_id: int | None = None) -
 async def _generate_for_meal_with_cleanup(meal_id: int, user_id: int | None) -> None:
     """Mirrors _run_photo_analysis_with_cleanup (app.tasks.meal_analysis): each
     Celery task invocation opens and closes its own event loop via
-    asyncio.run(). The shared OpenRouter httpx client and the SQLAlchemy
+    run_task(). The shared OpenRouter httpx client and the SQLAlchemy
     engine's pooled connections are lazily created on first use and bound to
     whatever loop was current at that moment — reused as-is from a later
     invocation, a request against either fails with "Event loop is closed"
@@ -66,9 +66,7 @@ async def _generate_for_meal_with_cleanup(meal_id: int, user_id: int | None) -> 
 
 async def _generate_for_meal(meal_id: int, user_id: int | None) -> None:
     async with SessionLocal() as db:
-        meal = await db.scalar(
-            select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items))
-        )
+        meal = await db.scalar(select(Meal).where(Meal.id == meal_id).options(selectinload(Meal.items)))
         if meal is None:
             # Retryable: the API's commit may not have landed yet.
             raise LookupError(f"meal {meal_id} not found")
@@ -80,9 +78,7 @@ async def _generate_for_meal(meal_id: int, user_id: int | None) -> None:
             try:
                 item.image_url = await service.get_or_generate(item.name, user_id=user_id)
             except Exception:  # noqa: BLE001 — one bad ingredient never stops the rest
-                logger.exception(
-                    "event=ingredient_image_item_failed meal_id=%s item_id=%s", meal_id, item.id
-                )
+                logger.exception("event=ingredient_image_item_failed meal_id=%s item_id=%s", meal_id, item.id)
         await db.commit()
         logger.info(
             "event=ingredient_image_task_completed meal_id=%s items=%s with_image=%s",

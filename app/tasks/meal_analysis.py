@@ -1,4 +1,3 @@
-import asyncio
 import datetime as dt
 import logging
 import time
@@ -19,6 +18,7 @@ from app.dependencies.premium import refund_ai_credit
 from app.models.meal import Meal
 from app.models.meal_analysis import MealAnalysisJob
 from app.models.user import User
+from app.worker.async_runner import run_task
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger("app.tasks.meal_analysis")
@@ -37,7 +37,7 @@ def analyze_photo_meal(self, job_id: str) -> int | None:
         retry_number,
     )
     try:
-        meal_id = asyncio.run(_run_photo_analysis_with_cleanup(job_id))
+        meal_id = run_task(_run_photo_analysis_with_cleanup(job_id))
         logger.info(
             "event=meal_analysis_worker_task_finished job_id=%s celery_task_id=%s meal_id=%s duration_ms=%s",
             job_id,
@@ -59,7 +59,7 @@ def analyze_photo_meal(self, job_id: str) -> int | None:
             int((time.perf_counter() - started_at) * 1000),
         )
         if retryable and retry_number < settings.MEAL_ANALYSIS_MAX_RETRIES:
-            asyncio.run(_mark_job_queued(job_id, str(exc)))
+            run_task(_mark_job_queued(job_id, str(exc)))
             countdown = min(60, 5 * (2**retry_number))
             logger.warning(
                 "event=meal_analysis_worker_retry_scheduled job_id=%s celery_task_id=%s "
@@ -70,7 +70,7 @@ def analyze_photo_meal(self, job_id: str) -> int | None:
                 countdown,
             )
             raise self.retry(exc=exc, countdown=countdown)
-        asyncio.run(_mark_job_failed(job_id, str(exc)))
+        run_task(_mark_job_failed(job_id, str(exc)))
         logger.error(
             "event=meal_analysis_worker_failed_permanently job_id=%s celery_task_id=%s retries=%s",
             job_id,
@@ -107,9 +107,9 @@ async def _run_photo_analysis_with_cleanup(job_id: str) -> int | None:
 
         await close_shared_client()
         await close_redis()
-        # asyncio.run() opens/closes a fresh event loop per task, but `engine`'s
+        # run_task() opens/closes a fresh event loop per task, but `engine`'s
         # pooled connections are bound to whichever loop created them. Dispose
-        # here (same loop) so the next asyncio.run() call starts a clean pool
+        # here (same loop) so the next run_task() call starts a clean pool
         # instead of reusing connections tied to an already-closed loop.
         await engine.dispose()
 

@@ -6,11 +6,11 @@ no-op when async distillation is disabled or no broker is reachable, so the meal
 path never fails because of Memory.
 """
 
-import asyncio
 import logging
 
 from app.core.config import settings
 from app.db.session import SessionLocal, engine
+from app.worker.async_runner import run_task
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger("app.tasks.memory")
@@ -30,7 +30,7 @@ def enqueue_memory_distillation(user_id: int) -> None:
 def distill_user_memory(self, user_id: int) -> dict:
     logger.info("event=memory_distillation_received user_id=%s", user_id)
     try:
-        return asyncio.run(_distill_with_cleanup(user_id))
+        return run_task(_distill_with_cleanup(user_id))
     except Exception:
         logger.exception("event=memory_distillation_failed user_id=%s", user_id)
         raise
@@ -40,7 +40,7 @@ def distill_user_memory(self, user_id: int) -> dict:
 def consolidate_memory(self) -> dict:
     logger.info("event=memory_consolidation_started")
     try:
-        return asyncio.run(_consolidate_with_cleanup())
+        return run_task(_consolidate_with_cleanup())
     except Exception:
         logger.exception("event=memory_consolidation_failed")
         raise

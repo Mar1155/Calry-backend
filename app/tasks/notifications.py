@@ -1,13 +1,12 @@
-import asyncio
-
 from app.core.config import settings
 from app.db.session import SessionLocal, engine
+from app.worker.async_runner import run_task
 from app.worker.celery_app import celery_app
 
 
 @celery_app.task(name="app.tasks.notifications.plan_meal_nudges")
 def plan_meal_nudges() -> dict:
-    return asyncio.run(_plan_meal_nudges())
+    return run_task(_plan_meal_nudges())
 
 
 async def _plan_meal_nudges() -> dict:

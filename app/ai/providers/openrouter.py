@@ -111,23 +111,44 @@ _RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 # C7: a single connection-pooled client reused across all calls (and across the
 # retry loop), instead of a fresh TLS handshake per attempt / per media fetch.
 _shared_client: httpx.AsyncClient | None = None
+_shared_client_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _running_loop() -> asyncio.AbstractEventLoop | None:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 def get_shared_client() -> httpx.AsyncClient:
-    global _shared_client
-    if _shared_client is None or _shared_client.is_closed:
+    """One pooled client per event loop.
+
+    The API runs a single long-lived loop, but every Celery task runs in its
+    own ``asyncio.run()`` loop. A client created on an earlier task's loop
+    holds connections bound to that closed loop, and the next request through
+    it fails with "Event loop is closed". So a client from another loop is
+    dropped (it cannot be closed from here) and a fresh one is created.
+    """
+    global _shared_client, _shared_client_loop
+    loop = _running_loop()
+    if _shared_client is None or _shared_client.is_closed or _shared_client_loop is not loop:
         _shared_client = httpx.AsyncClient(
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
         )
+        _shared_client_loop = loop
     return _shared_client
 
 
 async def close_shared_client() -> None:
-    """Closed on application shutdown (see main.py lifespan)."""
-    global _shared_client
-    if _shared_client is not None and not _shared_client.is_closed:
-        await _shared_client.aclose()
+    """Closed on application shutdown (see main.py lifespan) and at the end of
+    every worker task (see app.worker.async_runner)."""
+    global _shared_client, _shared_client_loop
+    client, client_loop = _shared_client, _shared_client_loop
     _shared_client = None
+    _shared_client_loop = None
+    if client is not None and not client.is_closed and client_loop is _running_loop():
+        await client.aclose()
 
 
 class OpenRouterProvider(BaseAIProvider):
@@ -1463,9 +1484,7 @@ class OpenRouterProvider(BaseAIProvider):
     ) -> tuple[str, str, list[dict[str, Any]]]:
         """Resolves photos, fetched URL images/PDFs, or digital menu text into model parts."""
         loaded_photo_uris = (
-            await asyncio.gather(*(self._load_image_data_uri(url) for url in image_urls))
-            if image_urls
-            else []
+            await asyncio.gather(*(self._load_image_data_uri(url) for url in image_urls)) if image_urls else []
         )
         all_data_uris = [*loaded_photo_uris, *menu_data_uris]
         media_parts: list[dict[str, Any]] = []
@@ -1478,9 +1497,7 @@ class OpenRouterProvider(BaseAIProvider):
                     }
                 )
             else:
-                media_parts.append(
-                    {"type": "image_url", "image_url": {"url": uri, "detail": "high"}}
-                )
+                media_parts.append({"type": "image_url", "image_url": {"url": uri, "detail": "high"}})
 
         model = settings.OPENROUTER_IMAGE_MODEL if media_parts else settings.OPENROUTER_TEXT_MODEL
         source_sections: list[str] = []
@@ -1566,9 +1583,7 @@ class OpenRouterProvider(BaseAIProvider):
             cat_id = slug or f"category_{idx + 1}"
             dish_count = self._as_int(raw_cat.get("dish_count"))
             sample_dishes = [
-                str(d).strip()
-                for d in (raw_cat.get("sample_dishes") or [])
-                if isinstance(d, str) and d.strip()
+                str(d).strip() for d in (raw_cat.get("sample_dishes") or []) if isinstance(d, str) and d.strip()
             ][:3]
             categories.append(
                 MenuCategoryAIItem(
@@ -1608,11 +1623,7 @@ class OpenRouterProvider(BaseAIProvider):
             menu_url=menu_req.menu_url,
         )
         context_str = self._build_user_context(user_context, leading_blank=True)
-        selected_cats = (
-            ", ".join(menu_req.selected_categories)
-            if menu_req.selected_categories
-            else "All categories"
-        )
+        selected_cats = ", ".join(menu_req.selected_categories) if menu_req.selected_categories else "All categories"
 
         req_info = (
             f"Remaining Calories: {menu_req.remaining_calories} kcal\n"

@@ -1,4 +1,3 @@
-import asyncio
 import datetime as dt
 import logging
 
@@ -7,6 +6,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.session import SessionLocal, engine
 from app.models.insight import InsightNotificationDelivery, ProactiveInsightEvent
+from app.worker.async_runner import run_task
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger("app.tasks.proactive_insights")
@@ -27,32 +27,32 @@ def enqueue_proactive_processing(event_id: str) -> None:
 
 @celery_app.task(name="app.tasks.proactive_insights.process_event")
 def process_proactive_event(event_id: str) -> dict:
-    return asyncio.run(_process_event(event_id))
+    return run_task(_process_event(event_id))
 
 
 @celery_app.task(name="app.tasks.proactive_insights.sweep_pending")
 def sweep_pending_proactive_events() -> dict:
-    return asyncio.run(_sweep_pending())
+    return run_task(_sweep_pending())
 
 
 @celery_app.task(name="app.tasks.proactive_insights.evaluate_periodic")
 def evaluate_periodic_proactive_insights(period: str) -> dict:
-    return asyncio.run(_evaluate_periodic(period))
+    return run_task(_evaluate_periodic(period))
 
 
 @celery_app.task(name="app.tasks.proactive_insights.evaluate_due")
 def evaluate_due_proactive_insights() -> dict:
-    return asyncio.run(_evaluate_due())
+    return run_task(_evaluate_due())
 
 
 @celery_app.task(name="app.tasks.proactive_insights.deliver_notification")
 def deliver_proactive_notification(delivery_id: int) -> dict:
-    return asyncio.run(_deliver_notification(delivery_id))
+    return run_task(_deliver_notification(delivery_id))
 
 
 @celery_app.task(name="app.tasks.proactive_insights.sweep_notifications")
 def sweep_proactive_notifications() -> dict:
-    return asyncio.run(_sweep_notifications())
+    return run_task(_sweep_notifications())
 
 
 async def _process_event(event_id: str) -> dict:
@@ -155,8 +155,7 @@ async def _sweep_notifications() -> dict:
                         .where(
                             InsightNotificationDelivery.status.in_(("scheduled", "failed")),
                             InsightNotificationDelivery.scheduled_for <= now,
-                            InsightNotificationDelivery.attempts
-                            < settings.PROACTIVE_NOTIFICATION_RETRY_MAX,
+                            InsightNotificationDelivery.attempts < settings.PROACTIVE_NOTIFICATION_RETRY_MAX,
                         )
                         .order_by(InsightNotificationDelivery.scheduled_for)
                         .limit(100)
