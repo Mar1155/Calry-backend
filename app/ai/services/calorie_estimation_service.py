@@ -30,6 +30,7 @@ from app.ai.schemas.menu_scan import (
 from app.ai.services.confidence_service import AIConfidenceService, bucket_confidence
 from app.ai.services.inference_logger import AIInferenceLogger
 from app.ai.services.speech_service import AISpeechService
+from app.ai.services.stated_quantities import apply_stated_quantities
 from app.ai.services.validation_service import AIValidationService
 from app.ai.streaming import protocol
 from app.ai.streaming.partial_parser import StreamingMealParser
@@ -38,6 +39,13 @@ from app.models.food_memory import UserFoodMemory
 from app.repositories.food_memory import FoodMemoryRepository
 
 logger = logging.getLogger("app.ai.calorie_estimation_service")
+
+
+def _stated_text(*parts: str | None) -> str | None:
+    """The person's own words for an estimate: description or photo hint,
+    plus any clarification they added."""
+    text = "\n".join(p.strip() for p in parts if p and p.strip())
+    return text or None
 
 
 class AICalorieEstimationService:
@@ -100,9 +108,27 @@ class AICalorieEstimationService:
         user_context: UserContext | None,
         channel: str,
         transcription_confidence: str | None = None,
+        stated_text: str | None = None,
     ) -> MealEstimateResult:
         # The channel is the source of truth for both bias and confidence base.
         result.source_type = channel  # type: ignore[assignment]
+        # Amounts the person wrote are facts: put them back before any
+        # statistical adjustment (see app.ai.services.stated_quantities).
+        # In shadow mode the check runs on a copy: the estimate is unchanged
+        # and only the report (what would have changed) is logged.
+        mode = settings.STATED_QUANTITY_LOCK
+        if mode != "off" and stated_text:
+            target = result if mode == "enforce" else result.model_copy(deep=True)
+            report = apply_stated_quantities(stated_text, target)
+            if report.stated:
+                result.stated_quantity_report = {"mode": mode, **report.as_json()}
+                if report.enforced or report.unresolved:
+                    logger.info(
+                        "event=stated_quantity_check mode=%s enforced=%s unresolved=%s",
+                        mode,
+                        report.enforced,
+                        report.unresolved,
+                    )
         self._apply_bias(result, user_context, channel)
         score = AIConfidenceService.compute(result, transcription_confidence=transcription_confidence)
         result.confidence_score = score
@@ -214,7 +240,13 @@ class AICalorieEstimationService:
             raw_output = raw_result.raw_output
 
             validated_result = AIValidationService.validate_and_normalize_estimate(raw_result)
-            self._finalize(validated_result, user_context, channel, transcription_confidence)
+            self._finalize(
+                validated_result,
+                user_context,
+                channel,
+                transcription_confidence,
+                stated_text=_stated_text(text, additional_context),
+            )
             success = True
             return validated_result
 
@@ -273,7 +305,12 @@ class AICalorieEstimationService:
             raw_output = raw_result.raw_output
 
             validated_result = AIValidationService.validate_and_normalize_estimate(raw_result)
-            self._finalize(validated_result, user_context, "photo")
+            self._finalize(
+                validated_result,
+                user_context,
+                "photo",
+                stated_text=_stated_text(optional_hint, additional_context),
+            )
             success = True
             return validated_result
 
@@ -439,7 +476,13 @@ class AICalorieEstimationService:
                 raw_output = fallback.raw_output
                 usage = fallback.token_usage
                 validated = AIValidationService.validate_and_normalize_estimate(fallback)
-                self._finalize(validated, user_context, channel, transcription_confidence)
+                self._finalize(
+                validated,
+                user_context,
+                channel,
+                transcription_confidence,
+                stated_text=_stated_text(text, additional_context),
+            )
                 success = True
                 yield {"type": "__complete__", "result": validated}
                 return
@@ -455,7 +498,13 @@ class AICalorieEstimationService:
                 finish_reason=finish_reason,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
-            self._finalize(validated, user_context, channel, transcription_confidence)
+            self._finalize(
+                validated,
+                user_context,
+                channel,
+                transcription_confidence,
+                stated_text=_stated_text(text, additional_context),
+            )
             success = True
             yield {"type": "__complete__", "result": validated}
         except Exception as e:
@@ -539,7 +588,12 @@ class AICalorieEstimationService:
                 raw_output = fallback.raw_output
                 usage = fallback.token_usage
                 validated = AIValidationService.validate_and_normalize_estimate(fallback)
-                self._finalize(validated, user_context, "photo")
+                self._finalize(
+                validated,
+                user_context,
+                "photo",
+                stated_text=_stated_text(optional_hint, additional_context),
+            )
                 success = True
                 yield {"type": "__complete__", "result": validated}
                 return
@@ -555,7 +609,12 @@ class AICalorieEstimationService:
                 finish_reason=finish_reason,
             )
             validated = AIValidationService.validate_and_normalize_estimate(raw_result)
-            self._finalize(validated, user_context, "photo")
+            self._finalize(
+                validated,
+                user_context,
+                "photo",
+                stated_text=_stated_text(optional_hint, additional_context),
+            )
             success = True
             yield {"type": "__complete__", "result": validated}
         except Exception as e:

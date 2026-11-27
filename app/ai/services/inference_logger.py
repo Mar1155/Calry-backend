@@ -29,6 +29,7 @@ def _quality_fields(result: "MealEstimateResult | None") -> dict:
             "macro_mismatch": result.macro_mismatch,
             "total_realigned": result.total_realigned,
             "bias_applied": result.bias_applied,
+            "stated_quantities": result.stated_quantity_report,
             "assumptions": list(result.assumptions or []),
         },
     }

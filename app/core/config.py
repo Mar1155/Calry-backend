@@ -213,6 +213,10 @@ class Settings(BaseSettings):
     # Pre-inference food-memory cache (C3 / C19): serve confirmed repeat foods
     # deterministically without an LLM call.
     FOOD_MEMORY_CACHE_ENABLED: bool = True
+    # Stated-quantity lock (app.ai.services.stated_quantities):
+    # "shadow" logs what it would change without changing the estimate,
+    # "enforce" puts the stated amounts back, "off" skips it.
+    STATED_QUANTITY_LOCK: Literal["off", "shadow", "enforce"] = "shadow"
     FOOD_MEMORY_FUZZY_ENABLED: bool = True
     FOOD_MEMORY_FUZZY_THRESHOLD: int = 92  # rapidfuzz token_set_ratio [0-100]
     FOOD_MEMORY_MIN_USE_COUNT: int = 2  # only serve a memory confirmed >= N times

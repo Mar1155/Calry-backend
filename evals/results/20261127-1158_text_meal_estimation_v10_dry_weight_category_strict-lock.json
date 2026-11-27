@@ -1,0 +1,1403 @@
+{
+ "ran_at": "2026-11-27T10:58:20+00:00",
+ "model": "google/gemini-3.8-flash",
+ "prompt_version": "text_meal_estimation_v10_dry_weight_category",
+ "lock": true,
+ "repeat": 1,
+ "summary": {
+  "cases": 51,
+  "failed_calls": 0,
+  "within_tolerance_pct": 96.1,
+  "mean_abs_error_pct": 7.2,
+  "median_abs_error_pct": 5.4,
+  "bias_pct": 2.5,
+  "stated_honored_pct": 100.0,
+  "category_ok_pct": 100.0,
+  "lock_enforced_cases": 0,
+  "lock_false_positives": 0,
+  "latency_p50_ms": 4679,
+  "latency_p90_ms": 6450
+ },
+ "results": [
+  {
+   "id": "pasta_ragu_dry_250",
+   "kcal": 1288,
+   "ref_kcal": 1190,
+   "tolerance": 0.2,
+   "error_pct": 0.0824,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pasta Secca (Cruda) 250g@360.0",
+    "Carne Macinata Mista Cotta Per Ragù 120g@215.0",
+    "Passata Di Pomodoro E Soffritto 120g@35.0",
+    "Olio Extravergine D'Oliva (Nel Ragù/Condimento) 10g@884.0"
+   ],
+   "latency_ms": 6036,
+   "error": null,
+   "tags": [
+    "dry_weight",
+    "regression"
+   ]
+  },
+  {
+   "id": "pasta_ragu_dry_explicit",
+   "kcal": 1184,
+   "ref_kcal": 1190,
+   "tolerance": 0.2,
+   "error_pct": -0.005,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pasta Di Semola (A Crudo) 250g@355.0",
+    "Ragù Di Carne Alla Bolognese 200g@148.0"
+   ],
+   "latency_ms": 5294,
+   "error": null,
+   "tags": [
+    "dry_weight",
+    "regression"
+   ]
+  },
+  {
+   "id": "pasta_pomodoro_100",
+   "kcal": 482,
+   "ref_kcal": 440,
+   "tolerance": 0.2,
+   "error_pct": 0.0955,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pasta Di Semola Cruda 100g@355.0",
+    "Passata Di Pomodoro 80g@24.0",
+    "Olio Extravergine D'Oliva 12g@900.0"
+   ],
+   "latency_ms": 5907,
+   "error": null,
+   "tags": [
+    "dry_weight"
+   ]
+  },
+  {
+   "id": "pasta_pesto_180",
+   "kcal": 1059,
+   "ref_kcal": 860,
+   "tolerance": 0.2,
+   "error_pct": 0.2314,
+   "within_tolerance": false,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pasta Di Semola Cruda 180g@355.0",
+    "Pesto Alla Genovese 80g@525.0"
+   ],
+   "latency_ms": 4679,
+   "error": null,
+   "tags": [
+    "dry_weight"
+   ]
+  },
+  {
+   "id": "pasta_cooked_stated",
+   "kcal": 507,
+   "ref_kcal": 440,
+   "tolerance": 0.2,
+   "error_pct": 0.1523,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "dinner",
+   "category_confidence": "high",
+   "category_expected": "dinner",
+   "category_ok": true,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pasta Di Semola Cotta 250g@155.0",
+    "Salsa Di Pomodoro 80g@36.0",
+    "Olio Extravergine D'Oliva 10g@900.0"
+   ],
+   "latency_ms": 5227,
+   "error": null,
+   "tags": [
+    "cooked_weight",
+    "category"
+   ]
+  },
+  {
+   "id": "riso_olio_80",
+   "kcal": 358,
+   "ref_kcal": 345,
+   "tolerance": 0.2,
+   "error_pct": 0.0377,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Riso Bianco (Crudo) 80g@358.0",
+    "Olio Extravergine D'Oliva 8g@900.0"
+   ],
+   "latency_ms": 4814,
+   "error": null,
+   "tags": [
+    "dry_weight"
+   ]
+  },
+  {
+   "id": "pollo_griglia_150",
+   "kcal": 248,
+   "ref_kcal": 220,
+   "tolerance": 0.3,
+   "error_pct": 0.1273,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Petto Di Pollo Ai Ferri 150g@165.0"
+   ],
+   "latency_ms": 3481,
+   "error": null,
+   "tags": [
+    "protein"
+   ]
+  },
+  {
+   "id": "uova_sode_2",
+   "kcal": 143,
+   "ref_kcal": 150,
+   "tolerance": 0.2,
+   "error_pct": -0.0467,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Uovo Sodo 100g@143.0"
+   ],
+   "latency_ms": 4054,
+   "error": null,
+   "tags": [
+    "count"
+   ]
+  },
+  {
+   "id": "mozzarella_125",
+   "kcal": 313,
+   "ref_kcal": 316,
+   "tolerance": 0.12,
+   "error_pct": -0.0095,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Mozzarella Vaccina 125g@250.0"
+   ],
+   "latency_ms": 4151,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "parmigiano_30",
+   "kcal": 120,
+   "ref_kcal": 118,
+   "tolerance": 0.12,
+   "error_pct": 0.0169,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Parmigiano Reggiano 30g@400.0"
+   ],
+   "latency_ms": 3350,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "latte_200ml",
+   "kcal": 130,
+   "ref_kcal": 128,
+   "tolerance": 0.12,
+   "error_pct": 0.0156,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "breakfast",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Latte Vaccino Intero 206g@63.0"
+   ],
+   "latency_ms": 3529,
+   "error": null,
+   "tags": [
+    "volume"
+   ]
+  },
+  {
+   "id": "avena_latte",
+   "kcal": 284,
+   "ref_kcal": 280,
+   "tolerance": 0.12,
+   "error_pct": 0.0143,
+   "within_tolerance": true,
+   "stated_checked": 2,
+   "stated_honored": 2,
+   "stated_misses": [],
+   "category": "breakfast",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Fiocchi D'Avena 50g@375.0",
+    "Latte Parzialmente Scremato 206g@46.5"
+   ],
+   "latency_ms": 4259,
+   "error": null,
+   "tags": [
+    "dry_weight",
+    "volume"
+   ]
+  },
+  {
+   "id": "mela",
+   "kcal": 94,
+   "ref_kcal": 90,
+   "tolerance": 0.25,
+   "error_pct": 0.0444,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Mela 180g@52.0"
+   ],
+   "latency_ms": 4140,
+   "error": null,
+   "tags": [
+    "single_food",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "pane_2_fette",
+   "kcal": 163,
+   "ref_kcal": 180,
+   "tolerance": 0.3,
+   "error_pct": -0.0944,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pane Comune 60g@271.0"
+   ],
+   "latency_ms": 3165,
+   "error": null,
+   "tags": [
+    "count",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "prosciutto_crudo_70",
+   "kcal": 165,
+   "ref_kcal": 188,
+   "tolerance": 0.12,
+   "error_pct": -0.1223,
+   "within_tolerance": false,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Prosciutto Crudo 70g@235.0"
+   ],
+   "latency_ms": 4141,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "burro_10",
+   "kcal": 72,
+   "ref_kcal": 76,
+   "tolerance": 0.1,
+   "error_pct": -0.0526,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Burro 10g@717.0"
+   ],
+   "latency_ms": 3329,
+   "error": null,
+   "tags": [
+    "fat"
+   ]
+  },
+  {
+   "id": "olio_cucchiaio",
+   "kcal": 115,
+   "ref_kcal": 120,
+   "tolerance": 0.2,
+   "error_pct": -0.0417,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Olio Extravergine D'Oliva 13g@884.0"
+   ],
+   "latency_ms": 3957,
+   "error": null,
+   "tags": [
+    "fat",
+    "household_measure"
+   ]
+  },
+  {
+   "id": "zucchero_cucchiaino",
+   "kcal": 20,
+   "ref_kcal": 18,
+   "tolerance": 0.35,
+   "error_pct": 0.1111,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Zucchero Bianco 5g@400.0"
+   ],
+   "latency_ms": 3886,
+   "error": null,
+   "tags": [
+    "household_measure"
+   ]
+  },
+  {
+   "id": "mandorle_30",
+   "kcal": 174,
+   "ref_kcal": 181,
+   "tolerance": 0.12,
+   "error_pct": -0.0387,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Mandorle Secche 30g@579.0"
+   ],
+   "latency_ms": 3013,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "fondente_20",
+   "kcal": 120,
+   "ref_kcal": 115,
+   "tolerance": 0.15,
+   "error_pct": 0.0435,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Cioccolato Fondente 70% 20g@598.0"
+   ],
+   "latency_ms": 3450,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "coca_lattina",
+   "kcal": 139,
+   "ref_kcal": 139,
+   "tolerance": 0.1,
+   "error_pct": 0.0,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Coca-Cola Classica 330g@42.0"
+   ],
+   "latency_ms": 3326,
+   "error": null,
+   "tags": [
+    "drink"
+   ]
+  },
+  {
+   "id": "vino_bicchiere",
+   "kcal": 128,
+   "ref_kcal": 115,
+   "tolerance": 0.25,
+   "error_pct": 0.113,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Vino Rosso 150g@85.0"
+   ],
+   "latency_ms": 3833,
+   "error": null,
+   "tags": [
+    "drink",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "pizza_margherita",
+   "kcal": 883,
+   "ref_kcal": 850,
+   "tolerance": 0.25,
+   "error_pct": 0.0388,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Impasto Per Pizza Cotto 220g@245.0",
+    "Passata Di Pomodoro 80g@24.0",
+    "Mozzarella Per Pizza 100g@254.0",
+    "Olio Extravergine D'Oliva 8g@884.0"
+   ],
+   "latency_ms": 4921,
+   "error": null,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "cornetto_cappuccino",
+   "kcal": 405,
+   "ref_kcal": 370,
+   "tolerance": 0.25,
+   "error_pct": 0.0946,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "breakfast",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Cornetto Semplice (Sfoglia) 75g@410.0",
+    "Latte Intero Vaccino 125g@64.0",
+    "Caffè Espresso 30g@2.0",
+    "Zucchero Bianco 4g@400.0"
+   ],
+   "latency_ms": 5909,
+   "error": null,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "patate_forno_200",
+   "kcal": 257,
+   "ref_kcal": 330,
+   "tolerance": 0.3,
+   "error_pct": -0.2212,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Patate Al Forno 190g@89.0",
+    "Olio Extravergine D'Oliva 10g@884.0"
+   ],
+   "latency_ms": 5301,
+   "error": null,
+   "tags": [
+    "cooked_dish"
+   ]
+  },
+  {
+   "id": "salmone_forno_200",
+   "kcal": 456,
+   "ref_kcal": 390,
+   "tolerance": 0.2,
+   "error_pct": 0.1692,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "dinner",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Filetto Di Salmone Cotto Al Forno 200g@206.0",
+    "Olio Extravergine D'Oliva Per La Cottura 5g@884.0"
+   ],
+   "latency_ms": 4997,
+   "error": null,
+   "tags": [
+    "protein"
+   ]
+  },
+  {
+   "id": "anguria_300",
+   "kcal": 90,
+   "ref_kcal": 90,
+   "tolerance": 0.2,
+   "error_pct": 0.0,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Anguria (Polpa Fresca) 300g@30.0"
+   ],
+   "latency_ms": 3299,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "barrette_2x35",
+   "kcal": 252,
+   "ref_kcal": 266,
+   "tolerance": 0.2,
+   "error_pct": -0.0526,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Barretta Proteica 70g@360.0"
+   ],
+   "latency_ms": 4282,
+   "error": null,
+   "tags": [
+    "count",
+    "per_piece",
+    "regression"
+   ]
+  },
+  {
+   "id": "barrette_luna",
+   "kcal": 273,
+   "ref_kcal": 266,
+   "tolerance": 0.2,
+   "error_pct": 0.0263,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Barrette Proteiche Con Avena E Frutta Secca 70g@390.0"
+   ],
+   "latency_ms": 3517,
+   "error": null,
+   "tags": [
+    "count",
+    "per_piece",
+    "regression"
+   ]
+  },
+  {
+   "id": "biscotti_3",
+   "kcal": 92,
+   "ref_kcal": 90,
+   "tolerance": 0.4,
+   "error_pct": 0.0222,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Biscotti Secchi 21g@438.0"
+   ],
+   "latency_ms": 4628,
+   "error": null,
+   "tags": [
+    "count",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "panino_cotto_mozzarella",
+   "kcal": 473,
+   "ref_kcal": 500,
+   "tolerance": 0.25,
+   "error_pct": -0.054,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pane Comune 90g@265.0",
+    "Mozzarella Vaccina 60g@250.0",
+    "Prosciutto Cotto 60g@140.0"
+   ],
+   "latency_ms": 6378,
+   "error": null,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "insalata_olio",
+   "kcal": 141,
+   "ref_kcal": 150,
+   "tolerance": 0.3,
+   "error_pct": -0.06,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Insalata Mista (Verdure A Foglia E Pomodori) 100g@20.0",
+    "Olio Extravergine D'Oliva 14g@864.0"
+   ],
+   "latency_ms": 5249,
+   "error": null,
+   "tags": [
+    "dish",
+    "household_measure"
+   ]
+  },
+  {
+   "id": "carbonara_ristorante",
+   "kcal": 880,
+   "ref_kcal": 750,
+   "tolerance": 0.3,
+   "error_pct": 0.1733,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Spaghetti Cotti 250g@158.0",
+    "Guanciale Cotto 50g@550.0",
+    "Tuorlo D'Uovo 35g@322.0",
+    "Pecorino Romano Grattugiato 25g@387.0"
+   ],
+   "latency_ms": 5278,
+   "error": null,
+   "tags": [
+    "dish",
+    "restaurant",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "greco_miele",
+   "kcal": 145,
+   "ref_kcal": 143,
+   "tolerance": 0.15,
+   "error_pct": 0.014,
+   "within_tolerance": true,
+   "stated_checked": 2,
+   "stated_honored": 2,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Yogurt Greco 0% Grassi 170g@57.0",
+    "Miele 15g@320.0"
+   ],
+   "latency_ms": 4436,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "bresaola_100",
+   "kcal": 359,
+   "ref_kcal": 330,
+   "tolerance": 0.25,
+   "error_pct": 0.0879,
+   "within_tolerance": true,
+   "stated_checked": 1,
+   "stated_honored": 1,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Bresaola Della Valtellina 100g@151.0",
+    "Rucola 30g@25.0",
+    "Parmigiano Reggiano In Scaglie 25g@402.0",
+    "Olio Extravergine D'Oliva 11g@884.0",
+    "Succo Di Limone 10g@22.0"
+   ],
+   "latency_ms": 6962,
+   "error": null,
+   "tags": [
+    "protein"
+   ]
+  },
+  {
+   "id": "pasta_fagioli_300",
+   "kcal": 370,
+   "ref_kcal": 360,
+   "tolerance": 0.3,
+   "error_pct": 0.0278,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Pasta Cotta 120g@150.0",
+    "Fagioli Borlotti Cotti 120g@90.0",
+    "Brodo E Pomodoro 50g@20.0",
+    "Olio Extravergine D'Oliva 8g@900.0"
+   ],
+   "latency_ms": 5835,
+   "error": null,
+   "tags": [
+    "dish",
+    "whole_dish_weight"
+   ]
+  },
+  {
+   "id": "colazione_fette",
+   "kcal": 182,
+   "ref_kcal": 175,
+   "tolerance": 0.35,
+   "error_pct": 0.04,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "breakfast",
+   "category_confidence": "high",
+   "category_expected": "breakfast",
+   "category_ok": true,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Fette Biscottate 27g@410.0",
+    "Marmellata O Confettura Di Frutta 30g@238.0"
+   ],
+   "latency_ms": 4213,
+   "error": null,
+   "tags": [
+    "category",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "en_chicken_rice",
+   "kcal": 569,
+   "ref_kcal": 525,
+   "tolerance": 0.15,
+   "error_pct": 0.0838,
+   "within_tolerance": true,
+   "stated_checked": 2,
+   "stated_honored": 2,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Grilled Skinless Chicken Breast 200g@165.0",
+    "Cooked White Rice 150g@130.0",
+    "Cooking Oil 5g@884.0"
+   ],
+   "latency_ms": 6036,
+   "error": null,
+   "tags": [
+    "cooked_weight",
+    "protein"
+   ]
+  },
+  {
+   "id": "en_toast_pb",
+   "kcal": 363,
+   "ref_kcal": 340,
+   "tolerance": 0.3,
+   "error_pct": 0.0676,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "breakfast",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Whole Wheat Bread (Toasted) 70g@250.0",
+    "Peanut Butter 32g@588.0"
+   ],
+   "latency_ms": 4341,
+   "error": null,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "en_banana",
+   "kcal": 105,
+   "ref_kcal": 105,
+   "tolerance": 0.25,
+   "error_pct": 0.0,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Banana 118g@89.0"
+   ],
+   "latency_ms": 3330,
+   "error": null,
+   "tags": [
+    "single_food",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "es_arroz_pollo",
+   "kcal": 648,
+   "ref_kcal": 560,
+   "tolerance": 0.2,
+   "error_pct": 0.1571,
+   "within_tolerance": true,
+   "stated_checked": 2,
+   "stated_honored": 2,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Arroz Blanco (En Crudo) 100g@355.0",
+    "Pechuga De Pollo 150g@165.0",
+    "Aceite Para Cocinar 5g@900.0"
+   ],
+   "latency_ms": 5736,
+   "error": null,
+   "tags": [
+    "dry_weight",
+    "protein"
+   ]
+  },
+  {
+   "id": "de_quark",
+   "kcal": 168,
+   "ref_kcal": 166,
+   "tolerance": 0.15,
+   "error_pct": 0.012,
+   "within_tolerance": true,
+   "stated_checked": 2,
+   "stated_honored": 2,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Magerquark 200g@68.0",
+    "Frische Erdbeeren 100g@32.0"
+   ],
+   "latency_ms": 4442,
+   "error": null,
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "fr_croissant",
+   "kcal": 327,
+   "ref_kcal": 335,
+   "tolerance": 0.3,
+   "error_pct": -0.0239,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "breakfast",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Croissant Pur Beurre 60g@410.0",
+    "Café Noir 100g@2.0",
+    "Lait Demi-Écrémé 103g@46.0",
+    "Sucre Blanc 8g@400.0"
+   ],
+   "latency_ms": 5526,
+   "error": null,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "trap_torta_mele_fetta",
+   "kcal": 368,
+   "ref_kcal": 400,
+   "tolerance": 0.3,
+   "error_pct": -0.08,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Mele Cotte Nell'Impasto 55g@52.0",
+    "Farina Di Frumento 40g@364.0",
+    "Zucchero 25g@387.0",
+    "Burro 10g@717.0",
+    "Uovo 15g@143.0",
+    "Latte Intero 5g@64.0"
+   ],
+   "latency_ms": 6466,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_torta_mele_200",
+   "kcal": 511,
+   "ref_kcal": 530,
+   "tolerance": 0.3,
+   "error_pct": -0.0358,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "snack",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Farina Di Frumento 55g@364.0",
+    "Mele 75g@52.0",
+    "Zucchero 35g@387.0",
+    "Burro 15g@717.0",
+    "Uovo 20g@143.0"
+   ],
+   "latency_ms": 6672,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_insalata_riso",
+   "kcal": 493,
+   "ref_kcal": 450,
+   "tolerance": 0.35,
+   "error_pct": 0.0956,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Riso Bianco Cotto 180g@130.0",
+    "Condimento Per Riso Sott'Olio E Verdure Miste 60g@85.0",
+    "Tonno Sott'Olio Sgocciolato 35g@190.0",
+    "Formaggio A Dadini 15g@350.0",
+    "Olio Extravergine D'Oliva 10g@884.0"
+   ],
+   "latency_ms": 7573,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_vellutata_zucca",
+   "kcal": 147,
+   "ref_kcal": 160,
+   "tolerance": 0.4,
+   "error_pct": -0.0813,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Zucca Cotta 250g@26.0",
+    "Patata Cotta 40g@87.0",
+    "Olio Extravergine D'Oliva 5g@884.0",
+    "Brodo Vegetale E Aromi (Cipolla/Carota) 5g@60.0"
+   ],
+   "latency_ms": 5517,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_pure_patate",
+   "kcal": 223,
+   "ref_kcal": 200,
+   "tolerance": 0.35,
+   "error_pct": 0.115,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Patate Lesse 140g@87.0",
+    "Latte Intero 50g@64.0",
+    "Burro 9g@717.0",
+    "Parmigiano Reggiano 1g@431.0"
+   ],
+   "latency_ms": 5782,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_insalata_pollo",
+   "kcal": 282,
+   "ref_kcal": 300,
+   "tolerance": 0.4,
+   "error_pct": -0.06,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Petto Di Pollo Cotto 100g@165.0",
+    "Insalata Mista (Lattuga, Verdure Crude) 140g@20.0",
+    "Olio Extravergine D'Oliva 10g@884.0",
+    "Sale E Aceto O Succo Di Limone 5g@18.0"
+   ],
+   "latency_ms": 6450,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_polpette_sugo",
+   "kcal": 334,
+   "ref_kcal": 380,
+   "tolerance": 0.35,
+   "error_pct": -0.1211,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": null,
+   "category_confidence": null,
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Polpette Di Carne (Macinato Misto, Pane, Uovo, Formaggio) 130g@195.0",
+    "Sugo Di Pomodoro 65g@55.0",
+    "Olio Extravergine D'Oliva 5g@884.0"
+   ],
+   "latency_ms": 4927,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_en_chicken_salad",
+   "kcal": 627,
+   "ref_kcal": 550,
+   "tolerance": 0.4,
+   "error_pct": 0.14,
+   "within_tolerance": true,
+   "stated_checked": 0,
+   "stated_honored": 0,
+   "stated_misses": [],
+   "category": "lunch",
+   "category_confidence": "low",
+   "category_expected": null,
+   "category_ok": null,
+   "lock_enforced": [],
+   "lock_false_positive": false,
+   "items": [
+    "Romaine Lettuce 150g@17.0",
+    "Cooked Chicken Breast 100g@165.0",
+    "Caesar Dressing 50g@470.0",
+    "Croutons 30g@410.0",
+    "Parmesan Cheese 20g@392.0"
+   ],
+   "latency_ms": 6647,
+   "error": null,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  }
+ ]
+}

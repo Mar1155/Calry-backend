@@ -64,6 +64,10 @@ class MealEstimateResult(BaseModel):
     # once the meal is persisted. Not part of the API response.
     linked_inference_log_ids: list[int] = Field(default_factory=list)
     bias_applied: bool = False
+    # Stated-quantity lock: amounts the person wrote were put back on their
+    # ingredients (see app.ai.services.stated_quantities). Not in the API.
+    stated_quantity_enforced: bool = False
+    stated_quantity_report: dict | None = None
 
     # Revision-only metadata. These fields are populated by the conversational
     # refinement pipeline and may be surfaced to the client before save.

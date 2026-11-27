@@ -1,0 +1,641 @@
+{
+ "version": 1,
+ "notes": "Reference energy from standard composition data (CREA Italian tables, USDA FoodData Central). Tolerance reflects how precisely the text defines the meal: tight for weighed single foods, wide for dishes with an unknown recipe. 'stated' lists amounts the person wrote (grams, ml counted as grams) that the matching items must keep within 5%. 'category' is checked only for explicit wording. 'dish_weight' marks a stated weight of the whole dish: the lock must not move it onto one ingredient (a change with more than one item counts as a lock false positive).",
+ "cases": [
+  {
+   "id": "pasta_ragu_dry_250",
+   "input": "250g di pasta al ragu",
+   "locale": "it",
+   "ref_kcal": 1190,
+   "tolerance": 0.2,
+   "stated": {
+    "pasta": 250
+   },
+   "tags": [
+    "dry_weight",
+    "regression"
+   ]
+  },
+  {
+   "id": "pasta_ragu_dry_explicit",
+   "input": "250g di pasta pesata da cruda e ragu",
+   "locale": "it",
+   "ref_kcal": 1190,
+   "tolerance": 0.2,
+   "stated": {
+    "pasta": 250
+   },
+   "tags": [
+    "dry_weight",
+    "regression"
+   ]
+  },
+  {
+   "id": "pasta_pomodoro_100",
+   "input": "100g di pasta al pomodoro",
+   "locale": "it",
+   "ref_kcal": 440,
+   "tolerance": 0.2,
+   "stated": {
+    "pasta": 100
+   },
+   "tags": [
+    "dry_weight"
+   ]
+  },
+  {
+   "id": "pasta_pesto_180",
+   "input": "pasta 180 gr con pesto",
+   "locale": "it",
+   "ref_kcal": 860,
+   "tolerance": 0.2,
+   "stated": {
+    "pasta": 180
+   },
+   "tags": [
+    "dry_weight"
+   ]
+  },
+  {
+   "id": "pasta_cooked_stated",
+   "input": "a cena 250g di pasta pesata cotta al pomodoro",
+   "locale": "it",
+   "ref_kcal": 440,
+   "tolerance": 0.2,
+   "stated": {
+    "pasta": 250
+   },
+   "category": "dinner",
+   "tags": [
+    "cooked_weight",
+    "category"
+   ]
+  },
+  {
+   "id": "riso_olio_80",
+   "input": "80g di riso in bianco con un filo d'olio",
+   "locale": "it",
+   "ref_kcal": 345,
+   "tolerance": 0.2,
+   "stated": {
+    "riso": 80
+   },
+   "tags": [
+    "dry_weight"
+   ]
+  },
+  {
+   "id": "pollo_griglia_150",
+   "input": "150g di petto di pollo alla griglia",
+   "locale": "it",
+   "ref_kcal": 220,
+   "tolerance": 0.3,
+   "stated": {
+    "pollo": 150
+   },
+   "tags": [
+    "protein"
+   ]
+  },
+  {
+   "id": "uova_sode_2",
+   "input": "2 uova sode",
+   "locale": "it",
+   "ref_kcal": 150,
+   "tolerance": 0.2,
+   "tags": [
+    "count"
+   ]
+  },
+  {
+   "id": "mozzarella_125",
+   "input": "125g di mozzarella",
+   "locale": "it",
+   "ref_kcal": 316,
+   "tolerance": 0.12,
+   "stated": {
+    "mozzarella": 125
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "parmigiano_30",
+   "input": "30g di parmigiano",
+   "locale": "it",
+   "ref_kcal": 118,
+   "tolerance": 0.12,
+   "stated": {
+    "parmigiano": 30
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "latte_200ml",
+   "input": "200 ml di latte intero",
+   "locale": "it",
+   "ref_kcal": 128,
+   "tolerance": 0.12,
+   "stated": {
+    "latte": 200
+   },
+   "tags": [
+    "volume"
+   ]
+  },
+  {
+   "id": "avena_latte",
+   "input": "50g di fiocchi d'avena con 200ml di latte parzialmente scremato",
+   "locale": "it",
+   "ref_kcal": 280,
+   "tolerance": 0.12,
+   "stated": {
+    "avena": 50,
+    "latte": 200
+   },
+   "tags": [
+    "dry_weight",
+    "volume"
+   ]
+  },
+  {
+   "id": "mela",
+   "input": "una mela",
+   "locale": "it",
+   "ref_kcal": 90,
+   "tolerance": 0.25,
+   "tags": [
+    "single_food",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "pane_2_fette",
+   "input": "2 fette di pane",
+   "locale": "it",
+   "ref_kcal": 180,
+   "tolerance": 0.3,
+   "tags": [
+    "count",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "prosciutto_crudo_70",
+   "input": "70g di prosciutto crudo",
+   "locale": "it",
+   "ref_kcal": 188,
+   "tolerance": 0.12,
+   "stated": {
+    "prosciutto": 70
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "burro_10",
+   "input": "10g di burro",
+   "locale": "it",
+   "ref_kcal": 76,
+   "tolerance": 0.1,
+   "stated": {
+    "burro": 10
+   },
+   "tags": [
+    "fat"
+   ]
+  },
+  {
+   "id": "olio_cucchiaio",
+   "input": "un cucchiaio di olio extravergine",
+   "locale": "it",
+   "ref_kcal": 120,
+   "tolerance": 0.2,
+   "tags": [
+    "fat",
+    "household_measure"
+   ]
+  },
+  {
+   "id": "zucchero_cucchiaino",
+   "input": "un cucchiaino di zucchero",
+   "locale": "it",
+   "ref_kcal": 18,
+   "tolerance": 0.35,
+   "tags": [
+    "household_measure"
+   ]
+  },
+  {
+   "id": "mandorle_30",
+   "input": "30g di mandorle",
+   "locale": "it",
+   "ref_kcal": 181,
+   "tolerance": 0.12,
+   "stated": {
+    "mandorle": 30
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "fondente_20",
+   "input": "20g di cioccolato fondente 70%",
+   "locale": "it",
+   "ref_kcal": 115,
+   "tolerance": 0.15,
+   "stated": {
+    "cioccolato": 20
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "coca_lattina",
+   "input": "una lattina di coca cola",
+   "locale": "it",
+   "ref_kcal": 139,
+   "tolerance": 0.1,
+   "tags": [
+    "drink"
+   ]
+  },
+  {
+   "id": "vino_bicchiere",
+   "input": "un bicchiere di vino rosso",
+   "locale": "it",
+   "ref_kcal": 115,
+   "tolerance": 0.25,
+   "tags": [
+    "drink",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "pizza_margherita",
+   "input": "una pizza margherita",
+   "locale": "it",
+   "ref_kcal": 850,
+   "tolerance": 0.25,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "cornetto_cappuccino",
+   "input": "un cornetto e un cappuccino",
+   "locale": "it",
+   "ref_kcal": 370,
+   "tolerance": 0.25,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "patate_forno_200",
+   "input": "200g di patate al forno",
+   "locale": "it",
+   "ref_kcal": 330,
+   "tolerance": 0.3,
+   "stated": {
+    "patate": 200
+   },
+   "tags": [
+    "cooked_dish"
+   ]
+  },
+  {
+   "id": "salmone_forno_200",
+   "input": "200g di salmone al forno",
+   "locale": "it",
+   "ref_kcal": 390,
+   "tolerance": 0.2,
+   "stated": {
+    "salmone": 200
+   },
+   "tags": [
+    "protein"
+   ]
+  },
+  {
+   "id": "anguria_300",
+   "input": "300g di anguria",
+   "locale": "it",
+   "ref_kcal": 90,
+   "tolerance": 0.2,
+   "stated": {
+    "anguria": 300
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "barrette_2x35",
+   "input": "due barrette proteiche da 35g",
+   "locale": "it",
+   "ref_kcal": 266,
+   "tolerance": 0.2,
+   "stated": {
+    "barrette": 70
+   },
+   "tags": [
+    "count",
+    "per_piece",
+    "regression"
+   ]
+  },
+  {
+   "id": "barrette_luna",
+   "input": "due barrette proteiche 35g l'una con avena e frutta secca",
+   "locale": "it",
+   "ref_kcal": 266,
+   "tolerance": 0.2,
+   "stated": {
+    "barrette": 70
+   },
+   "tags": [
+    "count",
+    "per_piece",
+    "regression"
+   ]
+  },
+  {
+   "id": "biscotti_3",
+   "input": "3 biscotti secchi",
+   "locale": "it",
+   "ref_kcal": 90,
+   "tolerance": 0.4,
+   "tags": [
+    "count",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "panino_cotto_mozzarella",
+   "input": "un panino con prosciutto cotto e mozzarella",
+   "locale": "it",
+   "ref_kcal": 500,
+   "tolerance": 0.25,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "insalata_olio",
+   "input": "insalata mista con un cucchiaio di olio",
+   "locale": "it",
+   "ref_kcal": 150,
+   "tolerance": 0.3,
+   "tags": [
+    "dish",
+    "household_measure"
+   ]
+  },
+  {
+   "id": "carbonara_ristorante",
+   "input": "spaghetti alla carbonara al ristorante",
+   "locale": "it",
+   "ref_kcal": 750,
+   "tolerance": 0.3,
+   "tags": [
+    "dish",
+    "restaurant",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "greco_miele",
+   "input": "yogurt greco 0% 170g con 15g di miele",
+   "locale": "it",
+   "ref_kcal": 143,
+   "tolerance": 0.15,
+   "stated": {
+    "yogurt": 170,
+    "miele": 15
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "bresaola_100",
+   "input": "100g di bresaola con rucola e parmigiano",
+   "locale": "it",
+   "ref_kcal": 330,
+   "note": "the classic dish is dressed with olive oil (about 8-10 g)",
+   "tolerance": 0.25,
+   "stated": {
+    "bresaola": 100
+   },
+   "tags": [
+    "protein"
+   ]
+  },
+  {
+   "id": "pasta_fagioli_300",
+   "input": "pasta e fagioli 300g",
+   "locale": "it",
+   "ref_kcal": 360,
+   "tolerance": 0.3,
+   "tags": [
+    "dish",
+    "whole_dish_weight"
+   ]
+  },
+  {
+   "id": "colazione_fette",
+   "input": "a colazione: fette biscottate con marmellata",
+   "locale": "it",
+   "ref_kcal": 175,
+   "tolerance": 0.35,
+   "category": "breakfast",
+   "tags": [
+    "category",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "en_chicken_rice",
+   "input": "200g grilled chicken breast and 150g cooked rice",
+   "locale": "en",
+   "ref_kcal": 525,
+   "tolerance": 0.15,
+   "stated": {
+    "chicken": 200,
+    "rice": 150
+   },
+   "tags": [
+    "cooked_weight",
+    "protein"
+   ]
+  },
+  {
+   "id": "en_toast_pb",
+   "input": "two slices of whole wheat toast with peanut butter",
+   "locale": "en",
+   "ref_kcal": 340,
+   "tolerance": 0.3,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "en_banana",
+   "input": "a banana",
+   "locale": "en",
+   "ref_kcal": 105,
+   "tolerance": 0.25,
+   "tags": [
+    "single_food",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "es_arroz_pollo",
+   "input": "100g de arroz con 150g de pollo",
+   "locale": "es",
+   "ref_kcal": 560,
+   "tolerance": 0.2,
+   "stated": {
+    "arroz": 100,
+    "pollo": 150
+   },
+   "tags": [
+    "dry_weight",
+    "protein"
+   ]
+  },
+  {
+   "id": "de_quark",
+   "input": "200 g Magerquark mit 100 g Erdbeeren",
+   "locale": "de",
+   "ref_kcal": 166,
+   "tolerance": 0.15,
+   "stated": {
+    "magerquark": 200,
+    "erdbeeren": 100
+   },
+   "tags": [
+    "single_food"
+   ]
+  },
+  {
+   "id": "fr_croissant",
+   "input": "un croissant et un café au lait",
+   "locale": "fr",
+   "ref_kcal": 335,
+   "tolerance": 0.3,
+   "tags": [
+    "dish",
+    "portion_guess"
+   ]
+  },
+  {
+   "id": "trap_torta_mele_fetta",
+   "input": "una fetta di torta di mele da 150g",
+   "locale": "it",
+   "ref_kcal": 400,
+   "tolerance": 0.3,
+   "dish_weight": 150,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_torta_mele_200",
+   "input": "200g di torta di mele",
+   "locale": "it",
+   "ref_kcal": 530,
+   "tolerance": 0.3,
+   "dish_weight": 200,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_insalata_riso",
+   "input": "insalata di riso 300g",
+   "locale": "it",
+   "ref_kcal": 450,
+   "tolerance": 0.35,
+   "dish_weight": 300,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_vellutata_zucca",
+   "input": "vellutata di zucca 300g",
+   "locale": "it",
+   "ref_kcal": 160,
+   "tolerance": 0.4,
+   "dish_weight": 300,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_pure_patate",
+   "input": "purè di patate 200g",
+   "locale": "it",
+   "ref_kcal": 200,
+   "tolerance": 0.35,
+   "dish_weight": 200,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_insalata_pollo",
+   "input": "insalata di pollo 250g",
+   "locale": "it",
+   "ref_kcal": 300,
+   "tolerance": 0.4,
+   "dish_weight": 250,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_polpette_sugo",
+   "input": "polpette di carne al sugo 200g",
+   "locale": "it",
+   "ref_kcal": 380,
+   "tolerance": 0.35,
+   "dish_weight": 200,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  },
+  {
+   "id": "trap_en_chicken_salad",
+   "input": "chicken caesar salad 350g",
+   "locale": "en",
+   "ref_kcal": 550,
+   "tolerance": 0.4,
+   "dish_weight": 350,
+   "tags": [
+    "dish_weight",
+    "lock_trap"
+   ]
+  }
+ ]
+}
